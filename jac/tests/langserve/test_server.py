@@ -47,20 +47,13 @@ def examples_abs_path() -> Callable[[str], str]:
 @pytest.fixture
 def passes_main_fixture_abs_path() -> Callable[[str], str]:
     """Get absolute path of a fixture from compiler passes main fixtures directory."""
-    import jaclang
+    from pathlib import Path
 
     def _passes_main_fixture_abs_path(file: str) -> str:
-        fixture_src = jaclang.__file__
-        file_path = os.path.join(
-            os.path.dirname(fixture_src),
-            "compiler",
-            "passes",
-            "main",
-            "tests",
-            "fixtures",
-            file,
-        )
-        return os.path.abspath(file_path)
+        # tests/langserve/test_server.py -> tests/compiler/passes/main/fixtures/
+        tests_dir = Path(__file__).parent.parent
+        file_path = tests_dir / "compiler" / "passes" / "main" / "fixtures" / file
+        return str(file_path.resolve())
 
     return _passes_main_fixture_abs_path
 
@@ -204,10 +197,10 @@ def test_go_to_definition_md_path(fixture_path: Callable[[str], str]) -> None:
             (11, 47, "compiler/constant.py:5:0-34:9"),
             (13, 47, "compiler/type_system/type_utils.py:0:0-0:0"),
             (14, 34, "compiler/type_system/__init__.py:0:0-0:0"),
-            (18, 5, "compiler/type_system/types.jac:48:6-48:14"),  # TypeBase now on line 18
+            (18, 5, "compiler/type_system/types.jac:47:6-47:14"),  # TypeBase now on line 18
             (20, 34, "compiler/unitree.py:0:0-0:0"),              # UniScopeNode now on line 20
             # (20, 48, "compiler/unitree.py:335:0-566:11"),
-            (22, 22, "langserve/tests/fixtures/circle.jac:7:5-7:8"),  # RAD now on line 22, fixture line changed too
+            (22, 22, "tests/langserve/fixtures/circle.jac:7:5-7:8"),  # RAD now on line 22, fixture line changed too
             (23, 38, "vendor/pygls/uris.py:0:0-0:0"),             # uris now on line 23
             (24, 52, "vendor/pygls/server.py:351:0-615:13"),      # LanguageServer on line 24
             (26, 31, "vendor/lsprotocol/types.py:0:0-0:0"),       # lspt now on line 26
