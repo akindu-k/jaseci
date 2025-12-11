@@ -46,24 +46,29 @@ class JacAPIServer(JServer) {
 
     static def refresh_jwt_token(token: str) -> (str | None) {
         try {
-            decoded = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM], options={"verify_exp": False});
+            decoded = jwt.decode(
+                token,
+                JWT_SECRET,
+                algorithms=[JWT_ALGORITHM],
+                options={"verify_exp": False}
+            );
             username = decoded.get('username');
             print(username);
-            
+
             if not username {
                 return None;
             }
-            
+
             iat = decoded.get('iat');
             if iat {
                 iat_datetime = datetime.fromtimestamp(iat, UTC);
                 max_refresh_age = timedelta(days=JWT_REFRESH_MAX_DAYS);
                 if datetime.now(UTC) - iat_datetime > max_refresh_age {
-                    return None;  
+                    return None;
                 }
             }
-            
-            return JacAPIServer.create_jwt_token(username); 
+
+            return JacAPIServer.create_jwt_token(username);
         } except Exception {
             return None;
         }
@@ -147,28 +152,26 @@ class JacAPIServer(JServer) {
     def refresh_token(self: JacAPIServer, token: str) -> JSONResponse {
         if (not token) {
             return JSONResponse(
-                status_code=400, 
-                content={'error': 'Token is required'}
+                status_code=400, content={'error': 'Token is required'}
             );
         }
-        
+
         if token.startswith('Bearer ') {
             token = token[7:];
         }
 
         print(f"Refreshing token: {token}");
-        
+
         new_token = self.refresh_jwt_token(token);
         print(f"New token: {new_token}");
         if (not new_token) {
             return JSONResponse(
-                status_code=401, 
-                content={'error': 'Invalid or expired token'}
+                status_code=401, content={'error': 'Invalid or expired token'}
             );
         }
-        
+
         return JSONResponse(
-            status_code=200, 
+            status_code=200,
             content={'token': new_token, 'message': 'Token refreshed successfully'}
         );
     }
