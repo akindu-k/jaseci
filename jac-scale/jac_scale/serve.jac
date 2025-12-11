@@ -4,6 +4,7 @@ import from datetime { UTC, datetime, timedelta }
 import from pathlib { Path }
 import from typing { Any }
 import jwt;
+import os;
 import from fastapi.middleware.cors { CORSMiddleware }
 import from fastapi.responses { HTMLResponse, JSONResponse, Response }
 import from jac_scale.jserver.jfast_api { JFastApiServer }
@@ -20,6 +21,7 @@ with entry {
     JWT_SECRET = 'supersecretkey';
     JWT_ALGORITHM = 'HS256';
     JWT_EXP_DELTA_DAYS = 7;
+    JWT_REFRESH_MAX_DAYS = 10;
 }
 
 class JacAPIServer(JServer) {
@@ -37,6 +39,31 @@ class JacAPIServer(JServer) {
         try {
             decoded = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM]);
             return decoded['username'];
+        } except Exception {
+            return None;
+        }
+    }
+
+    static def refresh_jwt_token(token: str) -> (str | None) {
+        try {
+            decoded = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM], options={"verify_exp": False});
+            username = decoded.get('username');
+            print(username);
+            
+            if not username {
+                return None;
+            }
+            
+            iat = decoded.get('iat');
+            if iat {
+                iat_datetime = datetime.fromtimestamp(iat, UTC);
+                max_refresh_age = timedelta(days=JWT_REFRESH_MAX_DAYS);
+                if datetime.now(UTC) - iat_datetime > max_refresh_age {
+                    return None;  
+                }
+            }
+            
+            return JacAPIServer.create_jwt_token(username); 
         } except Exception {
             return None;
         }
@@ -117,6 +144,35 @@ class JacAPIServer(JServer) {
         return JSONResponse(content=res, status_code=201);
     }
 
+    def refresh_token(self: JacAPIServer, token: str) -> JSONResponse {
+        if (not token) {
+            return JSONResponse(
+                status_code=400, 
+                content={'error': 'Token is required'}
+            );
+        }
+        
+        if token.startswith('Bearer ') {
+            token = token[7:];
+        }
+
+        print(f"Refreshing token: {token}");
+        
+        new_token = self.refresh_jwt_token(token);
+        print(f"New token: {new_token}");
+        if (not new_token) {
+            return JSONResponse(
+                status_code=401, 
+                content={'error': 'Invalid or expired token'}
+            );
+        }
+        
+        return JSONResponse(
+            status_code=200, 
+            content={'token': new_token, 'message': 'Token refreshed successfully'}
+        );
+    }
+
     def register_create_user_endpoint(self: JacAPIServer) -> None {
         self.server_impl.add_endpoint(
             JEndPoint(
@@ -145,6 +201,30 @@ class JacAPIServer(JServer) {
                 tags=['User APIs'],
                 summary='Register user API.',
                 description='Endpoint for creating a new user account'
+            )
+        );
+    }
+
+    def register_refresh_token_endpoint(self: JacAPIServer) -> None {
+        self.server_impl.add_endpoint(
+            JEndPoint(
+                method=HTTPMethod.POST,
+                path='/user/refresh-token',
+                callback=self.refresh_token,
+                parameters=[
+                    APIParameter(
+                        name='token',
+                        data_type='string',
+                        required=True,
+                        default=None,
+                        description='JWT token to refresh (with or without Bearer prefix)',
+                        type=ParameterType.BODY
+                    )
+                ],
+                response_model=None,
+                tags=['User APIs'],
+                summary='Refresh JWT token',
+                description='Endpoint for refreshing an existing JWT token. Token must be within the refresh window.'
             )
         );
     }
@@ -630,6 +710,7 @@ class JacAPIServer(JServer) {
         self.register_create_user_endpoint();
         self.register_login_endpoint();
         self.register_page_endpoint();
+        self.register_refresh_token_endpoint();
         self.register_client_js_endpoint();
         self.register_static_file_endpoint();
         self.register_walkers_endpoints();
