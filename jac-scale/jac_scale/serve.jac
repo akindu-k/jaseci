@@ -48,8 +48,7 @@ class JacAPIServer(JServer) {
         try {
             decoded = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM], options={"verify_exp": False});
             username = decoded.get('username');
-            print(username);
-            
+                        
             if not username {
                 return None;
             }
@@ -156,10 +155,8 @@ class JacAPIServer(JServer) {
             token = token[7:];
         }
 
-        print(f"Refreshing token: {token}");
-        
+                
         new_token = self.refresh_jwt_token(token);
-        print(f"New token: {new_token}");
         if (not new_token) {
             return JSONResponse(
                 status_code=401, 
