@@ -21,7 +21,7 @@ with entry {
     JWT_SECRET = 'supersecretkey';
     JWT_ALGORITHM = 'HS256';
     JWT_EXP_DELTA_DAYS = 7;
-    JWT_REFRESH_MAX_DAYS = 10;
+    JWT_REFRESH_MAX_DAYS = os.getenv('JWT_REFRESH_MAX_DAYS', 7);
 }
 
 class JacAPIServer(JServer) {
