@@ -284,8 +284,8 @@ First, clone the main Jaseci repository which contains JAC and JAC-Scale:
 
 ```bash
 git clone https://github.com/jaseci-labs/jaseci.git
-git submodule update --init --recursive
 cd jaseci
+git submodule update --init --recursive
 ```
 
 ### 2. Create Python Virtual Environment
