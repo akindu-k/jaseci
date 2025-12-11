@@ -438,6 +438,10 @@ jac destroy app.jac
 | `K8_REDIS` | Whether Redis is needed (`True`/`False`) | `True` |
 | `MONGODB_URI` | URL of MongoDB database | - |
 | `REDIS_URL` | URL of Redis database | - |
+| `JWT_REFRESH_MAX_DAYS` | Maximum number of days after token issuance during which refresh is allowed | `7` |
+| `JWT_EXP_DELTA_DAYS` | Number of days until JWT token expires | `7` |
+| `JWT_SECRET` | Secret key used for JWT token signing and verification | `'supersecretkey'` |
+| `JWT_ALGORITHM` | Algorithm used for JWT token encoding/decoding | `'HS256'` |
 
 ## Deployment Modes
 

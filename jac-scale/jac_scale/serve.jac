@@ -18,9 +18,9 @@ import from jaclang.runtimelib.runtime { JacRuntime as Jac }
 import from jaclang.runtimelib.server { JacAPIServer as JServer }
 import from jaclang.runtimelib.server { JsonValue }
 with entry {
-    JWT_SECRET = os.getenv('JWT_SECRET');
-    JWT_ALGORITHM = os.getenv('JWT_ALGORITHM');
-    JWT_EXP_DELTA_DAYS = os.getenv('JWT_EXP_DELTA_DAYS');
+    JWT_SECRET = os.getenv('JWT_SECRET','supersecretkey');
+    JWT_ALGORITHM = os.getenv('JWT_ALGORITHM','HS256');
+    JWT_EXP_DELTA_DAYS = os.getenv('JWT_EXP_DELTA_DAYS', 7);
     JWT_REFRESH_MAX_DAYS = os.getenv('JWT_REFRESH_MAX_DAYS', 7);
 }
 
