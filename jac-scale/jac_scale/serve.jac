@@ -53,7 +53,7 @@ class JacAPIServer(JServer) {
                 options={"verify_exp": False}
             );
             username = decoded.get('username');
-                        
+
             if not username {
                 return None;
             }
@@ -159,7 +159,6 @@ class JacAPIServer(JServer) {
             token = token[7:];
         }
 
-                
         new_token = self.refresh_jwt_token(token);
         if (not new_token) {
             return JSONResponse(
