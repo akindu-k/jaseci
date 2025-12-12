@@ -20,7 +20,7 @@ import from jaclang.runtimelib.server { JsonValue }
 with entry {
     JWT_SECRET = os.getenv('JWT_SECRET','supersecretkey');
     JWT_ALGORITHM = os.getenv('JWT_ALGORITHM','HS256');
-    JWT_EXP_DELTA_DAYS = os.getenv('JWT_EXP_DELTA_DAYS', 1/24/60);
+    JWT_EXP_DELTA_DAYS = os.getenv('JWT_EXP_DELTA_DAYS',7);
 }
 
 class JacAPIServer(JServer) {
@@ -49,7 +49,7 @@ class JacAPIServer(JServer) {
                 token,
                 JWT_SECRET,
                 algorithms=[JWT_ALGORITHM],
-                options={"verify_exp": False}
+                options={"verify_exp": True}
             );
             username = decoded.get('username');
 
@@ -57,16 +57,8 @@ class JacAPIServer(JServer) {
                 return None;
             }
 
-            iat = decoded.get('iat');
-            if iat {
-                iat_datetime = datetime.fromtimestamp(iat, UTC);
-                max_refresh_age = timedelta(days=JWT_EXP_DELTA_DAYS);
-                if datetime.now(UTC) - iat_datetime > max_refresh_age {
-                    return None;
-                }
-            }
-
             return JacAPIServer.create_jwt_token(username);
+
         } except Exception {
             return None;
         }
