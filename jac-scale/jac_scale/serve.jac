@@ -18,9 +18,9 @@ import from jaclang.runtimelib.runtime { JacRuntime as Jac }
 import from jaclang.runtimelib.server { JacAPIServer as JServer }
 import from jaclang.runtimelib.server { JsonValue }
 with entry {
-    JWT_SECRET = os.getenv('JWT_SECRET','supersecretkey');
-    JWT_ALGORITHM = os.getenv('JWT_ALGORITHM','HS256');
-    JWT_EXP_DELTA_DAYS = os.getenv('JWT_EXP_DELTA_DAYS',7);
+    JWT_SECRET = os.getenv('JWT_SECRET', 'supersecretkey');
+    JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'HS256');
+    JWT_EXP_DELTA_DAYS = os.getenv('JWT_EXP_DELTA_DAYS', 7);
 }
 
 class JacAPIServer(JServer) {
@@ -29,7 +29,7 @@ class JacAPIServer(JServer) {
         payload: dict[(str, Any)] = {
             'username': username,
             'exp': (now + timedelta(days=JWT_EXP_DELTA_DAYS)),
-            'iat': now.timestamp()  
+            'iat': now.timestamp()
         };
         return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM);
     }
@@ -58,7 +58,6 @@ class JacAPIServer(JServer) {
             }
 
             return JacAPIServer.create_jwt_token(username);
-
         } except Exception {
             return None;
         }

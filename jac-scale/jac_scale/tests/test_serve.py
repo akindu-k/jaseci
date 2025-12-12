@@ -1,15 +1,14 @@
 """Test for jac-scale serve command and REST API server."""
 
 import contextlib
-import json
-import jwt as pyjwt
 import socket
 import subprocess
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import jwt as pyjwt
 import requests
 
 
@@ -180,12 +179,12 @@ class TestJacScaleServe:
         # Use the same secret as the server (default)
         secret = "supersecretkey"
         algorithm = "HS256"
-        
-        past_time = datetime.now(timezone.utc) - timedelta(days=days_ago)
+
+        past_time = datetime.now(UTC) - timedelta(days=days_ago)
         payload = {
-            'username': username,
-            'exp': past_time + timedelta(hours=1),  # Expired 1 hour after past_time
-            'iat': past_time
+            "username": username,
+            "exp": past_time + timedelta(hours=1),  # Expired 1 hour after past_time
+            "iat": past_time,
         }
         return pyjwt.encode(payload, secret, algorithm=algorithm)
 
@@ -193,12 +192,12 @@ class TestJacScaleServe:
         """Create a token that's too old to refresh."""
         secret = "supersecretkey"
         algorithm = "HS256"
-        
-        past_time = datetime.now(timezone.utc) - timedelta(days=days_ago)
+
+        past_time = datetime.now(UTC) - timedelta(days=days_ago)
         payload = {
-            'username': username,
-            'exp': past_time + timedelta(hours=1),
-            'iat': past_time
+            "username": username,
+            "exp": past_time + timedelta(hours=1),
+            "iat": past_time,
         }
         return pyjwt.encode(payload, secret, algorithm=algorithm)
 
@@ -259,29 +258,30 @@ class TestJacScaleServe:
 
         assert "error" in login_result
 
-
     def test_refresh_token_with_missing_token(self) -> None:
-            """Test refresh endpoint without token parameter."""
-            refresh_result = self._request(
-                "POST",
-                "/user/refresh-token",
-                {},
-            )
+        """Test refresh endpoint without token parameter."""
+        refresh_result = self._request(
+            "POST",
+            "/user/refresh-token",
+            {},
+        )
 
-            # Case 1: FastAPI Automatic Validation (422 Unprocessable Entity)
-            # This happens because 'token' is missing from the body entirely.
-            if "detail" in refresh_result:
-                assert isinstance(refresh_result["detail"], list)
-                error_entry = refresh_result["detail"][0]
-                assert error_entry["loc"] == ["body", "token"]
-                assert error_entry["type"] == "missing"
-                
-            # Case 2: Custom Logic Error
-            # This handles cases where your code manually returns an error (if you bypass Pydantic).
-            else:
-                assert "error" in refresh_result
-                assert refresh_result["error"] in ["Token is required", "Invalid or expired token"]
+        # Case 1: FastAPI Automatic Validation (422 Unprocessable Entity)
+        # This happens because 'token' is missing from the body entirely.
+        if "detail" in refresh_result:
+            assert isinstance(refresh_result["detail"], list)
+            error_entry = refresh_result["detail"][0]
+            assert error_entry["loc"] == ["body", "token"]
+            assert error_entry["type"] == "missing"
 
+        # Case 2: Custom Logic Error
+        # This handles cases where your code manually returns an error (if you bypass Pydantic).
+        else:
+            assert "error" in refresh_result
+            assert refresh_result["error"] in [
+                "Token is required",
+                "Invalid or expired token",
+            ]
 
     def test_refresh_token_with_bearer_prefix(self) -> None:
         """Test refreshing token with 'Bearer ' prefix."""
@@ -347,7 +347,9 @@ class TestJacScaleServe:
         )
 
         # Create a very old token (15 days old, beyond refresh window)
-        very_old_token = self._create_very_old_token("refresh_old@example.com", days_ago=15)
+        very_old_token = self._create_very_old_token(
+            "refresh_old@example.com", days_ago=15
+        )
 
         # Try to refresh the very old token
         refresh_result = self._request(
@@ -424,7 +426,7 @@ class TestJacScaleServe:
         # Decode both tokens and verify username is preserved
         secret = "supersecretkey"
         algorithm = "HS256"
-        
+
         original_payload = pyjwt.decode(original_token, secret, algorithms=[algorithm])
         new_payload = pyjwt.decode(new_token, secret, algorithms=[algorithm])
 
@@ -456,7 +458,7 @@ class TestJacScaleServe:
         # Decode tokens and compare expiration times
         secret = "supersecretkey"
         algorithm = "HS256"
-        
+
         original_payload = pyjwt.decode(original_token, secret, algorithms=[algorithm])
         new_payload = pyjwt.decode(new_token, secret, algorithms=[algorithm])
 
@@ -468,15 +470,15 @@ class TestJacScaleServe:
         """Test that refresh endpoint appears in OpenAPI documentation."""
         response = requests.get(f"{self.base_url}/openapi.json", timeout=5)
         assert response.status_code == 200
-        
+
         openapi_spec = response.json()
         paths = openapi_spec.get("paths", {})
-        
+
         # Check that refresh endpoint is documented
         assert "/user/refresh-token" in paths
         refresh_endpoint = paths["/user/refresh-token"]
         assert "post" in refresh_endpoint
-        
+
         # Check endpoint metadata
         post_spec = refresh_endpoint["post"]
         assert post_spec["summary"] == "Refresh JWT token"
