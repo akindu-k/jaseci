@@ -20,8 +20,7 @@ import from jaclang.runtimelib.server { JsonValue }
 with entry {
     JWT_SECRET = os.getenv('JWT_SECRET','supersecretkey');
     JWT_ALGORITHM = os.getenv('JWT_ALGORITHM','HS256');
-    JWT_EXP_DELTA_DAYS = os.getenv('JWT_EXP_DELTA_DAYS', 7);
-    JWT_REFRESH_MAX_DAYS = os.getenv('JWT_REFRESH_MAX_DAYS', 7);
+    JWT_EXP_DELTA_DAYS = os.getenv('JWT_EXP_DELTA_DAYS', 1/24/60);
 }
 
 class JacAPIServer(JServer) {
@@ -61,7 +60,7 @@ class JacAPIServer(JServer) {
             iat = decoded.get('iat');
             if iat {
                 iat_datetime = datetime.fromtimestamp(iat, UTC);
-                max_refresh_age = timedelta(days=JWT_REFRESH_MAX_DAYS);
+                max_refresh_age = timedelta(days=JWT_EXP_DELTA_DAYS);
                 if datetime.now(UTC) - iat_datetime > max_refresh_age {
                     return None;
                 }
