@@ -1,10 +1,7 @@
+import contextlib
 import os
 import shutil
 import tempfile
-import pytest
-import contextlib
-from unittest.mock import Mock, patch, MagicMock
-from uuid import uuid4, UUID
 from dataclasses import dataclass, field
 import redis
 from pymongo.errors import ConnectionFailure
@@ -504,14 +501,17 @@ class TestMultiHierarchyMemory:
         self.multi_memory.mem = MagicMock()
         self.multi_memory.mem.get_gc.return_value = gc_anchors
         self.multi_memory.mem.get_mem.return_value = memory_anchors
-        
-        with patch.object(self.multi_memory, 'delete') as mock_delete, patch.object(self.multi_memory, 'sync') as mock_sync:
+
+        with (
+            patch.object(self.multi_memory, "delete") as mock_delete,
+            patch.object(self.multi_memory, "sync") as mock_sync,
+        ):
             self.multi_memory.commit()
-            
+
             for anchor in gc_anchors:
                 mock_delete.assert_any_call(anchor)
                 self.multi_memory.mem.remove_from_gc.assert_any_call(anchor)
-            
+
             expected_anchors = set(memory_anchors.values())
             mock_sync.assert_called_once_with(expected_anchors)
                 
