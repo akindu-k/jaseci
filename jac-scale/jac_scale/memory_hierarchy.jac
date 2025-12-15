@@ -8,6 +8,7 @@ import from typing { Any, TypeVar, cast }
 import from uuid { UUID }
 import redis;
 import from pymongo { MongoClient, UpdateOne }
+import from pymongo.errors { ConnectionFailure }
 import from jaclang.runtimelib.archetype { TANCH, Anchor }
 import from jaclang.runtimelib.memory { Memory }
 
@@ -19,47 +20,74 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
         self.mem = Memory[(UUID, Anchor)]();
         self.redis = RedisDB();
         self.mongo = MongoDB();
-        if not self.redis.redis_is_available() {
+        self.redis_available = self.redis.redis_is_available();
+        self.mongo_available = self.mongo.mongo_is_available();
+        self.shelf: (ShelfDB | None) = None;
+    }
+
+    def postinit() -> None {
+
+        if (not self.redis_available and not self.mongo_available) {
             self.shelf = ShelfDB();
         }
     }
 
     def find_by_id(id: UUID) -> (Anchor | None) {
+        
         if (anchor := self.mem.find_by_id(id)) {
             return anchor;
         }
-        if self.redis.redis_is_available() {
+
+        if (self.redis_available){
             if (anchor := self.redis.find_by_id(id)) {
                 self.mem.set(anchor);
                 return anchor;
             }
+        }
+
+        if (self.mongo_available){
             if (anchor := self.mongo.find_by_id(id)) {
                 self.mem.set(anchor);
-                self.redis.set(anchor);
+                if (self.redis_available){
+                    self.redis.set(anchor);
+                }
                 return anchor;
             }
-        } elif (anchor := self.shelf.find_by_id(id)) {
-            self.mem.set(anchor);
-            return anchor;
         }
+
+        if self.shelf {
+            if (anchor := self.shelf.find_by_id(id)) {
+                self.mem.set(anchor);
+                return anchor;
+            }
+        }
+
         return None;
     }
 
     def commit(anchor: (Anchor | None) = None) {
         gc = self.mem.get_gc();
         memory = self.mem.get_mem();
-        if anchor {
+        if (anchor) {
             if (anchor in gc) {
                 self.delete(anchor);
                 self.mem.remove_from_gc(anchor);
-            } elif self.redis.redis_is_available() {
-                self.redis.set(anchor);
-                self.mongo.set(anchor);
-            } else {
-                self.shelf.set(anchor);
-            }
+            } 
+            else {
+                if (self.redis_available){
+                    self.redis.set(anchor);
+                }
+                if (self.mongo_available){
+                    self.mongo.set(anchor);
+                }
+                elif (self.shelf) {
+                    self.shelf.set(anchor);
+                }
+
+            } 
             return;
         }
+
         for anchor in gc {
             self.delete(anchor);
             self.mem.remove_from_gc(anchor);
@@ -71,25 +99,46 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
     def close() {
         self.commit();
         self.mem.close();
+
+        if (self.redis_available and self.redis.redis_client) {
+            self.redis.redis_client.close();
+        }
+        
+        if (self.mongo_available and self.mongo.client) {
+            self.mongo.client.close();
+        }
+        
+        if (self.shelf) {
+            self.shelf.close();
+        }
     }
 
     def sync(anchors: Iterable[Anchor]) -> None {
-        if self.redis.redis_is_available() {
+        if self.redis_available {
             self.redis.commit(keys=anchors);
+        }
+        if self.mongo_available {
             self.mongo.commit(keys=anchors);
-        } else {
+        } elif self.shelf {
             self.shelf.commit(keys=anchors);
         }
     }
 
     def delete(anchor: Anchor) {
         self.mem.remove(anchor.id);
-        if self.redis.redis_is_available() {
+        
+        if self.redis_available {
             self.redis.remove(anchor);
-            self.mongo.remove(anchor);
-        } else {
-            self.shelf.commit(anchor);
         }
+        if self.mongo_available {
+            self.mongo.remove(anchor);
+        } elif self.shelf {
+            self.shelf.remove(anchor);
+        }
+    }
+
+    def <>set(anchor: TANCH) {
+        self.mem.set(anchor);
     }
 
     def <>set(anchor: TANCH) {
@@ -113,6 +162,30 @@ obj MongoDB {
         }
         self.db = self.client[self.db_name];
         self.collection = self.db[self.collection_name];
+    }
+
+    def mongo_is_available(uri: str = 'mongodb://root:rootpassword123@localhost:27017/') -> bool {
+        client = None;
+        try {
+            client = MongoClient(
+                uri,
+                serverSelectionTimeoutMS=15000
+            );
+
+            client.admin.command('ping');
+            return True;
+        }
+        except ConnectionFailure {
+            return False;
+        }
+        except Exception {
+            return False;
+        }
+        finally {
+            if (client) {
+                client.close();
+            }
+        }
     }
 
     def _to_uuid(id: (UUID | str)) -> UUID {
