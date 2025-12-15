@@ -1,18 +1,15 @@
+import contextlib
 import os
 import shutil
 import tempfile
-import pytest
-import contextlib
-from unittest.mock import Mock, patch, MagicMock
-from uuid import uuid4, UUID
 from dataclasses import dataclass, field
+from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 from uuid import UUID, uuid4
 
 import pytest
 import redis
 from pymongo.errors import ConnectionFailure
-from typing import Any
 
 from jac_scale.memory_hierarchy import (
     MongoDB,
@@ -120,7 +117,7 @@ class TestRedisDB:
         self.redis_db.redis_client = None
         assert self.redis_db.redis_is_available() is False
 
-    @patch('jac_scale.memory_hierarchy.dumps')
+    @patch("jac_scale.memory_hierarchy.dumps")
     def test_set_anchor(self, mock_dumps: Any):
         """Test setting an anchor in Redis."""
         anchor_id = uuid4()
@@ -141,8 +138,8 @@ class TestRedisDB:
 
         expected_key = f"anchor:{str(anchor_id)}"
         self.mock_redis.delete.assert_called_once_with(expected_key)
-        
-    @patch('jac_scale.memory_hierarchy.loads')
+
+    @patch("jac_scale.memory_hierarchy.loads")
     def test_find_by_id_success(self, mock_loads: Any):
         """Test finding an anchor by ID successfully."""
         anchor_id = uuid4()
@@ -205,10 +202,10 @@ class TestMongoDB:
     def test_mongo_initialization(self):
         """Test MongoDB initialization."""
         assert self.mongo_db.client is not None
-        assert self.mongo_db.db_name == 'jac_db'
-        assert self.mongo_db.collection_name == 'anchors'
-        
-    @patch('jac_scale.memory_hierarchy.MongoClient')
+        assert self.mongo_db.db_name == "jac_db"
+        assert self.mongo_db.collection_name == "anchors"
+
+    @patch("jac_scale.memory_hierarchy.MongoClient")
     def test_mongo_is_available_success(self, mock_mongo_client: Any):
         """Test mongo availability check when connection succeeds."""
         mock_client = Mock()
@@ -218,16 +215,16 @@ class TestMongoDB:
         result = self.mongo_db.mongo_is_available()
         assert result is True
         mock_client.close.assert_called_once()
-        
-    @patch('jac_scale.memory_hierarchy.MongoClient')
+
+    @patch("jac_scale.memory_hierarchy.MongoClient")
     def test_mongo_is_available_failure(self, mock_mongo_client: Any):
         """Test mongo availability check when connection fails."""
         mock_mongo_client.side_effect = ConnectionFailure("Connection failed")
 
         result = self.mongo_db.mongo_is_available()
         assert result is False
-        
-    @patch('jac_scale.memory_hierarchy.dumps')
+
+    @patch("jac_scale.memory_hierarchy.dumps")
     def test_set_anchor(self, mock_dumps: Any):
         """Test setting an anchor in MongoDB."""
         anchor_id = uuid4()
@@ -249,10 +246,10 @@ class TestMongoDB:
         anchor = MockAnchor(id=anchor_id)
 
         self.mongo_db.remove(anchor)
-        
-        self.mock_collection.delete_one.assert_called_once_with({'_id': str(anchor_id)})
-        
-    @patch('jac_scale.memory_hierarchy.loads')
+
+        self.mock_collection.delete_one.assert_called_once_with({"_id": str(anchor_id)})
+
+    @patch("jac_scale.memory_hierarchy.loads")
     def test_find_by_id_success(self, mock_loads: Any):
         """Test finding an anchor by ID successfully."""
         anchor_id = uuid4()
@@ -509,17 +506,20 @@ class TestMultiHierarchyMemory:
         self.multi_memory.mem = MagicMock()
         self.multi_memory.mem.get_gc.return_value = gc_anchors
         self.multi_memory.mem.get_mem.return_value = memory_anchors
-        
-        with patch.object(self.multi_memory, 'delete') as mock_delete, patch.object(self.multi_memory, 'sync') as mock_sync:
+
+        with (
+            patch.object(self.multi_memory, "delete") as mock_delete,
+            patch.object(self.multi_memory, "sync") as mock_sync,
+        ):
             self.multi_memory.commit()
-            
+
             for anchor in gc_anchors:
                 mock_delete.assert_any_call(anchor)
                 self.multi_memory.mem.remove_from_gc.assert_any_call(anchor)
-            
+
             expected_anchors = set(memory_anchors.values())
             mock_sync.assert_called_once_with(expected_anchors)
-                
+
     def test_sync_with_redis_and_mongo(self):
         """Test syncing anchors to available storage."""
         anchors = [MockAnchor(id=uuid4()) for _ in range(3)]
