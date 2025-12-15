@@ -6,13 +6,8 @@ import contextlib
 from unittest.mock import Mock, patch, MagicMock
 from uuid import uuid4, UUID
 from dataclasses import dataclass, field
-from unittest.mock import MagicMock, Mock, patch
-from uuid import UUID, uuid4
-
-import pytest
 import redis
 from pymongo.errors import ConnectionFailure
-from typing import Any
 
 from jac_scale.memory_hierarchy import (
     MongoDB,
@@ -34,22 +29,22 @@ class MockAnchor:
 
 
 class TestShelfDB:
-    def setup_method(self):
+    def setup_method(self) -> None:
         self.temp_dir = tempfile.mkdtemp()
         self.shelf_path = os.path.join(self.temp_dir, "test_shelf.db")
         self.shelf_db = ShelfDB(shelf_path=self.shelf_path)
 
-    def teardown_method(self):
+    def teardown_method(self) -> None:
         with contextlib.suppress(BaseException):
             self.shelf_db.close()
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def test_shelf_initialization(self):
+    def test_shelf_initialization(self) -> None:
         """Test ShelfDB initialization."""
         assert self.shelf_db.shelf_path == self.shelf_path
         assert self.shelf_db._shelf is not None
 
-    def test_set_and_find_anchor(self):
+    def test_set_and_find_anchor(self) -> None:
         """Test setting and finding an anchor."""
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id, data="test_anchor")
@@ -61,7 +56,7 @@ class TestShelfDB:
         assert found_anchor.id == anchor_id
         assert found_anchor.data == "test_anchor"
 
-    def test_remove_anchor(self):
+    def test_remove_anchor(self) -> None:
         """Test removing an anchor."""
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id)
@@ -72,7 +67,7 @@ class TestShelfDB:
         self.shelf_db.remove(anchor)
         assert self.shelf_db.find_by_id(anchor_id) is None
 
-    def test_commit_single_anchor(self):
+    def test_commit_single_anchor(self) -> None:
         """Test committing a single anchor."""
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id)
@@ -82,7 +77,7 @@ class TestShelfDB:
         assert found_anchor is not None
         assert found_anchor.id == anchor_id
 
-    def test_commit_multiple_anchors(self):
+    def test_commit_multiple_anchors(self) -> None:
         """Test committing multiple anchors."""
         anchors = [MockAnchor(id=uuid4()) for _ in range(3)]
 
@@ -95,33 +90,33 @@ class TestShelfDB:
 
 
 class TestRedisDB:
-    def setup_method(self):
+    def setup_method(self) -> None:
         self.mock_redis = Mock(spec=redis.Redis)
         self.redis_db = RedisDB()
         self.redis_db.redis_client = self.mock_redis
 
-    def test_redis_initialization(self):
+    def test_redis_initialization(self) -> None:
         """Test RedisDB initialization."""
         assert self.redis_db.redis_url is not None
         assert self.redis_db.redis_client is not None
 
-    def test_redis_is_available_success(self):
+    def test_redis_is_available_success(self) -> None:
         """Test redis availability check when connection succeeds."""
         self.mock_redis.ping.return_value = True
         assert self.redis_db.redis_is_available() is True
 
-    def test_redis_is_available_failure(self):
+    def test_redis_is_available_failure(self) -> None:
         """Test redis availability check when connection fails."""
         self.mock_redis.ping.side_effect = Exception("Connection failed")
         assert self.redis_db.redis_is_available() is False
 
-    def test_redis_is_available_none_client(self):
+    def test_redis_is_available_none_client(self) -> None:
         """Test redis availability when client is None."""
         self.redis_db.redis_client = None
         assert self.redis_db.redis_is_available() is False
 
     @patch('jac_scale.memory_hierarchy.dumps')
-    def test_set_anchor(self, mock_dumps: Any):
+    def test_set_anchor(self, mock_dumps: Mock) -> None:
         """Test setting an anchor in Redis."""
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id)
@@ -132,7 +127,7 @@ class TestRedisDB:
         expected_key = f"anchor:{str(anchor_id)}"
         self.mock_redis.set.assert_called_once_with(expected_key, b"serialized_anchor")
 
-    def test_remove_anchor(self):
+    def test_remove_anchor(self) -> None:
         """Test removing an anchor from Redis."""
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id)
@@ -143,7 +138,7 @@ class TestRedisDB:
         self.mock_redis.delete.assert_called_once_with(expected_key)
         
     @patch('jac_scale.memory_hierarchy.loads')
-    def test_find_by_id_success(self, mock_loads: Any):
+    def test_find_by_id_success(self, mock_loads: Mock) -> None:
         """Test finding an anchor by ID successfully."""
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id)
@@ -157,7 +152,7 @@ class TestRedisDB:
         self.mock_redis.get.assert_called_once_with(expected_key)
         assert result == anchor
 
-    def test_find_by_id_not_found(self):
+    def test_find_by_id_not_found(self) -> None:
         """Test finding an anchor by ID when not found."""
         anchor_id = uuid4()
         self.mock_redis.get.return_value = None
@@ -165,7 +160,7 @@ class TestRedisDB:
         result = self.redis_db.find_by_id(anchor_id)
         assert result is None
 
-    def test_commit_single_anchor(self):
+    def test_commit_single_anchor(self) -> None:
         """Test committing a single anchor."""
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id)
@@ -174,7 +169,7 @@ class TestRedisDB:
             self.redis_db.commit(anchor=anchor)
             mock_set.assert_called_once_with(anchor)
 
-    def test_commit_multiple_anchors(self):
+    def test_commit_multiple_anchors(self) -> None:
         """Test committing multiple anchors."""
         anchors = [MockAnchor(id=uuid4()) for _ in range(3)]
 
@@ -184,7 +179,7 @@ class TestRedisDB:
 
 
 class TestMongoDB:
-    def setup_method(self):
+    def setup_method(self) -> None:
         """Setup for each test method."""
         self.mock_collection = Mock()
 
@@ -202,14 +197,14 @@ class TestMongoDB:
         self.mongo_db.db = self.mock_db
         self.mongo_db.collection = self.mock_collection
 
-    def test_mongo_initialization(self):
+    def test_mongo_initialization(self) -> None:
         """Test MongoDB initialization."""
         assert self.mongo_db.client is not None
         assert self.mongo_db.db_name == 'jac_db'
         assert self.mongo_db.collection_name == 'anchors'
         
     @patch('jac_scale.memory_hierarchy.MongoClient')
-    def test_mongo_is_available_success(self, mock_mongo_client: Any):
+    def test_mongo_is_available_success(self, mock_mongo_client: Mock) -> None:
         """Test mongo availability check when connection succeeds."""
         mock_client = Mock()
         mock_mongo_client.return_value = mock_client
@@ -220,7 +215,7 @@ class TestMongoDB:
         mock_client.close.assert_called_once()
         
     @patch('jac_scale.memory_hierarchy.MongoClient')
-    def test_mongo_is_available_failure(self, mock_mongo_client: Any):
+    def test_mongo_is_available_failure(self, mock_mongo_client: Mock) -> None:
         """Test mongo availability check when connection fails."""
         mock_mongo_client.side_effect = ConnectionFailure("Connection failed")
 
@@ -228,7 +223,7 @@ class TestMongoDB:
         assert result is False
         
     @patch('jac_scale.memory_hierarchy.dumps')
-    def test_set_anchor(self, mock_dumps: Any):
+    def test_set_anchor(self, mock_dumps: Mock) -> None:
         """Test setting an anchor in MongoDB."""
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id)
@@ -243,7 +238,7 @@ class TestMongoDB:
         assert call_args[0][0] == {"_id": str(anchor_id)}
         assert call_args[1]["upsert"] is True
 
-    def test_remove_anchor(self):
+    def test_remove_anchor(self) -> None:
         """Test removing an anchor from MongoDB."""
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id)
@@ -253,7 +248,7 @@ class TestMongoDB:
         self.mock_collection.delete_one.assert_called_once_with({'_id': str(anchor_id)})
         
     @patch('jac_scale.memory_hierarchy.loads')
-    def test_find_by_id_success(self, mock_loads: Any):
+    def test_find_by_id_success(self, mock_loads: Mock) -> None:
         """Test finding an anchor by ID successfully."""
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id)
@@ -266,7 +261,7 @@ class TestMongoDB:
         self.mock_collection.find_one.assert_called_once_with({"_id": str(anchor_id)})
         assert result == anchor
 
-    def test_find_by_id_not_found(self):
+    def test_find_by_id_not_found(self) -> None:
         """Test finding an anchor by ID when not found."""
         anchor_id = uuid4()
         self.mock_collection.find_one.return_value = None
@@ -274,7 +269,7 @@ class TestMongoDB:
         result = self.mongo_db.find_by_id(anchor_id)
         assert result is None
 
-    def test_commit_single_anchor(self):
+    def test_commit_single_anchor(self) -> None:
         """Test committing a single anchor."""
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id)
@@ -283,7 +278,7 @@ class TestMongoDB:
             self.mongo_db.commit(anchor=anchor)
             mock_set.assert_called_once_with(anchor)
 
-    def test_commit_bulk_anchors(self):
+    def test_commit_bulk_anchors(self) -> None:
         """Test bulk committing anchors."""
         anchors = [MockAnchor(id=uuid4()) for _ in range(3)]
 
@@ -293,7 +288,7 @@ class TestMongoDB:
 
 
 class TestMultiHierarchyMemory:
-    def setup_method(self):
+    def setup_method(self) -> None:
         """Setup for each test method."""
         self.mock_memory = MagicMock()
         self.mock_redis = Mock()
@@ -309,7 +304,7 @@ class TestMultiHierarchyMemory:
 
                     self.multi_memory = MultiHierarchyMemory()
 
-    def test_initialization_with_all_available(self):
+    def test_initialization_with_all_available(self) -> None:
         """Test initialization when all storage systems are available."""
         self.multi_memory.redis_available = True
         self.multi_memory.mongo_available = True
@@ -321,7 +316,7 @@ class TestMultiHierarchyMemory:
 
         assert self.multi_memory.shelf is None
 
-    def test_initialization_with_none_available(self):
+    def test_initialization_with_none_available(self) -> None:
         """Test initialization when no external storage is available."""
         self.multi_memory.redis_available = False
         self.multi_memory.mongo_available = False
@@ -332,7 +327,7 @@ class TestMultiHierarchyMemory:
 
         assert self.multi_memory.shelf == self.mock_shelf
 
-    def test_initialization_with_redis_only(self):
+    def test_initialization_with_redis_only(self) -> None:
         """Test initialization when only Redis is available."""
         self.multi_memory.redis_available = True
         self.multi_memory.mongo_available = False
@@ -344,7 +339,7 @@ class TestMultiHierarchyMemory:
 
         assert self.multi_memory.shelf is None
 
-    def test_initialization_with_mongo_only(self):
+    def test_initialization_with_mongo_only(self) -> None:
         """Test initialization when only MongoDB is available."""
         self.multi_memory.redis_available = False
         self.multi_memory.mongo_available = True
@@ -356,7 +351,7 @@ class TestMultiHierarchyMemory:
 
         assert self.multi_memory.shelf is None
 
-    def test_find_by_id_in_memory(self):
+    def test_find_by_id_in_memory(self) -> None:
         """Test finding anchor in local memory first."""
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id)
@@ -369,7 +364,7 @@ class TestMultiHierarchyMemory:
         assert result == anchor
         self.multi_memory.mem.find_by_id.assert_called_once_with(anchor_id)
 
-    def test_find_by_id_in_redis(self):
+    def test_find_by_id_in_redis(self) -> None:
         """Test finding anchor in Redis if not in local memory."""
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id)
@@ -385,7 +380,7 @@ class TestMultiHierarchyMemory:
         self.multi_memory.mem.find_by_id.assert_called_once_with(anchor_id)
         self.mock_redis.find_by_id.assert_called_once_with(anchor_id)
 
-    def test_find_by_id_in_mongo(self):
+    def test_find_by_id_in_mongo(self) -> None:
         """Test finding anchor in MongoDB if not in local memory or Redis."""
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id)
@@ -403,7 +398,7 @@ class TestMultiHierarchyMemory:
         self.mock_redis.find_by_id.assert_called_once_with(anchor_id)
         self.mock_mongo.find_by_id.assert_called_once_with(anchor_id)
 
-    def test_find_by_id_in_shelf(self):
+    def test_find_by_id_in_shelf(self) -> None:
         """Test finding anchor in ShelfDB if not in local memory, Redis, or MongoDB."""
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id)
@@ -425,7 +420,7 @@ class TestMultiHierarchyMemory:
         self.mock_mongo.find_by_id.assert_called_once_with(anchor_id)
         self.multi_memory.shelf.find_by_id.assert_called_once_with(anchor_id)
 
-    def test_find_by_id_not_found(self):
+    def test_find_by_id_not_found(self) -> None:
         """Test finding anchor when not found in any storage."""
         anchor_id = uuid4()
 
@@ -445,7 +440,7 @@ class TestMultiHierarchyMemory:
         self.mock_mongo.find_by_id.assert_called_once_with(anchor_id)
         self.multi_memory.shelf.find_by_id.assert_called_once_with(anchor_id)
 
-    def test_set_anchor(self):
+    def test_set_anchor(self) -> None:
         """Test setting an anchor only stores in local memory initially."""
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id)
@@ -456,7 +451,7 @@ class TestMultiHierarchyMemory:
 
         self.multi_memory.mem.set.assert_called_once_with(anchor)
 
-    def test_commit_single_anchor_in_gc(self):
+    def test_commit_single_anchor_in_gc(self) -> None:
         """Test committing a single anchor that's marked for garbage collection."""
         anchor = MockAnchor(id=uuid4())
         gc_set = {anchor}
@@ -469,7 +464,7 @@ class TestMultiHierarchyMemory:
             mock_delete.assert_called_once_with(anchor)
             self.multi_memory.mem.remove_from_gc.assert_called_once_with(anchor)
 
-    def test_commit_single_anchor_not_in_gc_redis_mongo_available(self):
+    def test_commit_single_anchor_not_in_gc_redis_mongo_available(self) -> None:
         """Test committing a single anchor to Redis and MongoDB when both available."""
         anchor = MockAnchor(id=uuid4())
         gc_set = set()
@@ -485,7 +480,7 @@ class TestMultiHierarchyMemory:
         self.mock_redis.set.assert_called_once_with(anchor)
         self.mock_mongo.set.assert_called_once_with(anchor)
 
-    def test_commit_single_anchor_not_in_gc_shelf_only(self):
+    def test_commit_single_anchor_not_in_gc_shelf_only(self) -> None:
         """Test committing a single anchor to shelf when Redis/Mongo unavailable."""
         anchor = MockAnchor(id=uuid4())
         gc_set = set()
@@ -501,7 +496,7 @@ class TestMultiHierarchyMemory:
 
         self.mock_shelf.set.assert_called_once_with(anchor)
 
-    def test_commit_all_anchors(self):
+    def test_commit_all_anchors(self) -> None:
         """Test committing without specifying anchor (commits all)."""
         gc_anchors = {MockAnchor(id=uuid4())}
         memory_anchors = {uuid4(): MockAnchor(id=uuid4()) for _ in range(3)}
@@ -520,7 +515,7 @@ class TestMultiHierarchyMemory:
             expected_anchors = set(memory_anchors.values())
             mock_sync.assert_called_once_with(expected_anchors)
                 
-    def test_sync_with_redis_and_mongo(self):
+    def test_sync_with_redis_and_mongo(self) -> None:
         """Test syncing anchors to available storage."""
         anchors = [MockAnchor(id=uuid4()) for _ in range(3)]
         self.multi_memory.redis_available = True
@@ -531,7 +526,7 @@ class TestMultiHierarchyMemory:
         self.mock_redis.commit.assert_called_once_with(keys=anchors)
         self.mock_mongo.commit.assert_called_once_with(keys=anchors)
 
-    def test_sync_with_shelf_only(self):
+    def test_sync_with_shelf_only(self) -> None:
         """Test syncing anchors when only shelf is available."""
         anchors = [MockAnchor(id=uuid4()) for _ in range(3)]
         self.multi_memory.redis_available = False
@@ -542,7 +537,7 @@ class TestMultiHierarchyMemory:
 
         self.mock_shelf.commit.assert_called_once_with(keys=anchors)
 
-    def test_delete_anchor_with_redis_and_mongo(self):
+    def test_delete_anchor_with_redis_and_mongo(self) -> None:
         """Test deleting an anchor from all storage layers when both available."""
         anchor = MockAnchor(id=uuid4())
         self.multi_memory.redis_available = True
@@ -556,7 +551,7 @@ class TestMultiHierarchyMemory:
         self.mock_redis.remove.assert_called_once_with(anchor)
         self.mock_mongo.remove.assert_called_once_with(anchor)
 
-    def test_delete_anchor_with_shelf(self):
+    def test_delete_anchor_with_shelf(self) -> None:
         """Test deleting an anchor when using shelf storage."""
         anchor = MockAnchor(id=uuid4())
         self.multi_memory.redis_available = False
@@ -570,7 +565,7 @@ class TestMultiHierarchyMemory:
         self.multi_memory.mem.remove.assert_called_once_with(anchor.id)
         self.mock_shelf.remove.assert_called_once_with(anchor)
 
-    def test_close_with_all_storage(self):
+    def test_close_with_all_storage(self) -> None:
         """Test closing the memory hierarchy with all storage systems."""
         self.multi_memory.redis_available = True
         self.multi_memory.mongo_available = True
