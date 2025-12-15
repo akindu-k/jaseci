@@ -25,30 +25,28 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
         self.shelf: (ShelfDB | None) = None;
     }
 
-    def postinit() -> None {
-
+    def postinit()  -> None {
         if (not self.redis_available and not self.mongo_available) {
             self.shelf = ShelfDB();
         }
     }
 
     def find_by_id(id: UUID) -> (Anchor | None) {
-        
         if (anchor := self.mem.find_by_id(id)) {
             return anchor;
         }
 
-        if (self.redis_available){
+        if (self.redis_available) {
             if (anchor := self.redis.find_by_id(id)) {
                 self.mem.set(anchor);
                 return anchor;
             }
         }
 
-        if (self.mongo_available){
+        if (self.mongo_available) {
             if (anchor := self.mongo.find_by_id(id)) {
                 self.mem.set(anchor);
-                if (self.redis_available){
+                if (self.redis_available) {
                     self.redis.set(anchor);
                 }
                 return anchor;
@@ -72,19 +70,16 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
             if (anchor in gc) {
                 self.delete(anchor);
                 self.mem.remove_from_gc(anchor);
-            } 
-            else {
-                if (self.redis_available){
+            } else {
+                if (self.redis_available) {
                     self.redis.set(anchor);
                 }
-                if (self.mongo_available){
+                if (self.mongo_available) {
                     self.mongo.set(anchor);
-                }
-                elif (self.shelf) {
+                } elif (self.shelf) {
                     self.shelf.set(anchor);
                 }
-
-            } 
+            }
             return;
         }
 
@@ -103,11 +98,11 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
         if (self.redis_available and self.redis.redis_client) {
             self.redis.redis_client.close();
         }
-        
+
         if (self.mongo_available and self.mongo.client) {
             self.mongo.client.close();
         }
-        
+
         if (self.shelf) {
             self.shelf.close();
         }
@@ -126,7 +121,7 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
 
     def delete(anchor: Anchor) {
         self.mem.remove(anchor.id);
-        
+
         if self.redis_available {
             self.redis.remove(anchor);
         }
@@ -164,24 +159,20 @@ obj MongoDB {
         self.collection = self.db[self.collection_name];
     }
 
-    def mongo_is_available(uri: str = 'mongodb://root:rootpassword123@localhost:27017/') -> bool {
+    def mongo_is_available(
+        uri: str = 'mongodb://root:rootpassword123@localhost:27017/'
+    ) -> bool {
         client = None;
         try {
-            client = MongoClient(
-                uri,
-                serverSelectionTimeoutMS=15000
-            );
+            client = MongoClient(uri, serverSelectionTimeoutMS=15000);
 
             client.admin.command('ping');
             return True;
-        }
-        except ConnectionFailure {
+        } except ConnectionFailure {
             return False;
-        }
-        except Exception {
+        } except Exception {
             return False;
-        }
-        finally {
+        } finally {
             if (client) {
                 client.close();
             }
