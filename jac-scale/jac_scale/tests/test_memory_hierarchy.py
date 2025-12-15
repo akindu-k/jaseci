@@ -456,7 +456,7 @@ class TestMultiHierarchyMemory:
     def test_commit_single_anchor_in_gc(self) -> None:
         """Test committing a single anchor that's marked for garbage collection."""
         anchor = MockAnchor(id=uuid4())
-        gc_set = {anchor}
+        gc_set: set[MockAnchor] = {anchor}
 
         self.multi_memory.mem = MagicMock()
         self.multi_memory.mem.get_gc.return_value = gc_set
@@ -469,7 +469,7 @@ class TestMultiHierarchyMemory:
     def test_commit_single_anchor_not_in_gc_redis_mongo_available(self) -> None:
         """Test committing a single anchor to Redis and MongoDB when both available."""
         anchor = MockAnchor(id=uuid4())
-        gc_set = set()
+        gc_set: set[MockAnchor] = set()
 
         self.multi_memory.mem = MagicMock()
         self.multi_memory.mem.get_gc.return_value = gc_set
@@ -485,7 +485,7 @@ class TestMultiHierarchyMemory:
     def test_commit_single_anchor_not_in_gc_shelf_only(self) -> None:
         """Test committing a single anchor to shelf when Redis/Mongo unavailable."""
         anchor = MockAnchor(id=uuid4())
-        gc_set = set()
+        gc_set: set[MockAnchor] = set()
 
         self.multi_memory.mem = MagicMock()
         self.multi_memory.mem.get_gc.return_value = gc_set
