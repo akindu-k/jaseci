@@ -1,4 +1,4 @@
-"""Base memory hierachy implementation with timeout resilience."""
+"""Base memory hierachy implementation."""
 import os;
 import shelve;
 import from collections.abc { Iterable, MutableMapping }
@@ -8,7 +8,7 @@ import from typing { Any, TypeVar, cast }
 import from uuid { UUID }
 import redis;
 import from pymongo { MongoClient, UpdateOne }
-import from pymongo.errors { ConnectionFailure, ServerSelectionTimeoutError, NetworkTimeout }
+import from pymongo.errors { ConnectionFailure }
 import from jaclang.runtimelib.archetype { TANCH, Anchor }
 import from jaclang.runtimelib.memory { Memory }
 import from time { time }
@@ -16,14 +16,7 @@ import from time { time }
 glob ID = TypeVar('ID');
 
 obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
-    has redis_failures: int = 0;
-    has mongo_failures: int = 0;
-    has max_failures: int = 5;
-    has failure_reset_time: float = 300.0;  
-    has last_redis_failure_time: float = 0.0;
-    has last_mongo_failure_time: float = 0.0;
-
-    def init() -> None {
+    def init()  -> None {
         super.init();
         self.mem = Memory[(UUID, Anchor)]();
         self.redis = RedisDB();
@@ -33,42 +26,10 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
         self.shelf: (ShelfDB | None) = None;
     }
 
-    def postinit() -> None {
+    def postinit()  -> None {
         if (not self.redis_available and not self.mongo_available) {
             self.shelf = ShelfDB();
         }
-    }
-
-    def _should_skip_redis() -> bool {
-        if (self.redis_failures >= self.max_failures) {
-            if (time() - self.last_redis_failure_time > self.failure_reset_time) {
-                self.redis_failures = 0; 
-                return False;
-            }
-            return True;
-        }
-        return False;
-    }
-
-    def _should_skip_mongo() -> bool {
-        if (self.mongo_failures >= self.max_failures) {
-            if (time() - self.last_mongo_failure_time > self.failure_reset_time) {
-                self.mongo_failures = 0;
-                return False;
-            }
-            return True;
-        }
-        return False;
-    }
-
-    def _record_redis_failure() -> None {
-        self.redis_failures += 1;
-        self.last_redis_failure_time = time();
-    }
-
-    def _record_mongo_failure() -> None {
-        self.mongo_failures += 1;
-        self.last_mongo_failure_time = time();
     }
 
     def find_by_id(id: UUID) -> (Anchor | None) {
@@ -76,42 +37,25 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
             return anchor;
         }
 
-        if (self.redis_available and not self._should_skip_redis()) {
-            try {
-                if (anchor := self.redis.find_by_id(id)) {
-                    self.mem.set(anchor);
-                    return anchor;
-                }
-            } except (redis.TimeoutError, redis.ConnectionError, Exception) {
-                self._record_redis_failure();
+        if (self.redis_available) {
+            if (anchor := self.redis.find_by_id(id)) {
+                self.mem.set(anchor);
+                return anchor;
             }
         }
 
-        if (self.mongo_available and not self._should_skip_mongo()) {
-            try {
-                if (anchor := self.mongo.find_by_id(id)) {
-                    self.mem.set(anchor);
-                    if (self.redis_available and not self._should_skip_redis()) {
-                        try {
-                            self.redis.set(anchor);
-                        } except (redis.TimeoutError, redis.ConnectionError, Exception) {
-                            self._record_redis_failure();
-                        }
-                    }
-                    return anchor;
+        if (self.mongo_available) {
+            if (anchor := self.mongo.find_by_id(id)) {
+                self.mem.set(anchor);
+                if (self.redis_available) {
+                    self.redis.set(anchor);
                 }
-            } except (ServerSelectionTimeoutError, NetworkTimeout, Exception) {
-                self._record_mongo_failure();
+                return anchor;
             }
         } elif self.shelf {
-            try {
-                if (anchor := self.shelf.find_by_id(id)) {
-                    self.mem.set(anchor);
-                    return anchor;
-                }
-            } except Exception {
-                
-                pass;
+            if (anchor := self.shelf.find_by_id(id)) {
+                self.mem.set(anchor);
+                return anchor;
             }
         }
 
@@ -126,26 +70,13 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
                 self.delete(anchor);
                 self.mem.remove_from_gc(anchor);
             } else {
-                if (self.redis_available and not self._should_skip_redis()) {
-                    try {
-                        self.redis.set(anchor);
-                    } except (redis.TimeoutError, redis.ConnectionError, Exception) {
-                        self._record_redis_failure();
-                    }
+                if (self.redis_available) {
+                    self.redis.set(anchor);
                 }
-                if (self.mongo_available and not self._should_skip_mongo()) {
-                    try {
-                        self.mongo.set(anchor);
-                    } except (ServerSelectionTimeoutError, NetworkTimeout, Exception) {
-                        self._record_mongo_failure();
-                    }
+                if (self.mongo_available) {
+                    self.mongo.set(anchor);
                 } elif (self.shelf) {
-                    try {
-                        self.shelf.set(anchor);
-                    } except Exception {
-                        
-                        pass;
-                    }
+                    self.shelf.set(anchor);
                 }
             }
             return;
@@ -160,86 +91,48 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
     }
 
     def close() {
-        try {
-            self.commit();
-        } except Exception {
-            
-            pass;
-        }
-        
+        self.commit();
         self.mem.close();
 
         if (self.redis_available and self.redis.redis_client) {
-            try {
-                self.redis.redis_client.close();
-            } except Exception {
-                pass;
-            }
+            self.redis.redis_client.close();
         }
 
         if (self.mongo_available and self.mongo.client) {
-            try {
-                self.mongo.client.close();
-            } except Exception {
-                pass;
-            }
+            self.mongo.client.close();
         }
 
         if (self.shelf) {
-            try {
-                self.shelf.close();
-            } except Exception {
-                pass;
-            }
+            self.shelf.close();
         }
     }
 
     def sync(anchors: Iterable[Anchor]) -> None {
-        if (self.redis_available and not self._should_skip_redis()) {
-            try {
-                self.redis.commit(keys=anchors);
-            } except (redis.TimeoutError, redis.ConnectionError, Exception) {
-                self._record_redis_failure();
-            }
+        if self.redis_available {
+            self.redis.commit(keys=anchors);
         }
-        if (self.mongo_available and not self._should_skip_mongo()) {
-            try {
-                self.mongo.commit(keys=anchors);
-            } except (ServerSelectionTimeoutError, NetworkTimeout, Exception) {
-                self._record_mongo_failure();
-            }
+        if self.mongo_available {
+            self.mongo.commit(keys=anchors);
         } elif self.shelf {
-            try {
-                self.shelf.commit(keys=anchors);
-            } except Exception {
-                pass;
-            }
+            self.shelf.commit(keys=anchors);
         }
     }
 
     def delete(anchor: Anchor) {
         self.mem.remove(anchor.id);
 
-        if (self.redis_available and not self._should_skip_redis()) {
-            try {
-                self.redis.remove(anchor);
-            } except (redis.TimeoutError, redis.ConnectionError, Exception) {
-                self._record_redis_failure();
-            }
+        if self.redis_available {
+            self.redis.remove(anchor);
         }
-        if (self.mongo_available and not self._should_skip_mongo()) {
-            try {
-                self.mongo.remove(anchor);
-            } except (ServerSelectionTimeoutError, NetworkTimeout, Exception) {
-                self._record_mongo_failure();
-            }
+        if self.mongo_available {
+            self.mongo.remove(anchor);
         } elif self.shelf {
-            try {
-                self.shelf.remove(anchor);
-            } except Exception {
-                pass;
-            }
+            self.shelf.remove(anchor);
         }
+    }
+
+    def <>set(anchor: TANCH) {
+        self.mem.set(anchor);
     }
 
     def <>set(anchor: TANCH) {
@@ -247,7 +140,7 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
     }
 }
 
-"""MongoDB handler with timeout resilience."""
+"""MongoDB handler."""
 obj MongoDB {
     has client: (MongoClient | None) = None;
     has db_name: str = 'jac_db';
@@ -256,17 +149,10 @@ obj MongoDB {
         'MONGODB_URI', 'mongodb://root:rootpassword123@localhost:27017/'
     );
 
-    """Initialize MongoDB with proper timeout settings."""
-    def postinit() -> None {
+    """Initialize Mongodb."""
+    def postinit()  -> None {
         if (self.client is None) {
-            self.client = MongoClient(
-                self.mongo_url,
-                serverSelectionTimeoutMS=5000,
-                connectTimeoutMS=5000,
-                socketTimeoutMS=30000,
-                maxPoolSize=10,
-                retryWrites=True
-            );
+            self.client = MongoClient(self.mongo_url);
         }
         self.db = self.client[self.db_name];
         self.collection = self.db[self.collection_name];
@@ -278,15 +164,11 @@ obj MongoDB {
         client = None;
 
         try {
-            client = MongoClient(
-                uri, 
-                serverSelectionTimeoutMS=5000,
-                connectTimeoutMS=5000
-            );
+            client = MongoClient(uri, serverSelectionTimeoutMS=5000);
 
-            client.admin.command('ping', maxTimeMS=5000);
+            client.admin.command('ping');
             return True;
-        } except (ConnectionFailure, ServerSelectionTimeoutError) {
+        } except ConnectionFailure {
             return False;
         } except Exception {
             return False;
@@ -313,7 +195,7 @@ obj MongoDB {
     }
 
     """
-    Save anchor to MongoDB with timeout handling:
+    Save anchor to MongoDB, exactly like ShelfStorage:
         - Save all anchors (no empty NodeAnchor skipping)
         - Update NodeAnchor edges
         - Respect write and connect access
@@ -330,16 +212,7 @@ obj MongoDB {
         if (getattr(anchor, 'hash', None) == current_hash) {
             return;
         }
-        
-        try {
-            db_doc = self.collection.find_one(
-                {'_id': str(_id)},
-                maxTimeMS=5000
-            );
-        } except (ServerSelectionTimeoutError, NetworkTimeout) {
-            return;
-        }
-        
+        db_doc = self.collection.find_one({'_id': str(_id)});
         stored_anchor = self._load_anchor(db_doc) if db_doc else None;
         if (
             stored_anchor
@@ -379,38 +252,21 @@ obj MongoDB {
         } except Exception {
             return;
         }
-        
-        try {
-            self.collection.update_one(
-                {'_id': str(_id)},
-                {'$set': {'data': data_blob, 'type': <>type(final_anchor).__name__}},
-                upsert=True
-            );
-        } except (ServerSelectionTimeoutError, NetworkTimeout) {
-            return;
-        }
+        self.collection.update_one(
+            {'_id': str(_id)},
+            {'$set': {'data': data_blob, 'type': <>type(final_anchor).__name__}},
+            upsert=True
+        );
     }
 
     def remove(anchor: TANCH) -> None {
         _id = self._to_uuid(anchor.id);
-        try {
-            self.collection.delete_one({'_id': str(_id)});
-        } except (ServerSelectionTimeoutError, NetworkTimeout) {
-            return;
-        }
+        self.collection.delete_one({'_id': str(_id)});
     }
 
     def find_by_id(id: UUID) -> (Anchor | None) {
         _id = self._to_uuid(id);
-        try {
-            db_obj = self.collection.find_one(
-                {'_id': str(_id)},
-                maxTimeMS=5000
-            );
-        } except (ServerSelectionTimeoutError, NetworkTimeout) {
-            return None;
-        }
-        
+        db_obj = self.collection.find_one({'_id': str(_id)});
         if db_obj {
             anchor = self._load_anchor(db_obj);
             if anchor {
@@ -421,7 +277,7 @@ obj MongoDB {
     }
 
     """
-    Faster bulk commit with chunking and timeout handling:
+    Faster bulk commit:
         - Save all anchors (no empty NodeAnchor skipping)
         - Update NodeAnchor edges
         - Respect write and connect access
@@ -429,10 +285,7 @@ obj MongoDB {
     def commit_bulk(anchors: Iterable[Anchor]) -> None {
         import from jaclang.runtimelib.archetype { NodeAnchor }
         import from jaclang.pycore.runtime { JacRuntimeInterface as Jac }
-        
         ops: list = [];
-        batch_size = 100;  
-        
         for anc in anchors {
             _id = self._to_uuid(anc.id);
             try {
@@ -443,16 +296,7 @@ obj MongoDB {
             if (getattr(anc, 'hash', None) == current_hash) {
                 continue;
             }
-            
-            try {
-                db_doc = self.collection.find_one(
-                    {'_id': str(_id)},
-                    maxTimeMS=5000
-                );
-            } except (ServerSelectionTimeoutError, NetworkTimeout) {
-                continue;
-            }
-            
+            db_doc = self.collection.find_one({'_id': str(_id)});
             stored_anchor = self._load_anchor(db_doc) if db_doc else None;
             if (
                 stored_anchor
@@ -499,27 +343,9 @@ obj MongoDB {
                     upsert=True
                 )
             );
-            
-            
-            if (len(ops) >= batch_size) {
-                try {
-                    self.collection.bulk_write(ops, ordered=False);
-                    ops = [];
-                } except (ServerSelectionTimeoutError, NetworkTimeout) {
-                    
-                    ops = [];
-                }
-            }
         }
-        
-        
         if ops {
-            try {
-                self.collection.bulk_write(ops, ordered=False);
-            } except (ServerSelectionTimeoutError, NetworkTimeout) {
-               
-                pass;
-            }
+            self.collection.bulk_write(ops);
         }
     }
 
@@ -534,34 +360,29 @@ obj MongoDB {
     }
 }
 
-"""Redis-based Memory Handler with timeout resilience."""
+"""Redis-based Memory Handler."""
 obj RedisDB {
     has redis_url: str = os.environ.get(
         'REDIS_URL', 'redis://:mypassword123@localhost:6379/0'
     );
+
     has redis_client: (redis.Redis | None) = None;
 
-    """Initialize Redis with timeout settings."""
-    def postinit() -> None {
+    """Initialize Redis."""
+    def postinit()  -> None {
         if (self.redis_client is None) {
-            self.redis_client = redis.from_url(
-                self.redis_url,
-                socket_connect_timeout=5,
-                socket_timeout=30,
-                retry_on_timeout=True,
-                health_check_interval=30
-            );
+            self.redis_client = redis.from_url(self.redis_url);
         }
     }
 
     """Check whether Redis connection is alive and reachable."""
-    def redis_is_available() -> bool {
+    def redis_is_available()  -> bool {
         try {
             if (self.redis_client is None) {
                 return False;
             }
             return self.redis_client.ping();
-        } except (redis.ConnectionError, redis.TimeoutError, Exception) {
+        } except Exception {
             return False;
         }
     }
@@ -582,47 +403,40 @@ obj RedisDB {
             return None;
         }
         key = self._redis_key(id);
+        raw = self.redis_client.get(key);
+        if not raw {
+            return None;
+        }
         try {
-            raw = self.redis_client.get(key);
-            if not raw {
-                return None;
-            }
             return loads(raw);
-        } except (redis.TimeoutError, redis.ConnectionError, Exception) {
+        } except Exception {
             return None;
         }
     }
 
-    """Save to Redis with timeout handling."""
+    """Save to MongoDB AND Redis."""
     def <>set(anchor: Anchor) -> None {
         if (self.redis_client is None) {
             return;
         }
-        try {
-            self.redis_client.set(self._redis_key(anchor.id), dumps(anchor));
-        } except (redis.TimeoutError, redis.ConnectionError) {
-            raise;  
-        }
+        self.redis_client.set(self._redis_key(anchor.id), dumps(anchor));
     }
 
-    """Delete from Redis with timeout handling."""
+    """Delete from MongoDB AND Redis."""
     def remove(anchor: Anchor) -> None {
         if (self.redis_client is None) {
-            return;
+            return None;
         }
-        try {
-            self.redis_client.delete(self._redis_key(anchor.id));
-        } except (redis.TimeoutError, redis.ConnectionError) {
-            raise;  
-        }
+        self.redis_client.delete(self._redis_key(anchor.id));
     }
 
     def find_by_id(id: UUID) -> (Anchor | None) {
         _id = self._to_uuid(id);
-        return self._load_anchor_from_redis(_id);
+        data = self._load_anchor_from_redis(_id);
+        return data;
     }
 
-    """Commit with timeout handling."""
+    """Commit behaves like MongoDB but also syncs Redis."""
     def commit(anchor: (Anchor | None) = None, keys: Iterable[Anchor] = []) -> None {
         if anchor {
             self.set(anchor);
@@ -630,19 +444,14 @@ obj RedisDB {
         }
         if keys {
             for anc in keys {
-                try {
-                    self.set(anc);
-                } except (redis.TimeoutError, redis.ConnectionError) {
-                    
-                    continue;
-                }
+                self.set(anc);
             }
         }
     }
 }
 
 """
-Shelf-based Memory Handler with lock timeout handling.
+Shelf-based Memory Handler — file-backed key/value storage.
 Uses dbm.dumb on all platforms to avoid gdbm locking issues in Linux.
 """
 obj ShelfDB {
@@ -657,7 +466,7 @@ obj ShelfDB {
     }
 
     """Always use dbm.dumb backend to avoid Linux gdbm locking."""
-    def _open_shelf() -> shelve.Shelf {
+    def _open_shelf()  -> shelve.Shelf {
         import dbm.dumb;
         if (self._shelf is None) {
             raw_db = dbm.dumb.open(self.shelf_path, 'c');
@@ -667,7 +476,7 @@ obj ShelfDB {
         return self._shelf;
     }
 
-    def _ensure_shelf() -> shelve.Shelf {
+    def _ensure_shelf()  -> shelve.Shelf {
         if (self._shelf is None) {
             self._shelf = self._open_shelf();
         }
@@ -676,12 +485,9 @@ obj ShelfDB {
 
     """Cleanly close shelf storage."""
     def close() {
+        self._shelf = self._ensure_shelf();
         if (self._shelf is not None) {
-            try {
-                self._shelf.close();
-            } except Exception {
-                pass;
-            }
+            self._shelf.close();
             self._shelf = None;
         }
     }
@@ -701,52 +507,32 @@ obj ShelfDB {
     def _load_anchor_from_shelf(id: UUID) -> (Anchor | None) {
         key = self._redis_key(id);
         shelf = self._ensure_shelf();
-        
-        
-        if (self._lock.acquire(timeout=10)) { 
-            try {
-                if (key not in shelf) {
-                    return None;
-                }
-                return shelf[key];
-            } finally {
-                self._lock.release();
+        with self._lock {
+            if (key not in shelf) {
+                return None;
             }
-        } else {
-           
-            return None;
+            return shelf[key];
         }
     }
 
-    """Save anchor to shelf with timeout."""
+    """Save anchor to shelf."""
     def <>set(anchor: Anchor) -> None {
         key = self._redis_key(anchor.id);
         shelf = self._ensure_shelf();
-        
-        if (self._lock.acquire(timeout=10)) {
-            try {
-                shelf[key] = anchor;
-                shelf.sync();
-            } finally {
-                self._lock.release();
-            }
+        with self._lock {
+            shelf[key] = anchor;
+            shelf.sync();
         }
-        
     }
 
-    """Remove anchor from shelf with timeout."""
+    """Remove anchor from shelf."""
     def remove(anchor: Anchor) -> None {
         key = self._redis_key(anchor.id);
         shelf = self._ensure_shelf();
-        
-        if (self._lock.acquire(timeout=10)) {
-            try {
-                if (key in shelf) {
-                    del (shelf[key], );
-                    shelf.sync();
-                }
-            } finally {
-                self._lock.release();
+        with self._lock {
+            if (key in shelf) {
+                del (shelf[key], ) ;
+                shelf.sync();
             }
         }
     }
@@ -756,19 +542,14 @@ obj ShelfDB {
         return self._load_anchor_from_shelf(_id);
     }
 
-    """Commit one or many anchors with timeout handling."""
+    """Commit one or many anchors."""
     def commit(anchor: (Anchor | None) = None, keys: Iterable[Anchor] = []) -> None {
         if anchor {
             self.set(anchor);
             return;
         }
         for anc in keys {
-            try {
-                self.set(anc);
-            } except Exception {
-                
-                continue;
-            }
+            self.set(anc);
         }
     }
 }
