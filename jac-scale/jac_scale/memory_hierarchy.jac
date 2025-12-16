@@ -161,12 +161,12 @@ obj MongoDB {
     }
 
     def mongo_is_available(
-        uri: str = 'mongodb://root:rootpassword1234@localhost:27017/'
+        uri: str = 'mongodb://root:rootpassword123@localhost:27017/'
     ) -> bool {
         client = None;
        
         try {
-            client = MongoClient(uri, serverSelectionTimeoutMS=15000);
+            client = MongoClient(uri, serverSelectionTimeoutMS=5000);
 
             client.admin.command('ping');
             return True;
