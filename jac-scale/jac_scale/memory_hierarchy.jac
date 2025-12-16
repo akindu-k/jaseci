@@ -93,18 +93,6 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
     def close() {
         self.commit();
         self.mem.close();
-
-        if (self.redis_available and self.redis.redis_client) {
-            self.redis.redis_client.close();
-        }
-
-        if (self.mongo_available and self.mongo.client) {
-            self.mongo.client.close();
-        }
-
-        if (self.shelf) {
-            self.shelf.close();
-        }
     }
 
     def sync(anchors: Iterable[Anchor]) -> None {
@@ -162,19 +150,29 @@ obj MongoDB {
         uri: str = 'mongodb://root:rootpassword123@localhost:27017/'
     ) -> bool {
         client = None;
+        print("Checking MongoDB availability...");
 
         try {
-            client = MongoClient(uri, serverSelectionTimeoutMS=5000);
-
-            client.admin.command('ping');
+            client = MongoClient(
+                uri,
+                serverSelectionTimeoutMS=2000,
+                connectTimeoutMS=2000,
+                socketTimeoutMS=2000
+            );
+            print("Testing MongoDB connection...");
+            client.admin.command('ping', maxTimeMS=2000);
             return True;
         } except ConnectionFailure {
+            print("MongoDB server not available");
             return False;
         } except Exception {
+            print("An unexpected error occurred while connecting to MongoDB");
             return False;
         } finally {
             if (client) {
-                client.close();
+                try {
+                    client.close();
+                } except Exception {}
             }
         }
     }
