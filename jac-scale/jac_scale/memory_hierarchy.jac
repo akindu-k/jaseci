@@ -172,7 +172,7 @@ obj MongoDB {
             if (client) {
                 try {
                     client.close();
-                } except Exception {}
+                } except Exception { }
             }
         }
     }
