@@ -11,6 +11,7 @@ import from pymongo { MongoClient, UpdateOne }
 import from pymongo.errors { ConnectionFailure }
 import from jaclang.runtimelib.archetype { TANCH, Anchor }
 import from jaclang.runtimelib.memory { Memory }
+import from time {time}
 
 glob ID = TypeVar('ID');
 
@@ -53,7 +54,7 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
             }
         }
 
-        if self.shelf {
+        elif self.shelf {
             if (anchor := self.shelf.find_by_id(id)) {
                 self.mem.set(anchor);
                 return anchor;
@@ -160,9 +161,10 @@ obj MongoDB {
     }
 
     def mongo_is_available(
-        uri: str = 'mongodb://root:rootpassword123@localhost:27017/'
+        uri: str = 'mongodb://root:rootpassword1234@localhost:27017/'
     ) -> bool {
         client = None;
+       
         try {
             client = MongoClient(uri, serverSelectionTimeoutMS=15000);
 
@@ -177,6 +179,7 @@ obj MongoDB {
                 client.close();
             }
         }
+
     }
 
     def _to_uuid(id: (UUID | str)) -> UUID {
