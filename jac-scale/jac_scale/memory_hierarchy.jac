@@ -553,4 +553,3 @@ obj ShelfDB {
         }
     }
 }
-
