@@ -19,7 +19,7 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
     has redis_failures: int = 0;
     has mongo_failures: int = 0;
     has max_failures: int = 5;
-    has failure_reset_time: float = 300.0;  
+    has failure_reset_time: float = 300.0;
     has last_redis_failure_time: float = 0.0;
     has last_mongo_failure_time: float = 0.0;
 
@@ -42,7 +42,7 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
     def _should_skip_redis() -> bool {
         if (self.redis_failures >= self.max_failures) {
             if (time() - self.last_redis_failure_time > self.failure_reset_time) {
-                self.redis_failures = 0; 
+                self.redis_failures = 0;
                 return False;
             }
             return True;
@@ -110,7 +110,7 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
                     return anchor;
                 }
             } except Exception {
-                
+
                 pass;
             }
         }
@@ -143,7 +143,7 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
                     try {
                         self.shelf.set(anchor);
                     } except Exception {
-                        
+
                         pass;
                     }
                 }
@@ -163,10 +163,10 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
         try {
             self.commit();
         } except Exception {
-            
+
             pass;
         }
-        
+
         self.mem.close();
 
         if (self.redis_available and self.redis.redis_client) {
@@ -279,7 +279,7 @@ obj MongoDB {
 
         try {
             client = MongoClient(
-                uri, 
+                uri,
                 serverSelectionTimeoutMS=5000,
                 connectTimeoutMS=5000
             );
@@ -330,7 +330,7 @@ obj MongoDB {
         if (getattr(anchor, 'hash', None) == current_hash) {
             return;
         }
-        
+
         try {
             db_doc = self.collection.find_one(
                 {'_id': str(_id)},
@@ -339,7 +339,7 @@ obj MongoDB {
         } except (ServerSelectionTimeoutError, NetworkTimeout) {
             return;
         }
-        
+
         stored_anchor = self._load_anchor(db_doc) if db_doc else None;
         if (
             stored_anchor
@@ -379,7 +379,7 @@ obj MongoDB {
         } except Exception {
             return;
         }
-        
+
         try {
             self.collection.update_one(
                 {'_id': str(_id)},
@@ -410,7 +410,7 @@ obj MongoDB {
         } except (ServerSelectionTimeoutError, NetworkTimeout) {
             return None;
         }
-        
+
         if db_obj {
             anchor = self._load_anchor(db_obj);
             if anchor {
@@ -429,10 +429,10 @@ obj MongoDB {
     def commit_bulk(anchors: Iterable[Anchor]) -> None {
         import from jaclang.runtimelib.archetype { NodeAnchor }
         import from jaclang.pycore.runtime { JacRuntimeInterface as Jac }
-        
+
         ops: list = [];
-        batch_size = 100;  
-        
+        batch_size = 100;
+
         for anc in anchors {
             _id = self._to_uuid(anc.id);
             try {
@@ -443,7 +443,7 @@ obj MongoDB {
             if (getattr(anc, 'hash', None) == current_hash) {
                 continue;
             }
-            
+
             try {
                 db_doc = self.collection.find_one(
                     {'_id': str(_id)},
@@ -452,7 +452,7 @@ obj MongoDB {
             } except (ServerSelectionTimeoutError, NetworkTimeout) {
                 continue;
             }
-            
+
             stored_anchor = self._load_anchor(db_doc) if db_doc else None;
             if (
                 stored_anchor
@@ -499,25 +499,25 @@ obj MongoDB {
                     upsert=True
                 )
             );
-            
-            
+
+
             if (len(ops) >= batch_size) {
                 try {
                     self.collection.bulk_write(ops, ordered=False);
                     ops = [];
                 } except (ServerSelectionTimeoutError, NetworkTimeout) {
-                    
+
                     ops = [];
                 }
             }
         }
-        
-        
+
+
         if ops {
             try {
                 self.collection.bulk_write(ops, ordered=False);
             } except (ServerSelectionTimeoutError, NetworkTimeout) {
-               
+
                 pass;
             }
         }
@@ -601,7 +601,7 @@ obj RedisDB {
         try {
             self.redis_client.set(self._redis_key(anchor.id), dumps(anchor));
         } except (redis.TimeoutError, redis.ConnectionError) {
-            raise;  
+            raise;
         }
     }
 
@@ -613,7 +613,7 @@ obj RedisDB {
         try {
             self.redis_client.delete(self._redis_key(anchor.id));
         } except (redis.TimeoutError, redis.ConnectionError) {
-            raise;  
+            raise;
         }
     }
 
@@ -633,7 +633,7 @@ obj RedisDB {
                 try {
                     self.set(anc);
                 } except (redis.TimeoutError, redis.ConnectionError) {
-                    
+
                     continue;
                 }
             }
@@ -701,9 +701,9 @@ obj ShelfDB {
     def _load_anchor_from_shelf(id: UUID) -> (Anchor | None) {
         key = self._redis_key(id);
         shelf = self._ensure_shelf();
-        
-        
-        if (self._lock.acquire(timeout=10)) { 
+
+
+        if (self._lock.acquire(timeout=10)) {
             try {
                 if (key not in shelf) {
                     return None;
@@ -713,7 +713,7 @@ obj ShelfDB {
                 self._lock.release();
             }
         } else {
-           
+
             return None;
         }
     }
@@ -722,7 +722,7 @@ obj ShelfDB {
     def <>set(anchor: Anchor) -> None {
         key = self._redis_key(anchor.id);
         shelf = self._ensure_shelf();
-        
+
         if (self._lock.acquire(timeout=10)) {
             try {
                 shelf[key] = anchor;
@@ -731,14 +731,14 @@ obj ShelfDB {
                 self._lock.release();
             }
         }
-        
+
     }
 
     """Remove anchor from shelf with timeout."""
     def remove(anchor: Anchor) -> None {
         key = self._redis_key(anchor.id);
         shelf = self._ensure_shelf();
-        
+
         if (self._lock.acquire(timeout=10)) {
             try {
                 if (key in shelf) {
@@ -766,7 +766,7 @@ obj ShelfDB {
             try {
                 self.set(anc);
             } except Exception {
-                
+
                 continue;
             }
         }
