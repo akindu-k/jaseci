@@ -23,7 +23,6 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
         self.mongo = MongoDB();
         self.redis_available = self.redis.redis_is_available();
         self.mongo_available =  self.mongo.mongo_is_available();  
-        print(f"status of mongo: {self.mongo_available}");
         self.shelf: (ShelfDB | None) = None;
     }
 
