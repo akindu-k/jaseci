@@ -22,7 +22,7 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
         self.redis = RedisDB();
         self.mongo = MongoDB();
         self.redis_available = False;
-        self.mongo_available = False;  
+        self.mongo_available = False;
         self.shelf: (ShelfDB | None) = None;
     }
 
