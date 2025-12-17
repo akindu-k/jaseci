@@ -120,7 +120,6 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
         }
     }
 
-
     def <>set(anchor: TANCH) {
         self.mem.set(anchor);
     }
@@ -131,9 +130,7 @@ obj MongoDB {
     has client: (MongoClient | None) = None;
     has db_name: str = 'jac_db';
     has collection_name: str = 'anchors';
-    has mongo_url: (str | None) = os.environ.get(
-        'MONGODB_URI', None
-    );
+    has mongo_url: (str | None) = os.environ.get('MONGODB_URI', None);
 
     """Initialize Mongodb."""
     def postinit()  -> None {
@@ -144,7 +141,7 @@ obj MongoDB {
         self.collection = self.db[self.collection_name];
     }
 
-    def mongo_is_available() -> bool {
+    def mongo_is_available()  -> bool {
         client = None;
                 
         if (self.mongo_url) {
