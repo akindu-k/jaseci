@@ -22,7 +22,8 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
         self.redis = RedisDB();
         self.mongo = MongoDB();
         self.redis_available = self.redis.redis_is_available();
-        self.mongo_available = False;  
+        self.mongo_available =  self.mongo.mongo_is_available();  
+        print(f"status of mongo: {self.mongo_available}");
         self.shelf: (ShelfDB | None) = None;
     }
 
@@ -119,9 +120,6 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
         }
     }
 
-    def <>set(anchor: TANCH) {
-        self.mem.set(anchor);
-    }
 
     def <>set(anchor: TANCH) {
         self.mem.set(anchor);
@@ -133,8 +131,8 @@ obj MongoDB {
     has client: (MongoClient | None) = None;
     has db_name: str = 'jac_db';
     has collection_name: str = 'anchors';
-    has mongo_url: str = os.environ.get(
-        'MONGODB_URI', 'mongodb://root:rootpassword123@localhost:27017/'
+    has mongo_url: (str | None) = os.environ.get(
+        'MONGODB_URI', None
     );
 
     """Initialize Mongodb."""
@@ -146,34 +144,50 @@ obj MongoDB {
         self.collection = self.db[self.collection_name];
     }
 
-    def mongo_is_available(
-        uri: str = 'mongodb://root:rootpassword123@localhost:27017/'
-    ) -> bool {
+    def mongo_is_available() -> bool {
         client = None;
         print("Checking MongoDB availability...");
+        
+        if (self.mongo_url){
 
-        try {
-            client = MongoClient(
-                uri,
-                serverSelectionTimeoutMS=2000,
-                connectTimeoutMS=2000,
-                socketTimeoutMS=2000
-            );
-            print("Testing MongoDB connection...");
-            client.admin.command('ping', maxTimeMS=2000);
-            return True;
-        } except ConnectionFailure {
-            print("MongoDB server not available");
-            return False;
-        } except Exception {
-            print("An unexpected error occurred while connecting to MongoDB");
-            return False;
-        } finally {
-            if (client) {
-                try {
-                    client.close();
-                } except Exception { }
+            try {
+                
+                current_time = time();
+                client = MongoClient(
+                    self.mongo_url,
+                    serverSelectionTimeoutMS=200,
+                );
+                print("Testing MongoDB connection...");
+                current_time_2 = time();
+                print("time taken to connect:", current_time_2 - current_time);
+                try{
+                    client.admin.command('ping', maxTimeMS=100);
+
+                } 
+                except Exception{
+                    current_time_3 = time();
+                    print("time taken to ping:", current_time_3 - current_time_2);
+                    return False;
+
+                }
+
+                return True;
+            } except ConnectionFailure {
+                print("MongoDB server not available");
+                return False;
+            } except Exception {
+                print("An unexpected error occurred while connecting to MongoDB");
+                return False;
+            } finally {
+                if (client) {
+                    try {
+                        client.close();
+                    } except Exception { }
+                }
             }
+        }
+        else{
+            return False;
         }
     }
 
@@ -360,7 +374,7 @@ obj MongoDB {
 
 """Redis-based Memory Handler."""
 obj RedisDB {
-    has redis_url: str = os.environ.get(
+    has redis_url: (str | None) = os.environ.get(
         'REDIS_URL', 'redis://:mypassword123@localhost:6379/0'
     );
 
