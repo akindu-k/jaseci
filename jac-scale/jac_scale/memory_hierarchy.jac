@@ -22,7 +22,7 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
         self.redis = RedisDB();
         self.mongo = MongoDB();
         self.redis_available = self.redis.redis_is_available();
-        self.mongo_available =  self.mongo.mongo_is_available();  
+        self.mongo_available = self.mongo.mongo_is_available();
         self.shelf: (ShelfDB | None) = None;
     }
 
@@ -119,7 +119,6 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
         }
     }
 
-
     def <>set(anchor: TANCH) {
         self.mem.set(anchor);
     }
@@ -130,9 +129,7 @@ obj MongoDB {
     has client: (MongoClient | None) = None;
     has db_name: str = 'jac_db';
     has collection_name: str = 'anchors';
-    has mongo_url: (str | None) = os.environ.get(
-        'MONGODB_URI', None
-    );
+    has mongo_url: (str | None) = os.environ.get('MONGODB_URI', None);
 
     """Initialize Mongodb."""
     def postinit()  -> None {
@@ -143,31 +140,23 @@ obj MongoDB {
         self.collection = self.db[self.collection_name];
     }
 
-    def mongo_is_available() -> bool {
+    def mongo_is_available()  -> bool {
         client = None;
         print("Checking MongoDB availability...");
-        
-        if (self.mongo_url){
 
+        if (self.mongo_url) {
             try {
-                
                 current_time = time();
-                client = MongoClient(
-                    self.mongo_url,
-                    serverSelectionTimeoutMS=200,
-                );
+                client = MongoClient(self.mongo_url, serverSelectionTimeoutMS=200,);
                 print("Testing MongoDB connection...");
                 current_time_2 = time();
                 print("time taken to connect:", current_time_2 - current_time);
-                try{
+                try {
                     client.admin.command('ping', maxTimeMS=100);
-
-                } 
-                except Exception{
+                } except Exception {
                     current_time_3 = time();
                     print("time taken to ping:", current_time_3 - current_time_2);
                     return False;
-
                 }
 
                 return True;
@@ -184,8 +173,7 @@ obj MongoDB {
                     } except Exception { }
                 }
             }
-        }
-        else{
+        } else {
             return False;
         }
     }
