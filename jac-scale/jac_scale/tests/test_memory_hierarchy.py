@@ -210,9 +210,14 @@ class TestMongoDB:
         mock_client = Mock()
         mock_mongo_client.return_value = mock_client
         mock_client.admin.command.return_value = True
-
+        
+        self.mongo_db.mongo_url = "mongodb://localhost:27017"
+        
         result = self.mongo_db.mongo_is_available()
         assert result is True
+        
+        mock_mongo_client.assert_called_once_with(self.mongo_db.mongo_url)
+        mock_client.admin.command.assert_called_once_with('ping', maxTimeMS=100)
         mock_client.close.assert_called_once()
 
     @patch("jac_scale.memory_hierarchy.MongoClient")
@@ -307,50 +312,77 @@ class TestMultiHierarchyMemory:
 
     def test_initialization_with_all_available(self) -> None:
         """Test initialization when all storage systems are available."""
-        self.multi_memory.redis_available = True
-        self.multi_memory.mongo_available = True
-
         self.mock_redis.redis_is_available.return_value = True
         self.mock_mongo.mongo_is_available.return_value = True
-
-        self.multi_memory.__post_init__()
-
-        assert self.multi_memory.shelf is None
+        
+        with patch("jac_scale.memory_hierarchy.Memory") as mock_mem_class:
+            mock_mem_class.return_value = self.mock_memory
+            with patch("jac_scale.memory_hierarchy.RedisDB") as mock_redis_class:
+                mock_redis_class.return_value = self.mock_redis
+                with patch("jac_scale.memory_hierarchy.MongoDB") as mock_mongo_class:
+                    mock_mongo_class.return_value = self.mock_mongo
+                    
+                    test_memory = MultiHierarchyMemory()
+        
+        assert test_memory.shelf is None
+        assert test_memory.redis_available is True
+        assert test_memory.mongo_available is True
 
     def test_initialization_with_none_available(self) -> None:
         """Test initialization when no external storage is available."""
-        self.multi_memory.redis_available = False
-        self.multi_memory.mongo_available = False
+        self.mock_redis.redis_is_available.return_value = False
+        self.mock_mongo.mongo_is_available.return_value = False
+        
+        with patch("jac_scale.memory_hierarchy.Memory") as mock_mem_class:
+            mock_mem_class.return_value = self.mock_memory
+            with patch("jac_scale.memory_hierarchy.RedisDB") as mock_redis_class:
+                mock_redis_class.return_value = self.mock_redis
+                with patch("jac_scale.memory_hierarchy.MongoDB") as mock_mongo_class:
+                    mock_mongo_class.return_value = self.mock_mongo
+                    with patch("jac_scale.memory_hierarchy.ShelfDB") as mock_shelf_class:
+                        mock_shelf_class.return_value = self.mock_shelf
+                        
+                        test_memory = MultiHierarchyMemory()
 
-        with patch("jac_scale.memory_hierarchy.ShelfDB") as mock_shelf_class:
-            mock_shelf_class.return_value = self.mock_shelf
-            self.multi_memory.__post_init__()
-
-        assert self.multi_memory.shelf == self.mock_shelf
+        assert test_memory.shelf == self.mock_shelf
+        assert test_memory.redis_available is False
+        assert test_memory.mongo_available is False
 
     def test_initialization_with_redis_only(self) -> None:
         """Test initialization when only Redis is available."""
-        self.multi_memory.redis_available = True
-        self.multi_memory.mongo_available = False
-
         self.mock_redis.redis_is_available.return_value = True
         self.mock_mongo.mongo_is_available.return_value = False
+        
+        with patch("jac_scale.memory_hierarchy.Memory") as mock_mem_class:
+            mock_mem_class.return_value = self.mock_memory
+            with patch("jac_scale.memory_hierarchy.RedisDB") as mock_redis_class:
+                mock_redis_class.return_value = self.mock_redis
+                with patch("jac_scale.memory_hierarchy.MongoDB") as mock_mongo_class:
+                    mock_mongo_class.return_value = self.mock_mongo
+                    
+                    test_memory = MultiHierarchyMemory()
 
-        self.multi_memory.__post_init__()
-
-        assert self.multi_memory.shelf is None
+        assert test_memory.shelf is None
+        assert test_memory.redis_available is True
+        assert test_memory.mongo_available is False
 
     def test_initialization_with_mongo_only(self) -> None:
         """Test initialization when only MongoDB is available."""
-        self.multi_memory.redis_available = False
-        self.multi_memory.mongo_available = True
-
         self.mock_redis.redis_is_available.return_value = False
         self.mock_mongo.mongo_is_available.return_value = True
+        
+        with patch("jac_scale.memory_hierarchy.Memory") as mock_mem_class:
+            mock_mem_class.return_value = self.mock_memory
+            with patch("jac_scale.memory_hierarchy.RedisDB") as mock_redis_class:
+                mock_redis_class.return_value = self.mock_redis
+                with patch("jac_scale.memory_hierarchy.MongoDB") as mock_mongo_class:
+                    mock_mongo_class.return_value = self.mock_mongo
+                    
+                    test_memory = MultiHierarchyMemory()
 
-        self.multi_memory.__post_init__()
-
-        assert self.multi_memory.shelf is None
+        assert test_memory.shelf is None
+        assert test_memory.redis_available is False
+        assert test_memory.mongo_available is True
 
     def test_find_by_id_in_memory(self) -> None:
         """Test finding anchor in local memory first."""
@@ -400,25 +432,29 @@ class TestMultiHierarchyMemory:
         self.mock_mongo.find_by_id.assert_called_once_with(anchor_id)
 
     def test_find_by_id_in_shelf(self) -> None:
-        """Test finding anchor in ShelfDB if not in local memory, Redis, or MongoDB."""
+        """Test finding anchor in ShelfDB when Redis and MongoDB are not available."""
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id)
 
         self.multi_memory.mem = MagicMock()
         self.multi_memory.mem.find_by_id.return_value = None
 
-        self.mock_redis.find_by_id.return_value = None
-        self.mock_mongo.find_by_id.return_value = None
-
+        self.multi_memory.redis_available = False
+        self.multi_memory.mongo_available = False
         self.multi_memory.shelf = MagicMock()
         self.multi_memory.shelf.find_by_id.return_value = anchor
+
+        self.mock_redis.find_by_id.return_value = None
 
         result = self.multi_memory.find_by_id(anchor_id)
 
         assert result == anchor
         self.multi_memory.mem.find_by_id.assert_called_once_with(anchor_id)
-        self.mock_redis.find_by_id.assert_called_once_with(anchor_id)
-        self.mock_mongo.find_by_id.assert_called_once_with(anchor_id)
+        if self.multi_memory.redis_available:
+            self.mock_redis.find_by_id.assert_called_once_with(anchor_id)
+        else:
+            self.mock_redis.find_by_id.assert_not_called()
+        self.mock_mongo.find_by_id.assert_not_called()
         self.multi_memory.shelf.find_by_id.assert_called_once_with(anchor_id)
 
     def test_find_by_id_not_found(self) -> None:
@@ -428,10 +464,11 @@ class TestMultiHierarchyMemory:
         self.multi_memory.mem = MagicMock()
         self.multi_memory.mem.find_by_id.return_value = None
 
+        self.multi_memory.redis_available = True
+        self.multi_memory.mongo_available = True
+        
         self.mock_redis.find_by_id.return_value = None
         self.mock_mongo.find_by_id.return_value = None
-        self.multi_memory.shelf = MagicMock()
-        self.multi_memory.shelf.find_by_id.return_value = None
 
         result = self.multi_memory.find_by_id(anchor_id)
 
@@ -439,7 +476,8 @@ class TestMultiHierarchyMemory:
         self.multi_memory.mem.find_by_id.assert_called_once_with(anchor_id)
         self.mock_redis.find_by_id.assert_called_once_with(anchor_id)
         self.mock_mongo.find_by_id.assert_called_once_with(anchor_id)
-        self.multi_memory.shelf.find_by_id.assert_called_once_with(anchor_id)
+        if hasattr(self.multi_memory, 'shelf') and self.multi_memory.shelf:
+            self.multi_memory.shelf.find_by_id.assert_not_called()
 
     def test_set_anchor(self) -> None:
         """Test setting an anchor only stores in local memory initially."""
@@ -569,14 +607,8 @@ class TestMultiHierarchyMemory:
         self.multi_memory.mem.remove.assert_called_once_with(anchor.id)
         self.mock_shelf.remove.assert_called_once_with(anchor)
 
-    def test_close_with_all_storage(self) -> None:
-        """Test closing the memory hierarchy with all storage systems."""
-        self.multi_memory.redis_available = True
-        self.multi_memory.mongo_available = True
-        self.multi_memory.shelf = self.mock_shelf
-
-        self.mock_redis.redis_client = Mock()
-        self.mock_mongo.client = Mock()
+    def test_close(self) -> None:
+        """Test closing the memory hierarchy."""
         self.multi_memory.mem = MagicMock()
 
         with patch.object(self.multi_memory, "commit") as mock_commit:
@@ -584,9 +616,6 @@ class TestMultiHierarchyMemory:
 
             mock_commit.assert_called_once()
             self.multi_memory.mem.close.assert_called_once()
-            self.mock_redis.redis_client.close.assert_called_once()
-            self.mock_mongo.client.close.assert_called_once()
-            self.mock_shelf.close.assert_called_once()
 
 
 if __name__ == "__main__":

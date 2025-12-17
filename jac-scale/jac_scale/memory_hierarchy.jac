@@ -16,21 +16,22 @@ import from time { time }
 glob ID = TypeVar('ID');
 
 obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
+
+
     def init()  -> None {
         super.init();
         self.mem = Memory[(UUID, Anchor)]();
         self.redis = RedisDB();
         self.mongo = MongoDB();
-        self.redis_available = self.redis.redis_is_available();
-        self.mongo_available =  self.mongo.mongo_is_available();  
         self.shelf: (ShelfDB | None) = None;
-    }
-
-    def postinit()  -> None {
+        self.redis_available = self.redis.redis_is_available();
+        self.mongo_available = self.mongo.mongo_is_available(); 
         if (not self.redis_available and not self.mongo_available) {
             self.shelf = ShelfDB();
         }
     }
+
+
 
     def find_by_id(id: UUID) -> (Anchor | None) {
         if (anchor := self.mem.find_by_id(id)) {
@@ -145,37 +146,20 @@ obj MongoDB {
 
     def mongo_is_available() -> bool {
         client = None;
-        print("Checking MongoDB availability...");
-        
-        if (self.mongo_url){
-
-            try {
                 
-                current_time = time();
-                client = MongoClient(
-                    self.mongo_url,
-                    serverSelectionTimeoutMS=200,
-                );
-                print("Testing MongoDB connection...");
-                current_time_2 = time();
-                print("time taken to connect:", current_time_2 - current_time);
-                try{
+        if (self.mongo_url) {
+            try {
+                client = MongoClient(self.mongo_url);
+                
+                try {
                     client.admin.command('ping', maxTimeMS=100);
-
-                } 
-                except Exception{
-                    current_time_3 = time();
-                    print("time taken to ping:", current_time_3 - current_time_2);
+                    return True;  
+                } except Exception {
                     return False;
-
                 }
-
-                return True;
             } except ConnectionFailure {
-                print("MongoDB server not available");
                 return False;
             } except Exception {
-                print("An unexpected error occurred while connecting to MongoDB");
                 return False;
             } finally {
                 if (client) {
@@ -184,11 +168,10 @@ obj MongoDB {
                     } except Exception { }
                 }
             }
-        }
-        else{
-            return False;
-        }
+    } else {
+        return False;
     }
+        }
 
     def _to_uuid(id: (UUID | str)) -> UUID {
         if not isinstance(id, UUID) {
