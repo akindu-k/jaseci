@@ -165,10 +165,10 @@ obj MongoDB {
                     } except Exception { }
                 }
             }
-    } else {
-        return False;
-    }
+        } else {
+            return False;
         }
+    }
 
     def _to_uuid(id: (UUID | str)) -> UUID {
         if not isinstance(id, UUID) {
