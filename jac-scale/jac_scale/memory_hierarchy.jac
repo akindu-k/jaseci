@@ -21,8 +21,8 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
         self.mem = Memory[(UUID, Anchor)]();
         self.redis = RedisDB();
         self.mongo = MongoDB();
-        self.redis_available = False;
-        self.mongo_available = self.mongo.mongo_is_available();  
+        self.redis_available = self.redis.redis_is_available();
+        self.mongo_available = False;  
         self.shelf: (ShelfDB | None) = None;
     }
 
