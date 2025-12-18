@@ -25,7 +25,7 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
         self.mongo = MongoDB();
         self.shelf: (ShelfDB | None) = None;
         self.redis_available = self.redis.redis_is_available();
-        self.mongo_available = self.mongo.mongo_is_available(); 
+        self.mongo_available = self.mongo.mongo_is_available();
         if (not self.redis_available and not self.mongo_available) {
             self.shelf = ShelfDB();
         }
@@ -143,14 +143,14 @@ obj MongoDB {
 
     def mongo_is_available()  -> bool {
         client = None;
-                
+
         if (self.mongo_url) {
             try {
                 client = MongoClient(self.mongo_url);
-                
+
                 try {
                     client.admin.command('ping', maxTimeMS=100);
-                    return True;  
+                    return True;
                 } except Exception {
                     return False;
                 }
