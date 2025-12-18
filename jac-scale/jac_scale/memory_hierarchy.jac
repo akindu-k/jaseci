@@ -15,9 +15,10 @@ import from time { time }
 
 glob ID = TypeVar('ID');
 
-
 obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
-    def init -> None {
+
+
+    def init  -> None {
         super.init();
         self.mem = Memory[(UUID, Anchor)]();
         self.redis = RedisDB();
@@ -129,12 +130,10 @@ obj MongoDB {
     has client: (MongoClient | None) = None,
         db_name: str = 'jac_db',
         collection_name: str = 'anchors',
-        mongo_url: str = os.environ.get(
-            'MONGODB_URI', 'mongodb://root:rootpassword123@localhost:27017/'
-        );
+        mongo_url: (str | None) = os.environ.get('MONGODB_URI', None);
 
     """Initialize Mongodb."""
-    def postinit -> None {
+    def postinit  -> None {
         if (self.client is None) {
             self.client = MongoClient(self.mongo_url);
         }
@@ -357,17 +356,18 @@ obj RedisDB {
     has redis_url: (str | None) = os.environ.get(
         'REDIS_URL', 'redis://:mypassword123@localhost:6379/0'
     ),
+
         redis_client: (redis.Redis | None) = None;
 
     """Initialize Redis."""
-    def postinit -> None {
+    def postinit  -> None {
         if (self.redis_client is None) {
             self.redis_client = redis.from_url(self.redis_url);
         }
     }
 
     """Check whether Redis connection is alive and reachable."""
-    def redis_is_available -> bool {
+    def redis_is_available  -> bool {
         try {
             if (self.redis_client is None) {
                 return False;
@@ -457,7 +457,7 @@ obj ShelfDB {
     }
 
     """Always use dbm.dumb backend to avoid Linux gdbm locking."""
-    def _open_shelf -> shelve.Shelf {
+    def _open_shelf  -> shelve.Shelf {
         import dbm.dumb;
         if (self._shelf is None) {
             raw_db = dbm.dumb.open(self.shelf_path, 'c');
@@ -467,7 +467,7 @@ obj ShelfDB {
         return self._shelf;
     }
 
-    def _ensure_shelf -> shelve.Shelf {
+    def _ensure_shelf  -> shelve.Shelf {
         if (self._shelf is None) {
             self._shelf = self._open_shelf();
         }
