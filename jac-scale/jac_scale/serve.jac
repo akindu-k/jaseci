@@ -18,9 +18,10 @@ import from jaclang.pycore.runtime { JacRuntime as Jac }
 import from jaclang.runtimelib.server { JacAPIServer as JServer }
 import from jaclang.runtimelib.server { JsonValue }
 
-glob JWT_SECRET = os.getenv('JWT_SECRET', 'supersecretkey') , JWT_ALGORITHM = os.getenv(
-    'JWT_ALGORITHM', 'HS256'
-) , JWT_EXP_DELTA_DAYS = os.getenv('JWT_EXP_DELTA_DAYS', 7);
+glob
+    JWT_SECRET = os.getenv('JWT_SECRET', 'supersecretkey'),
+    JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'HS256'),
+    JWT_EXP_DELTA_DAYS = os.getenv('JWT_EXP_DELTA_DAYS', 7);
 
 class JacAPIServer(JServer) {
     static def create_jwt_token(username: str) -> str {

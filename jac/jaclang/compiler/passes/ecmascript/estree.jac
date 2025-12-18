@@ -14,12 +14,13 @@ import from dataclasses { dataclass, field }
 import from typing { Any, TypeAlias }
 import from typing { Literal as TypingLiteral }
 
-glob SourceType: TypeAlias = TypingLiteral[('script', 'module')] , VariableDeclarationKind:
-    TypeAlias = TypingLiteral[('var', 'let', 'const')] , PropertyKind: TypeAlias = TypingLiteral[
-    ('init', 'get', 'set')
-] , MethodDefinitionKind: TypeAlias = TypingLiteral[
-    ('constructor', 'method', 'get', 'set')
-];
+glob
+    SourceType: TypeAlias = TypingLiteral[('script', 'module')],
+    VariableDeclarationKind: TypeAlias = TypingLiteral[('var', 'let', 'const')],
+    PropertyKind: TypeAlias = TypingLiteral[('init', 'get', 'set')],
+    MethodDefinitionKind: TypeAlias = TypingLiteral[
+        ('constructor', 'method', 'get', 'set')
+    ];
 
 """Source location information for a node."""
 @dataclass
@@ -948,11 +949,16 @@ class IndexInfo {
     }
 }
 
-glob Statement = ExpressionStatement | BlockStatement | EmptyStatement | DebuggerStatement | WithStatement | ReturnStatement | LabeledStatement | BreakStatement | ContinueStatement | IfStatement | SwitchStatement | ThrowStatement | TryStatement | WhileStatement | DoWhileStatement | ForStatement | ForInStatement | ForOfStatement | FunctionDeclaration | VariableDeclaration | ClassDeclaration , Expression = (
-    Identifier | Literal | ThisExpression | ArrayExpression | ObjectExpression | FunctionExpression | ArrowFunctionExpression | UnaryExpression | UpdateExpression | BinaryExpression | AssignmentExpression | LogicalExpression | MemberExpression | ConditionalExpression | CallExpression | ChainExpression | NewExpression | SequenceExpression | YieldExpression | AwaitExpression | TemplateLiteral | TaggedTemplateExpression | ClassExpression | ImportExpression
-) , Pattern = Identifier | ArrayPattern | ObjectPattern | AssignmentPattern | RestElement , Declaration = FunctionDeclaration | VariableDeclaration | ClassDeclaration , ModuleDeclaration = (
-    ImportDeclaration | ExportNamedDeclaration | ExportDefaultDeclaration | ExportAllDeclaration
-);
+glob
+    Statement = ExpressionStatement | BlockStatement | EmptyStatement | DebuggerStatement | WithStatement | ReturnStatement | LabeledStatement | BreakStatement | ContinueStatement | IfStatement | SwitchStatement | ThrowStatement | TryStatement | WhileStatement | DoWhileStatement | ForStatement | ForInStatement | ForOfStatement | FunctionDeclaration | VariableDeclaration | ClassDeclaration,
+    Expression = (
+        Identifier | Literal | ThisExpression | ArrayExpression | ObjectExpression | FunctionExpression | ArrowFunctionExpression | UnaryExpression | UpdateExpression | BinaryExpression | AssignmentExpression | LogicalExpression | MemberExpression | ConditionalExpression | CallExpression | ChainExpression | NewExpression | SequenceExpression | YieldExpression | AwaitExpression | TemplateLiteral | TaggedTemplateExpression | ClassExpression | ImportExpression
+    ),
+    Pattern = Identifier | ArrayPattern | ObjectPattern | AssignmentPattern | RestElement,
+    Declaration = FunctionDeclaration | VariableDeclaration | ClassDeclaration,
+    ModuleDeclaration = (
+        ImportDeclaration | ExportNamedDeclaration | ExportDefaultDeclaration | ExportAllDeclaration
+    );
 
 """Convert an ESTree node to a dictionary representation."""
 def es_node_to_dict(<>node: Node) -> dict[str, Any] {
