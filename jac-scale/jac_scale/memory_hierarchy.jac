@@ -31,7 +31,9 @@ obj MongoDB {
         collection_name: str = 'anchors',
         mongo_url: (str | None) = os.environ.get('MONGODB_URI', None);
 
+    """Initialize Mongodb."""
     def postinit -> None;
+    def mongo_is_available()  -> bool;
     def _to_uuid(id: (UUID | str)) -> UUID;
     def _load_anchor(raw: dict[(str, Any)]) -> (TANCH | None);
     def <>set(anchor: Anchor) -> None;
