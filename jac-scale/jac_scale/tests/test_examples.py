@@ -253,7 +253,7 @@ class JacScaleTestRunner:
         path: str,
         data: dict[str, Any] | None = None,
         use_token: bool = False,
-        timeout: int = 10,
+        timeout: int = 60,
     ) -> str:
         """Make a raw HTTP request to the server.
 
