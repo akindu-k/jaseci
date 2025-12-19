@@ -490,7 +490,7 @@ impl MultiHierarchyMemory.find_by_id(id: UUID) -> (Anchor | None) {
     return None;
 }
 
-impl MultiHierarchyMemory.init -> None {
+impl MultiHierarchyMemory.postinit -> None {
     super.init();
     self.mem = Memory[(UUID, Anchor)]();
     self.redis = RedisDB();
