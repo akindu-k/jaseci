@@ -15,7 +15,7 @@ import from jaclang.runtimelib.memory { Memory }
 glob ID = TypeVar('ID');
 
 obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
-        has mem: Memory[(UUID, Anchor)] | None = None,
+    has mem: Memory[(UUID, Anchor)] | None = None,
         redis: RedisDB | None = None,
         mongo: MongoDB | None = None,
         shelf: ShelfDB | None = None,
