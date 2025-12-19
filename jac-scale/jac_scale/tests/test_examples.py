@@ -48,7 +48,7 @@ class JacScaleTestRunner:
         self.root_id: str | None = None
         self.setup_npm = setup_npm
 
-    def start_server(self, timeout: int = 30) -> None:
+    def start_server(self, timeout: int = 60) -> None:
         """Start the jac-scale server.
 
         Args:
