@@ -48,7 +48,7 @@ class JacScaleTestRunner:
         self.root_id: str | None = None
         self.setup_npm = setup_npm
 
-    def start_server(self, timeout: int = 120) -> None:
+    def start_server(self, timeout: int = 30) -> None:
         """Start the jac-scale server.
 
         Args:
@@ -58,7 +58,6 @@ class JacScaleTestRunner:
 
         # Clean up directories before starting
         dirs_to_clean = ["build", "dist", "node_modules", "src"]
-        dirs_to_clean = []
         for dir_name in dirs_to_clean:
             dir_path = example_dir / dir_name
             if dir_path.exists():
@@ -281,7 +280,7 @@ class JacScaleTestRunner:
             url=url,
             json=data,
             headers=headers,
-            timeout=timeout,
+            # timeout=timeout,
         )
 
         return response.text
