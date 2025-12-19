@@ -64,7 +64,11 @@ impl ShelfDB._redis_key(id: UUID) -> str {
 
 """Cleanly close shelf storage."""
 impl ShelfDB.close{
-    self._shelf = self._ensure_shelf();
+    # self._shelf = self._ensure_shelf();
+    # if (self._shelf is not None) {
+    #     self._shelf.close();
+    #     self._shelf = None;
+    # }
     if (self._shelf is not None) {
         self._shelf.close();
         self._shelf = None;
