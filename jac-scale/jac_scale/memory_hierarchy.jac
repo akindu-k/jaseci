@@ -33,7 +33,7 @@ obj MongoDB {
 
     """Initialize Mongodb."""
     def postinit -> None;
-
+    def close -> None; 
     def mongo_is_available()  -> bool;
     def _to_uuid(id: (UUID | str)) -> UUID;
     def _load_anchor(raw: dict[(str, Any)]) -> (TANCH | None);

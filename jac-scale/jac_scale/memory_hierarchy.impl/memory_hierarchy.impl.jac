@@ -372,6 +372,17 @@ impl MongoDB.mongo_is_available()  -> bool {
     }
 }
 
+impl MongoDB.close -> None {
+    if self.client {
+        try {
+            self.client.close();
+        } except Exception {
+            pass;
+        }
+        self.client = None;
+    }
+}
+
 """Initialize Mongodb."""
 impl MongoDB.postinit -> None {
     if (self.client is None) {
@@ -408,9 +419,17 @@ impl MultiHierarchyMemory.sync(anchors: Iterable[Anchor]) -> None {
     }
 }
 
-impl MultiHierarchyMemory.close{
+impl MultiHierarchyMemory.close {
     self.commit();
     self.mem.close();
+    
+    if self.mongo {
+        self.mongo.close();
+    }
+    
+    if self.shelf {
+        self.shelf.close();
+    }
 }
 
 impl MultiHierarchyMemory.commit(anchor: (Anchor | None) = None) {
