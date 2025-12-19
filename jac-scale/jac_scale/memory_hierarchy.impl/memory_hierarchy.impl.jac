@@ -422,11 +422,11 @@ impl MultiHierarchyMemory.sync(anchors: Iterable[Anchor]) -> None {
 impl MultiHierarchyMemory.close {
     self.commit();
     self.mem.close();
-    
+
     if self.mongo {
         self.mongo.close();
     }
-    
+
     if self.shelf {
         self.shelf.close();
     }
