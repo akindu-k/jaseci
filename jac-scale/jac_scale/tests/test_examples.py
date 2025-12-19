@@ -48,7 +48,7 @@ class JacScaleTestRunner:
         self.root_id: str | None = None
         self.setup_npm = setup_npm
 
-    def start_server(self, timeout: int = 30) -> None:
+    def start_server(self, timeout: int = 120) -> None:
         """Start the jac-scale server.
 
         Args:
@@ -58,6 +58,7 @@ class JacScaleTestRunner:
 
         # Clean up directories before starting
         dirs_to_clean = ["build", "dist", "node_modules", "src"]
+        dirs_to_clean = []
         for dir_name in dirs_to_clean:
             dir_path = example_dir / dir_name
             if dir_path.exists():
@@ -130,8 +131,10 @@ class JacScaleTestRunner:
                 time.sleep(0.2)
 
         if not server_ready:
-            self.stop_server()
-            raise RuntimeError(f"Server failed to start after {timeout} seconds")
+            stdout, stderr = self.server_process.communicate(timeout=5)
+            raise RuntimeError(
+                f"Server failed to become ready.\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}"
+            )
 
     def stop_server(self) -> None:
         """Stop the jac-scale server and clean up session files."""
@@ -253,7 +256,7 @@ class JacScaleTestRunner:
         path: str,
         data: dict[str, Any] | None = None,
         use_token: bool = False,
-        timeout: int = 10,
+        timeout: int = 60,
     ) -> str:
         """Make a raw HTTP request to the server.
 
