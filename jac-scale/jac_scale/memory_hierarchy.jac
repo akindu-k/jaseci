@@ -21,7 +21,7 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
         shelf: ShelfDB | None = None,
         redis_available: bool = False,
         mongo_available: bool = False;
-
+    
     def postinit -> None;
     def find_by_id(id: UUID) -> (Anchor | None);
     def commit(anchor: (Anchor | None) = None);
