@@ -58,6 +58,7 @@ class JacScaleTestRunner:
 
         # Clean up directories before starting
         dirs_to_clean = ["build", "dist", "node_modules", "src"]
+        dirs_to_clean = []
         for dir_name in dirs_to_clean:
             dir_path = example_dir / dir_name
             if dir_path.exists():
