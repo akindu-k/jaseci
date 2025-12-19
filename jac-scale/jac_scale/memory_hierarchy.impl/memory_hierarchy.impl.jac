@@ -380,9 +380,7 @@ impl MongoDB.close -> None {
     if self.client {
         try {
             self.client.close();
-        } except Exception {
-            
-        }
+        } except Exception { }
         self.client = None;
     }
 }
@@ -423,14 +421,12 @@ impl MultiHierarchyMemory.sync(anchors: Iterable[Anchor]) -> None {
     }
 }
 
-impl MultiHierarchyMemory.close {
+impl MultiHierarchyMemory.close{
     self.commit();
     self.mem.close();
-
     if self.mongo {
         self.mongo.close();
     }
-
     if self.shelf {
         self.shelf.close();
     }
@@ -490,15 +486,15 @@ impl MultiHierarchyMemory.find_by_id(id: UUID) -> (Anchor | None) {
     return None;
 }
 
-impl MultiHierarchyMemory.init -> None  {
-        super.init();
-        self.mem = Memory[(UUID, Anchor)]();
-        self.redis = RedisDB();
-        self.mongo = MongoDB();
-        self.shelf: (ShelfDB | None) = None;
-        self.redis_available = self.redis.redis_is_available();
-        self.mongo_available = self.mongo.mongo_is_available();
-        if (not self.redis_available and not self.mongo_available) {
-            self.shelf = ShelfDB();
-        }
+impl MultiHierarchyMemory.init -> None {
+    super.init();
+    self.mem = Memory[(UUID, Anchor)]();
+    self.redis = RedisDB();
+    self.mongo = MongoDB();
+    self.shelf: (ShelfDB | None) = None;
+    self.redis_available = self.redis.redis_is_available();
+    self.mongo_available = self.mongo.mongo_is_available();
+    if (not self.redis_available and not self.mongo_available) {
+        self.shelf = ShelfDB();
+    }
 }
