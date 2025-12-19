@@ -178,8 +178,6 @@ impl RedisDB.postinit -> None {
     }
 }
 
-
-
 impl MongoDB.commit(anchor: (TANCH | None) = None, keys: Iterable[Anchor] = []) -> None {
     if anchor {
         self.set(anchor);
@@ -346,9 +344,8 @@ impl MongoDB._to_uuid(id: (UUID | str)) -> UUID {
     return id;
 }
 
-impl MongoDB.mongo_is_available()  -> bool  {
+impl MongoDB.mongo_is_available()  -> bool {
     client = None;
-
     if (self.mongo_url) {
         try {
             client = MongoClient(self.mongo_url);
@@ -390,7 +387,6 @@ impl MultiHierarchyMemory.<>set(anchor: TANCH) {
 
 impl MultiHierarchyMemory.delete(anchor: Anchor) {
     self.mem.remove(anchor.id);
-
     if self.redis_available {
         self.redis.remove(anchor);
     }
@@ -436,7 +432,6 @@ impl MultiHierarchyMemory.commit(anchor: (Anchor | None) = None) {
         }
         return;
     }
-
     for anchor in gc {
         self.delete(anchor);
         self.mem.remove_from_gc(anchor);
@@ -446,44 +441,41 @@ impl MultiHierarchyMemory.commit(anchor: (Anchor | None) = None) {
 }
 
 impl MultiHierarchyMemory.find_by_id(id: UUID) -> (Anchor | None) {
-        if (anchor := self.mem.find_by_id(id)) {
+    if (anchor := self.mem.find_by_id(id)) {
+        return anchor;
+    }
+    if (self.redis_available) {
+        if (anchor := self.redis.find_by_id(id)) {
+            self.mem.set(anchor);
             return anchor;
         }
-
-        if (self.redis_available) {
-            if (anchor := self.redis.find_by_id(id)) {
-                self.mem.set(anchor);
-                return anchor;
+    }
+    if (self.mongo_available) {
+        if (anchor := self.mongo.find_by_id(id)) {
+            self.mem.set(anchor);
+            if (self.redis_available) {
+                self.redis.set(anchor);
             }
+            return anchor;
         }
-
-        if (self.mongo_available) {
-            if (anchor := self.mongo.find_by_id(id)) {
-                self.mem.set(anchor);
-                if (self.redis_available) {
-                    self.redis.set(anchor);
-                }
-                return anchor;
-            }
-        } elif self.shelf {
-            if (anchor := self.shelf.find_by_id(id)) {
-                self.mem.set(anchor);
-                return anchor;
-            }
+    } elif self.shelf {
+        if (anchor := self.shelf.find_by_id(id)) {
+            self.mem.set(anchor);
+            return anchor;
         }
-
-        return None;
+    }
+    return None;
 }
 
 impl MultiHierarchyMemory.init -> None {
-        super.init();
-        self.mem = Memory[(UUID, Anchor)]();
-        self.redis = RedisDB();
-        self.mongo = MongoDB();
-        self.shelf: (ShelfDB | None) = None;
-        self.redis_available = self.redis.redis_is_available();
-        self.mongo_available = self.mongo.mongo_is_available();
-        if (not self.redis_available and not self.mongo_available) {
-            self.shelf = ShelfDB();
-        }
+    super.init();
+    self.mem = Memory[(UUID, Anchor)]();
+    self.redis = RedisDB();
+    self.mongo = MongoDB();
+    self.shelf: (ShelfDB | None) = None;
+    self.redis_available = self.redis.redis_is_available();
+    self.mongo_available = self.mongo.mongo_is_available();
+    if (not self.redis_available and not self.mongo_available) {
+        self.shelf = ShelfDB();
+    }
 }
