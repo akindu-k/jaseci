@@ -381,7 +381,7 @@ impl MongoDB.close -> None {
         try {
             self.client.close();
         } except Exception {
-            pass;
+            
         }
         self.client = None;
     }
@@ -490,15 +490,15 @@ impl MultiHierarchyMemory.find_by_id(id: UUID) -> (Anchor | None) {
     return None;
 }
 
-impl MultiHierarchyMemory.postinit -> None {
-    super.init();
-    self.mem = Memory[(UUID, Anchor)]();
-    self.redis = RedisDB();
-    self.mongo = MongoDB();
-    self.shelf: (ShelfDB | None) = None;
-    self.redis_available = self.redis.redis_is_available();
-    self.mongo_available = self.mongo.mongo_is_available();
-    if (not self.redis_available and not self.mongo_available) {
-        self.shelf = ShelfDB();
-    }
+impl MultiHierarchyMemory.init -> None  {
+        super.init();
+        self.mem = Memory[(UUID, Anchor)]();
+        self.redis = RedisDB();
+        self.mongo = MongoDB();
+        self.shelf: (ShelfDB | None) = None;
+        self.redis_available = self.redis.redis_is_available();
+        self.mongo_available = self.mongo.mongo_is_available();
+        if (not self.redis_available and not self.mongo_available) {
+            self.shelf = ShelfDB();
+        }
 }

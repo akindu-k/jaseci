@@ -15,14 +15,15 @@ import from jaclang.runtimelib.memory { Memory }
 glob ID = TypeVar('ID');
 
 obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
-    has mem: Memory[(UUID, Anchor)] | None = None,
-        redis: RedisDB | None = None,
-        mongo: MongoDB | None = None,
-        shelf: ShelfDB | None = None,
-        redis_available: bool = False,
-        mongo_available: bool = False;
     
-    def postinit -> None;
+    # has mem: Memory[(UUID, Anchor)] | None = None,
+    #     redis: RedisDB | None = None,
+    #     mongo: MongoDB | None = None,
+    #     shelf: ShelfDB | None = None,
+    #     redis_available: bool = False,
+    #     mongo_available: bool = False;
+    
+    def init -> None;
     def find_by_id(id: UUID) -> (Anchor | None);
     def commit(anchor: (Anchor | None) = None);
     def close;
@@ -30,6 +31,8 @@ obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
     def delete(anchor: Anchor);
     def <>set(anchor: TANCH);
 }
+
+
 
 """MongoDB handler."""
 obj MongoDB {
