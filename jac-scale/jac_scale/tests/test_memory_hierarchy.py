@@ -1,10 +1,3 @@
-import warnings
-
-warnings.filterwarnings(
-    "ignore", category=DeprecationWarning, module="testcontainers.*"
-)
-warnings.filterwarnings("ignore", message=".*wait_container_is_ready.*")
-
 import contextlib
 import os
 import pickle
@@ -13,13 +6,14 @@ import tempfile
 from dataclasses import dataclass, field
 from unittest.mock import MagicMock, Mock, patch
 from uuid import UUID, uuid4
+import time
 
 import pytest
 import redis
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
-from testcontainers.mongodb import MongoDbContainer
-from testcontainers.redis import RedisContainer
+
+import docker
 
 from jac_scale.memory_hierarchy import (
     MongoDB,
@@ -484,35 +478,73 @@ class TestMultiHierarchyMemory:
 @pytest.fixture(scope="module")
 def real_containers():
     """
-    Spins up Docker containers for Redis and MongoDB.
+    Spins up Docker containers for Redis and MongoDB using docker-py directly.
     Scope='module' means they run once for all tests in this file.
     """
-    import warnings
+    client = docker.from_env()
+    
+    try:
+        redis_container = client.containers.run(
+            "redis:latest",
+            ports={'6379/tcp': None},
+            detach=True,
+            remove=True
+        )
+        
+        redis_container.reload()
+        redis_port = redis_container.ports['6379/tcp'][0]['HostPort']
+        redis_host = "localhost"
+        redis_url = f"redis://{redis_host}:{redis_port}/0"
+        
+        redis_client = redis.Redis(host=redis_host, port=int(redis_port))
+        for _ in range(30):  # Wait up to 30 seconds
+            try:
+                redis_client.ping()
+                break
+            except Exception:
+                time.sleep(1)
+        else:
+            raise RuntimeError("Redis container did not start in time")
+        
+        mongo_container = client.containers.run(
+            "mongo:latest",
+            ports={'27017/tcp': None},
+            detach=True,
+            remove=True
+        )
+        
+        mongo_container.reload()
+        mongo_port = mongo_container.ports['27017/tcp'][0]['HostPort']
+        mongo_host = "localhost"
+        mongo_url = f"mongodb://{mongo_host}:{mongo_port}"
+        
+        for _ in range(30):  # Wait up to 30 seconds
+            try:
+                mongo_client = MongoClient(mongo_url, serverSelectionTimeoutMS=1000)
+                mongo_client.admin.command('ping')
+                break
+            except Exception:
+                time.sleep(1)
+        else:
+            raise RuntimeError("MongoDB container did not start in time")
 
-    redis_c = RedisContainer("redis:latest")
-    mongo_c = MongoDbContainer("mongo:latest")
+        yield {
+            "redis_url": redis_url,
+            "mongo_url": mongo_url,
+            "redis_client": redis_client,
+            "mongo_client": mongo_client,
+        }
 
-    # This prevents the "wait_for_logs" error from crashing the test suite
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", category=DeprecationWarning)
-        redis_c.start()
-        mongo_c.start()
-
-    redis_host = redis_c.get_container_host_ip()
-    redis_port = redis_c.get_exposed_port(6379)
-    redis_url = f"redis://{redis_host}:{redis_port}/0"
-
-    mongo_url = mongo_c.get_connection_url()
-
-    yield {
-        "redis_url": redis_url,
-        "mongo_url": mongo_url,
-        "redis_client": redis.Redis(host=redis_host, port=redis_port),
-        "mongo_client": MongoClient(mongo_url),
-    }
-
-    redis_c.stop()
-    mongo_c.stop()
+    finally:
+        # Cleanup containers
+        try:
+            redis_container.stop()
+        except Exception:
+            pass
+        try:
+            mongo_container.stop()
+        except Exception:
+            pass
 
 
 class TestIntegrationWorkflow:
@@ -529,6 +561,7 @@ class TestIntegrationWorkflow:
         self.verify_mongo.drop_database("jac_db")
 
         self.memory = MultiHierarchyMemory()
+
 
         self.memory.mem = MagicMock()
         self.l1_store = {}  # to simulate RAM
