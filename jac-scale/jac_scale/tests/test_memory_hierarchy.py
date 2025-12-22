@@ -1,15 +1,15 @@
 import warnings
 
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="testcontainers.*")
+warnings.filterwarnings(
+    "ignore", category=DeprecationWarning, module="testcontainers.*"
+)
 warnings.filterwarnings("ignore", message=".*wait_container_is_ready.*")
 
 import contextlib
 import os
+import pickle
 import shutil
 import tempfile
-import pickle
-import shelve
-import dbm.dumb
 from dataclasses import dataclass, field
 from unittest.mock import MagicMock, Mock, patch
 from uuid import UUID, uuid4
@@ -18,8 +18,8 @@ import pytest
 import redis
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
-from testcontainers.redis import RedisContainer
 from testcontainers.mongodb import MongoDbContainer
+from testcontainers.redis import RedisContainer
 
 from jac_scale.memory_hierarchy import (
     MongoDB,
@@ -32,13 +32,15 @@ from jac_scale.memory_hierarchy import (
 @dataclass(frozen=True)
 class MockAnchor:
     """mock anchor for testing"""
+
     id: UUID
     data: str = "test_data"
     archetype: tuple = field(default_factory=tuple)
     access: tuple = field(default_factory=tuple)
     edges: tuple = field(default_factory=tuple)
     persistent: bool = True
-    hash: int = field(default=1) 
+    hash: int = field(default=1)
+
 
 class TestShelfDB:
     def setup_method(self) -> None:
@@ -277,7 +279,9 @@ class TestMultiHierarchyMemory:
                 mock_redis_class.return_value = self.mock_redis
                 with patch("jac_scale.memory_hierarchy.MongoDB") as mock_mongo_class:
                     mock_mongo_class.return_value = self.mock_mongo
-                    with patch("jac_scale.memory_hierarchy.ShelfDB") as mock_shelf_class:
+                    with patch(
+                        "jac_scale.memory_hierarchy.ShelfDB"
+                    ) as mock_shelf_class:
                         mock_shelf_class.return_value = self.mock_shelf
                         test_memory = MultiHierarchyMemory()
         assert test_memory.shelf == self.mock_shelf
@@ -483,7 +487,7 @@ def real_containers():
     Spins up Docker containers for Redis and MongoDB.
     Scope='module' means they run once for all tests in this file.
     """
-    import warnings 
+    import warnings
 
     redis_c = RedisContainer("redis:latest")
     mongo_c = MongoDbContainer("mongo:latest")
@@ -504,7 +508,7 @@ def real_containers():
         "redis_url": redis_url,
         "mongo_url": mongo_url,
         "redis_client": redis.Redis(host=redis_host, port=redis_port),
-        "mongo_client": MongoClient(mongo_url)
+        "mongo_client": MongoClient(mongo_url),
     }
 
     redis_c.stop()
@@ -512,128 +516,137 @@ def real_containers():
 
 
 class TestIntegrationWorkflow:
-    
     @pytest.fixture(autouse=True)
     def setup_env(self, monkeypatch, real_containers):
-        
         # add the URLs to env
         monkeypatch.setenv("REDIS_URL", real_containers["redis_url"])
         monkeypatch.setenv("MONGODB_URI", real_containers["mongo_url"])
-        
+
         self.verify_redis = real_containers["redis_client"]
         self.verify_mongo = real_containers["mongo_client"]
-        
+
         self.verify_redis.flushall()
         self.verify_mongo.drop_database("jac_db")
-        
+
         self.memory = MultiHierarchyMemory()
-        
+
         self.memory.mem = MagicMock()
-        self.l1_store = {} # to simulate RAM
-        
+        self.l1_store = {}  # to simulate RAM
+
         def mock_set(anchor):
             self.l1_store[anchor.id] = anchor
-            
+
         def mock_get(anchor_id):
             return self.l1_store.get(anchor_id)
-        
+
         def mock_remove(anchor_id):
             self.l1_store.pop(anchor_id, None)
-        
+
         self.memory.mem.set.side_effect = mock_set
         self.memory.mem.find_by_id.side_effect = mock_get
         self.memory.mem.remove.side_effect = mock_remove
-        self.memory.mem.get_gc.return_value = set() # nothing in Garbage collector
+        self.memory.mem.get_gc.return_value = set()  # nothing in Garbage collector
         self.memory.mem.get_mem.return_value = self.l1_store
-        
+
     def teardown_method(self) -> None:
         self.memory.close()
-    
+
     def test_commit_workflow(self):
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id, data="This is test data")
-        
+
         self.memory.commit(anchor)
-        
+
         # checking redis
         redis_key = f"anchor:{anchor_id}"
         assert self.verify_redis.exists(redis_key), "Data is not in Redis"
-        
+
         # chekcking mongo
-        mongo_document = self.verify_mongo["jac_db"]["anchors"].find_one({"_id": str(anchor_id)})
+        mongo_document = self.verify_mongo["jac_db"]["anchors"].find_one(
+            {"_id": str(anchor_id)}
+        )
         assert mongo_document is not None, "Data is not in MongoDB"
-        
+
         # deserializng data and checking the content
         data = pickle.loads(mongo_document["data"])
-        assert data.data == "This is test data", "Data content is not matching in MongoDB"
-        
-    def test_l3_hit(self):
+        assert data.data == "This is test data", (
+            "Data content is not matching in MongoDB"
+        )
 
+    def test_l3_hit(self):
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id, data="L3 Hit Data")
-        
+
         # storing directly in MongoDB
         serialized_data = pickle.dumps(anchor)
-        self.verify_mongo["jac_db"]["anchors"].insert_one({
-            "_id": str(anchor_id),
-            "data": serialized_data,
-            "type" : "MockAnchor"
-        })
-        
+        self.verify_mongo["jac_db"]["anchors"].insert_one(
+            {"_id": str(anchor_id), "data": serialized_data, "type": "MockAnchor"}
+        )
+
         # check L1 miss
         assert not self.verify_redis.exists(f"anchor:{anchor_id}")
-        
+
         # requesting using the memory hierarchy
         result = self.memory.find_by_id(anchor_id)
-        
+
         assert result is not None
         assert result.data == "L3 Hit Data"
         assert self.verify_redis.exists(f"anchor:{anchor_id}")
-        
+
     def test_l2_hit(self):
-        '''sabotage strategy'''
+        """sabotage strategy"""
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id, data="Cached L2 Data")
-        
+
         serialized_data = pickle.dumps(anchor)
-        self.verify_mongo["jac_db"]["anchors"].insert_one({
-            "_id": str(anchor_id),
-            "data": serialized_data,
-            "type" : "MockAnchor"
-        })
-        
-        first_retrieval = self.memory.find_by_id(anchor_id) # fetch from mongo and write to L2
+        self.verify_mongo["jac_db"]["anchors"].insert_one(
+            {"_id": str(anchor_id), "data": serialized_data, "type": "MockAnchor"}
+        )
+
+        first_retrieval = self.memory.find_by_id(
+            anchor_id
+        )  # fetch from mongo and write to L2
         assert first_retrieval.data == "Cached L2 Data"
-        
-        assert self.verify_redis.exists(f"anchor:{anchor_id}"), "data did not get written to L2"
-        
-        self.verify_mongo["jac_db"]["anchors"].delete_one({"_id": str(anchor_id)}) # remove from L3
-        
-        assert self.verify_mongo["jac_db"]["anchors"].find_one({"_id": str(anchor_id)}) is None # confirm removal
-        
+
+        assert self.verify_redis.exists(f"anchor:{anchor_id}"), (
+            "data did not get written to L2"
+        )
+
+        self.verify_mongo["jac_db"]["anchors"].delete_one(
+            {"_id": str(anchor_id)}
+        )  # remove from L3
+
+        assert (
+            self.verify_mongo["jac_db"]["anchors"].find_one({"_id": str(anchor_id)})
+            is None
+        )  # confirm removal
+
         if anchor_id in self.l1_store:
-            self.l1_store.pop(anchor_id) # remove from L1 cache
-            
-        second_retrieval = self.memory.find_by_id(anchor_id) # should fetch from L2 now
-        
+            self.l1_store.pop(anchor_id)  # remove from L1 cache
+
+        second_retrieval = self.memory.find_by_id(anchor_id)  # should fetch from L2 now
+
         assert second_retrieval is not None, "Cache Miss"
-        assert second_retrieval.data == "Cached L2 Data", "Data mismatch on L2 retrieval"
-        
-        
+        assert second_retrieval.data == "Cached L2 Data", (
+            "Data mismatch on L2 retrieval"
+        )
+
     def test_deletion(self):
         anchor_id = uuid4()
         anchor = MockAnchor(id=anchor_id)
-        
+
         self.memory.commit(anchor)
         assert self.verify_mongo["jac_db"]["anchors"].find_one({"_id": str(anchor_id)})
-        
+
         self.memory.delete(anchor)
-        
+
         assert anchor_id not in self.l1_store
         assert not self.verify_redis.exists(f"anchor:{anchor_id}")
-        assert self.verify_mongo["jac_db"]["anchors"].find_one({"_id": str(anchor_id)}) is None
-        
-        
+        assert (
+            self.verify_mongo["jac_db"]["anchors"].find_one({"_id": str(anchor_id)})
+            is None
+        )
+
 
 if __name__ == "__main__":
     pytest.main([__file__])
