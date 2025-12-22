@@ -17,6 +17,9 @@ from uuid import UUID, uuid4
 
 import pytest
 import redis
+
+import pytest
+import redis
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
 from testcontainers.mongodb import MongoDbContainer
