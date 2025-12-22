@@ -3,17 +3,17 @@ import os
 import pickle
 import shutil
 import tempfile
+import time
 from dataclasses import dataclass, field
+from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 from uuid import UUID, uuid4
-import time
 
+import docker
 import pytest
 import redis
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
-
-import docker
 
 from jac_scale.memory_hierarchy import (
     MongoDB,
@@ -482,20 +482,17 @@ def real_containers():
     Scope='module' means they run once for all tests in this file.
     """
     client = docker.from_env()
-    
+
     try:
         redis_container = client.containers.run(
-            "redis:latest",
-            ports={'6379/tcp': None},
-            detach=True,
-            remove=True
+            "redis:latest", ports={"6379/tcp": None}, detach=True, remove=True
         )
-        
+
         redis_container.reload()
-        redis_port = redis_container.ports['6379/tcp'][0]['HostPort']
+        redis_port = redis_container.ports["6379/tcp"][0]["HostPort"]
         redis_host = "localhost"
         redis_url = f"redis://{redis_host}:{redis_port}/0"
-        
+
         redis_client = redis.Redis(host=redis_host, port=int(redis_port))
         for _ in range(30):  # Wait up to 30 seconds
             try:
@@ -505,23 +502,20 @@ def real_containers():
                 time.sleep(1)
         else:
             raise RuntimeError("Redis container did not start in time")
-        
+
         mongo_container = client.containers.run(
-            "mongo:latest",
-            ports={'27017/tcp': None},
-            detach=True,
-            remove=True
+            "mongo:latest", ports={"27017/tcp": None}, detach=True, remove=True
         )
-        
+
         mongo_container.reload()
-        mongo_port = mongo_container.ports['27017/tcp'][0]['HostPort']
+        mongo_port = mongo_container.ports["27017/tcp"][0]["HostPort"]
         mongo_host = "localhost"
         mongo_url = f"mongodb://{mongo_host}:{mongo_port}"
-        
+
         for _ in range(30):  # Wait up to 30 seconds
             try:
                 mongo_client = MongoClient(mongo_url, serverSelectionTimeoutMS=1000)
-                mongo_client.admin.command('ping')
+                mongo_client.admin.command("ping")
                 break
             except Exception:
                 time.sleep(1)
@@ -537,19 +531,17 @@ def real_containers():
 
     finally:
         # Cleanup containers
-        try:
+        with contextlib.suppress(Exception):
             redis_container.stop()
-        except Exception:
-            pass
-        try:
+        with contextlib.suppress(Exception):
             mongo_container.stop()
-        except Exception:
-            pass
 
 
 class TestIntegrationWorkflow:
     @pytest.fixture(autouse=True)
-    def setup_env(self, monkeypatch, real_containers):
+    def setup_env(
+        self, monkeypatch: pytest.MonkeyPatch, real_containers: dict[str, Any]
+    ) -> None:
         # add the URLs to env
         monkeypatch.setenv("REDIS_URL", real_containers["redis_url"])
         monkeypatch.setenv("MONGODB_URI", real_containers["mongo_url"])
@@ -562,17 +554,16 @@ class TestIntegrationWorkflow:
 
         self.memory = MultiHierarchyMemory()
 
-
         self.memory.mem = MagicMock()
-        self.l1_store = {}  # to simulate RAM
+        self.l1_store: dict[UUID, MockAnchor] = {}  # to simulate RAM
 
-        def mock_set(anchor):
+        def mock_set(anchor: MockAnchor) -> None:
             self.l1_store[anchor.id] = anchor
 
-        def mock_get(anchor_id):
+        def mock_get(anchor_id: UUID) -> MockAnchor | None:
             return self.l1_store.get(anchor_id)
 
-        def mock_remove(anchor_id):
+        def mock_remove(anchor_id: UUID) -> None:
             self.l1_store.pop(anchor_id, None)
 
         self.memory.mem.set.side_effect = mock_set
