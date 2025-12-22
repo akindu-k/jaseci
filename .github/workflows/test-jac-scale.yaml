@@ -30,7 +30,6 @@ jobs:
           pip install pytest
           pip install pytest-asyncio
           pip install -e jac-client
-          pip install testcontainers[redis,mongodb]
 
       - name: Run Backend tests
         run: |
