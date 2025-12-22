@@ -1,4 +1,8 @@
-"""Functions that operate on Type objects.\n\nPyrightReference: packages/pyright-internal/src/analyzer/typeUtils.ts\n"""
+"""
+Functions that operate on Type objects.
+
+PyrightReference: packages/pyright-internal/src/analyzer/typeUtils.ts
+"""
 import from dataclasses { dataclass }
 import from enum { Enum }
 import jaclang.pycore.unitree as uni;
@@ -7,12 +11,23 @@ import from jaclang.pycore.unitree { Symbol }
 import from . { types }
 """Represents a member of a class."""
 class ClassMember {
-    def init(self: ClassMember, symbol: Symbol, class_type: types.ClassType) -> None;
+    def init(
+        self: ClassMember,
+        symbol: Symbol,
+        class_type: types.ClassType,
+        overloads: list[Symbol]
+    ) -> None;
 }
 
 def compute_mro_linearization(cls: types.ClassType) -> None;
 
-"""Tracks parameter assignments for function calls.\n\n    This class helps in tracking which parameters have been matched\n    with arguments in a function call. It supports positional, named,\n    *args, and **kwargs arguments.\n    """
+"""
+Tracks parameter assignments for function calls.
+
+    This class helps in tracking which parameters have been matched
+    with arguments in a function call. It supports positional, named,
+    *args, and **kwargs arguments.
+"""
 class ParamAssignmentTracker {
     def init(self: ParamAssignmentTracker, params: list[types.Parameter]) -> None;
     def lookup_named_parameter(
@@ -37,11 +52,9 @@ class ParamAssignmentTracker {
 """A completion item."""
 @dataclass
 class CompletionItem {
-    with entry {
-        label: str;
-        kind: int;
+    has label: str,
+        kind: int,
         detail: (str | None) = None;
-    }
 }
 
 """The kind of a completion entry."""

@@ -3,7 +3,6 @@
 This module provides a LLM class that abstracts LiteLLM and offers
 enhanced functionality and interface for language model operations.
 """
-
 import logging;
 import from loguru { logger }
 import os;
@@ -33,9 +32,8 @@ with entry {
     os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True";
 }
 
-glob
-    DEFAULT_BASE_URL = "http://localhost:4000",
-    MODEL_MOCK = "mockllm";
+glob DEFAULT_BASE_URL = "http://localhost:4000",
+     MODEL_MOCK = "mockllm";
 
 """Base class for LLM implementations.
 

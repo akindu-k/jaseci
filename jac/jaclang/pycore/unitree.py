@@ -36,7 +36,7 @@ from jaclang.pycore.constant import (
     JacSemTokenType as SemTokType,
 )
 from jaclang.pycore.constant import Tokens as Tok
-from jaclang.pycore.module_resolver import resolve_relative_path
+from jaclang.pycore.modresolver import resolve_relative_path
 
 if TYPE_CHECKING:
     from jaclang.compiler.type_system.types import TypeBase
@@ -350,6 +350,7 @@ class UniScopeNode(UniNode):
         self.parent_scope = parent_scope
         self.kid_scope: list[UniScopeNode] = []
         self.names_in_scope: dict[str, Symbol] = {}
+        self.names_in_scope_overload: dict[str, list[Symbol]] = {}
         self.inherited_scope: list[InheritedSymbolTable] = []
 
     def get_type(self) -> SymbolType:
@@ -418,18 +419,24 @@ class UniScopeNode(UniNode):
             if single and node.sym_name in self.names_in_scope
             else None
         )
+
+        symbol = node.name_spec.create_symbol(
+            access=(
+                access_spec
+                if isinstance(access_spec, SymbolAccess)
+                else access_spec.access_type
+                if access_spec
+                else SymbolAccess.PUBLIC
+            ),
+            parent_tab=self,
+            imported=imported,
+        )
+
+        if node.sym_name in self.names_in_scope:
+            self.names_in_scope_overload.setdefault(node.sym_name, []).append(symbol)
+
         if force_overwrite or node.sym_name not in self.names_in_scope:
-            self.names_in_scope[node.sym_name] = node.name_spec.create_symbol(
-                access=(
-                    access_spec
-                    if isinstance(access_spec, SymbolAccess)
-                    else access_spec.access_type
-                    if access_spec
-                    else SymbolAccess.PUBLIC
-                ),
-                parent_tab=self,
-                imported=imported,
-            )
+            self.names_in_scope[node.sym_name] = symbol
         else:
             self.names_in_scope[node.sym_name].add_defn(node.name_spec)
         node.name_spec.sym = self.names_in_scope[node.sym_name]
@@ -1004,12 +1011,22 @@ class Module(AstDocNode, UniScopeNode):
             or self.loc.mod_path.endswith(".test.jac")
             or self.loc.mod_path.endswith(".cl.jac")
         ):
+
+            def existing_base_path(dir_path: str, stem: str) -> str | None:
+                jac_path = os.path.join(dir_path, f"{stem}.jac")
+                cl_path = os.path.join(dir_path, f"{stem}.cl.jac")
+                if os.path.exists(jac_path) and jac_path != self.loc.mod_path:
+                    return jac_path
+                if os.path.exists(cl_path) and cl_path != self.loc.mod_path:
+                    return cl_path
+                return None
+
             head_mod_name = self.name.split(".")[0]
-            potential_path = os.path.join(
+            potential_path = existing_base_path(
                 os.path.dirname(self.loc.mod_path),
-                f"{head_mod_name}.jac",
+                head_mod_name,
             )
-            if os.path.exists(potential_path) and potential_path != self.loc.mod_path:
+            if potential_path:
                 return potential_path
             annex_dir = os.path.split(os.path.dirname(self.loc.mod_path))[-1]
             if (
@@ -1020,14 +1037,11 @@ class Module(AstDocNode, UniScopeNode):
                 head_mod_name = os.path.split(os.path.dirname(self.loc.mod_path))[
                     -1
                 ].split(".")[0]
-                potential_path = os.path.join(
+                potential_path = existing_base_path(
                     os.path.dirname(os.path.dirname(self.loc.mod_path)),
-                    f"{head_mod_name}.jac",
+                    head_mod_name,
                 )
-                if (
-                    os.path.exists(potential_path)
-                    and potential_path != self.loc.mod_path
-                ):
+                if potential_path:
                     return potential_path
         return None
 
@@ -1269,8 +1283,10 @@ class ClientBlock(ElementStmt):
         self,
         body: Sequence[ElementStmt],
         kid: Sequence[UniNode],
+        implicit: bool = False,
     ) -> None:
         self.body = list(body)
+        self.implicit = implicit
         UniNode.__init__(self, kid=kid)
 
     def normalize(self, deep: bool = False) -> bool:
@@ -1279,11 +1295,24 @@ class ClientBlock(ElementStmt):
             for stmt in self.body:
                 res = res and stmt.normalize(deep)
         new_kid: list[UniNode] = []
-        new_kid.append(self.gen_token(Tok.KW_CLIENT))
-        new_kid.append(self.gen_token(Tok.LBRACE))
-        for stmt in self.body:
-            new_kid.append(stmt)
-        new_kid.append(self.gen_token(Tok.RBRACE))
+        parent_mod = self.find_parent_of_type(Module)
+        is_implicit_top_level_cl_module = (
+            self.implicit
+            and parent_mod is not None
+            and parent_mod.loc.mod_path.endswith(".cl.jac")
+            and parent_mod.body == [self]
+        )
+        if is_implicit_top_level_cl_module:
+            if self.body:
+                new_kid.extend(self.body)
+            else:
+                new_kid.append(EmptyToken())
+        else:
+            new_kid.append(self.gen_token(Tok.KW_CLIENT))
+            new_kid.append(self.gen_token(Tok.LBRACE))
+            for stmt in self.body:
+                new_kid.append(stmt)
+            new_kid.append(self.gen_token(Tok.RBRACE))
         self.set_kids(nodes=new_kid)
         return res
 
@@ -1359,22 +1388,29 @@ class Import(ClientFacingNode, ElementStmt, CodeBlockStmt):
     def __jac_detected(self) -> bool:
         """Check if import is jac."""
         if self.from_loc:
-            if self.from_loc.resolve_relative_path().endswith(".jac"):
+            if self.from_loc.resolve_relative_path().endswith((".jac", ".cl.jac")):
                 return True
             if os.path.isdir(self.from_loc.resolve_relative_path()):
                 if os.path.exists(
                     os.path.join(self.from_loc.resolve_relative_path(), "__init__.jac")
                 ):
                     return True
+                if os.path.exists(
+                    os.path.join(
+                        self.from_loc.resolve_relative_path(), "__init__.cl.jac"
+                    )
+                ):
+                    return True
                 for i in self.items:
                     if isinstance(
                         i, ModuleItem
                     ) and self.from_loc.resolve_relative_path(i.name.value).endswith(
-                        ".jac"
+                        (".jac", ".cl.jac")
                     ):
                         return True
         return any(
-            isinstance(i, ModulePath) and i.resolve_relative_path().endswith(".jac")
+            isinstance(i, ModulePath)
+            and i.resolve_relative_path().endswith((".jac", ".cl.jac"))
             for i in self.items
         )
 
@@ -1459,10 +1495,13 @@ class ModulePath(UniNode):
             runtime_dir = os.path.dirname(jaclang.runtimelib.__file__)
             # Handle both .jac and .js file extensions
             if not (target.endswith(".jac") or target.endswith(".js")):
-                # Try .jac first, then .js
+                # Try .jac first, then .cl.jac, then .js
                 jac_path = os.path.join(runtime_dir, target + ".jac")
                 if os.path.exists(jac_path):
                     return jac_path
+                cl_jac_path = os.path.join(runtime_dir, target + ".cl.jac")
+                if os.path.exists(cl_jac_path):
+                    return cl_jac_path
                 js_path = os.path.join(runtime_dir, target + ".js")
                 if os.path.exists(js_path):
                     return js_path
@@ -5177,6 +5216,8 @@ class SpecialVarRef(Name):
     def py_resolve_name(self) -> str:
         if self.orig.name == Tok.KW_SELF:
             return "self"
+        if self.orig.name == Tok.KW_PROPS:
+            return "props"
         elif self.orig.name == Tok.KW_SUPER:
             return "super"
         elif self.orig.name == Tok.KW_ROOT:

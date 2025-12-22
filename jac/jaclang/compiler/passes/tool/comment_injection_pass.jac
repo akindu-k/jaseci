@@ -1,4 +1,12 @@
-"""Pass to inject comments using token-level precision.\n\nThis pass injects comments into the DocIR structure by:\n1. Categorizing comments as inline (same line as token) or standalone\n2. Injecting inline comments after their anchor tokens\n3. Injecting standalone comments at appropriate positions (module, body, params)\n4. Handling spacing adjustments for empty structures that receive comments\n"""
+"""
+Pass to inject comments using token-level precision.
+
+This pass injects comments into the DocIR structure by:
+1. Categorizing comments as inline (same line as token) or standalone
+2. Injecting inline comments after their anchor tokens
+3. Injecting standalone comments at appropriate positions (module, body, params)
+4. Handling spacing adjustments for empty structures that receive comments
+"""
 import from bisect { bisect_left }
 import from collections.abc { Sequence }
 import from dataclasses { dataclass }
@@ -9,22 +17,18 @@ import from jaclang.pycore.constant { Tokens as Tok }
 import from jaclang.pycore.passes { Transform }
 """Information about a pair of delimiters and their positions."""
 class DelimiterInfo(NamedTuple) {
-    with entry {
-        open_idx: int;
-        close_idx: int;
-        open_line: int;
+    has open_idx: int,
+        close_idx: int,
+        open_line: int,
         close_line: int;
-    }
 }
 
 """Rich metadata about a source comment."""
 @dataclass(slots=True)
 class CommentInfo {
-    with entry {
-        index: int;
-        token: uni.CommentToken;
+    has index: int,
+        token: uni.CommentToken,
         anchor_token_id: (int | None);
-    }
 
     @property
     def is_inline(self: CommentInfo) -> bool;
@@ -57,7 +61,13 @@ class CommentStore {
     def drain_unattached(self: CommentStore) -> list[CommentInfo];
 }
 
-"""Injects comments using token sequence analysis for perfect precision.\n\n    Uses src_terminals to detect inline vs standalone comments, then\n    injects them using source_token annotations with automatic duplicate\n    line collapsing.\n    """
+"""
+Injects comments using token sequence analysis for perfect precision.
+
+    Uses src_terminals to detect inline vs standalone comments, then
+    injects them using source_token annotations with automatic duplicate
+    line collapsing.
+"""
 class CommentInjectionPass(Transform[(uni.Module, uni.Module)]) {
     def transform(self: CommentInjectionPass, ir_in: uni.Module) -> uni.Module;
     def _process(

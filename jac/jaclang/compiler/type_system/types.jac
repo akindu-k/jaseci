@@ -22,11 +22,24 @@ class TypeCategory(IntEnum) {
         TypeVar = auto();
         Class = auto();
         Function = auto();
+        Overload = auto();
         Union = auto();
     }
 }
 
-"""Flags to set on a type.\n\n    foo = 42  # <-- Here type of foo is `int` class, Instance type.\n    foo = int # <-- Here type of foo is `type[int]`, Instantiable is set.\n    foo: int = 42\n         ^^^------- Here the type of the expression `int` is `type[int]`\n                    That is same as the prefetched int_class that has the\n                    flag Instantiable set.\n\n                    calling convertToInstance() will return the same type\n                    with Instance flag set.\n    """
+"""
+Flags to set on a type.
+
+    foo = 42  # <-- Here type of foo is `int` class, Instance type.
+    foo = int # <-- Here type of foo is `type[int]`, Instantiable is set.
+    foo: int = 42
+         ^^^------- Here the type of the expression `int` is `type[int]`
+                    That is same as the prefetched int_class that has the
+                    flag Instantiable set.
+
+                    calling convertToInstance() will return the same type
+                    with Instance flag set.
+"""
 class TypeFlags(IntEnum) {
     with entry {
         Null = 0;
@@ -45,7 +58,13 @@ class ParameterCategory(IntEnum) {
     }
 }
 
-"""Maps to pyright's TypeBase<T> in the types.ts file.\n\n    This is the base class for all type instance of the jaclang that holds\n    information about the type's category and any additional metadata and\n    utilities to analyze type information and provide type checking.\n    """
+"""
+Maps to pyright's TypeBase<T> in the types.ts file.
+
+    This is the base class for all type instance of the jaclang that holds
+    information about the type's category and any additional metadata and
+    utilities to analyze type information and provide type checking.
+"""
 class TypeBase(ABC) {
     with entry {
         CATEGORY: ClassVar[TypeCategory];
@@ -116,7 +135,13 @@ class ClassType(TypeBase) {
         CATEGORY: ClassVar[TypeCategory] = TypeCategory.Class;
     }
 
-    """Holds the shared details of class type.\n\n        The shared detail of classes will points to the same instance across multiple clones\n        of the same class. This is needed when we do `==` between two classes, if they have the\n        same shared object, that means they both are the same class (with different context).\n        """
+    """
+Holds the shared details of class type.
+
+        The shared detail of classes will points to the same instance across multiple clones
+        of the same class. This is needed when we do `==` between two classes, if they have the
+        same shared object, that means they both are the same class (with different context).
+    """
     class ClassDetailsShared {
         def init(
             self: ClassDetailsShared,
@@ -131,7 +156,11 @@ class ClassType(TypeBase) {
         ) -> None;
     }
 
-    """Holds the private details of class type.\n\n        The private details of classes will be unique to each class instance.\n        """
+    """
+Holds the private details of class type.
+
+        The private details of classes will be unique to each class instance.
+    """
     class ClassDetailsPrivate {
         def init(
             self: ClassDetailsPrivate, type_args: (list[TypeBase] | None) = None
@@ -150,7 +179,10 @@ class ClassType(TypeBase) {
     def clone_as_class(self: ClassType) -> ClassType;
     def specialize_generics(self: ClassType, type_args: list[TypeBase]) -> ClassType;
     def get_class_symbol(self: ClassType) -> Symbol;
-    def lookup_member_symbol(self: ClassType, member: str) -> (Symbol | None);
+    def lookup_member_symbol(
+        self: ClassType, member: str, r_overloaded: list | None = None
+    ) -> (Symbol | None);
+
     def is_builtin(self: ClassType, class_name: (str | None) = None) -> bool;
     def is_data_class(self: ClassType) -> bool;
     def is_edge_type(self: ClassType) -> bool;
@@ -177,6 +209,7 @@ class Parameter {
         param_type: (TypeBase | None),
         default_value: (Expr | None) = None,
         is_self: bool = False,
+        is_cls: bool = False,
         param_kind: ParamKind = ParamKind.NORMAL
     ) -> None;
 }
@@ -199,6 +232,15 @@ class FunctionType(TypeBase) {
     def _index_of_type_param(
         self: FunctionType, class_type: ClassType, type_var: TypeVarType
     ) -> int;
+}
+
+"""Represents an overloaded type."""
+class OverloadedType(TypeBase) {
+    with entry {
+        CATEGORY: ClassVar[TypeCategory] = TypeCategory.Overload;
+    }
+
+    def init(self: OverloadedType, overloads: list[FunctionType]) -> None;
 }
 
 """Represents a union type."""

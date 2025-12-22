@@ -1,4 +1,24 @@
-"""ECMAScript AST Generation Pass for the Jac compiler.\n\nThis pass transforms the Jac AST into equivalent ECMAScript AST following\nthe ESTree specification by:\n\n1. Traversing the Jac AST and generating corresponding ESTree nodes\n2. Handling all Jac language constructs and translating them to JavaScript/ECMAScript equivalents:\n   - Classes, functions, and methods\n   - Control flow statements (if/else, loops, try/catch)\n   - Data structures (arrays, objects)\n   - Special Jac features (walkers, abilities, archetypes) converted to JS classes\n   - Data spatial operations converted to appropriate JS patterns\n\n3. Managing imports and module dependencies\n4. Preserving source location information\n5. Generating valid ECMAScript code that can be executed in JavaScript environments\n\nThe output of this pass is a complete ESTree AST representation that can be\nserialized to JavaScript source code or used by JavaScript tooling.\n"""
+"""
+ECMAScript AST Generation Pass for the Jac compiler.
+
+This pass transforms the Jac AST into equivalent ECMAScript AST following
+the ESTree specification by:
+
+1. Traversing the Jac AST and generating corresponding ESTree nodes
+2. Handling all Jac language constructs and translating them to JavaScript/ECMAScript equivalents:
+   - Classes, functions, and methods
+   - Control flow statements (if/else, loops, try/catch)
+   - Data structures (arrays, objects)
+   - Special Jac features (walkers, abilities, archetypes) converted to JS classes
+   - Data spatial operations converted to appropriate JS patterns
+
+3. Managing imports and module dependencies
+4. Preserving source location information
+5. Generating valid ECMAScript code that can be executed in JavaScript environments
+
+The output of this pass is a complete ESTree AST representation that can be
+serialized to JavaScript source code or used by JavaScript tooling.
+"""
 import from __future__ { annotations }
 import json;
 import from collections.abc { Callable, Sequence }
@@ -11,112 +31,101 @@ import from jaclang.pycore.constant { SymbolType }
 import from jaclang.pycore.constant { Tokens as Tok }
 import from jaclang.pycore.passes.ast_gen { BaseAstGenPass }
 import from jaclang.pycore.passes.ast_gen.jsx_processor { EsJsxProcessor }
-import from jaclang.pycore.module_resolver {
+import from jaclang.pycore.modresolver {
     convert_to_js_import_path,
     resolve_relative_path
 }
 
-glob
-    _T = TypeVar('_T', bound=es.Node),
-    ES_LOGICAL_OPS: dict[(Tok, str)] = {Tok.KW_AND: '&&', Tok.KW_OR: '||'},
-    ES_BINARY_OPS: dict[(Tok, str)] = {
-        Tok.EE: '===',
-        Tok.NE: '!==',
-        Tok.LT: '<',
-        Tok.GT: '>',
-        Tok.LTE: '<=',
-        Tok.GTE: '>=',
-        Tok.PLUS: '+',
-        Tok.MINUS: '-',
-        Tok.STAR_MUL: '*',
-        Tok.DIV: '/',
-        Tok.MOD: '%',
-        Tok.BW_AND: '&',
-        Tok.BW_OR: '|',
-        Tok.BW_XOR: '^',
-        Tok.LSHIFT: '<<',
-        Tok.RSHIFT: '>>'
-    },
-    ES_COMPARISON_OPS: dict[(Tok, str)] = {
-        Tok.EE: '===',
-        Tok.NE: '!==',
-        Tok.LT: '<',
-        Tok.GT: '>',
-        Tok.LTE: '<=',
-        Tok.GTE: '>=',
-        Tok.KW_IN: 'in',
-        Tok.KW_NIN: 'in'
-    },
-    ES_UNARY_OPS: dict[(Tok, str)] = {
-        Tok.MINUS: '-',
-        Tok.PLUS: '+',
-        Tok.NOT: '!',
-        Tok.BW_NOT: '~'
-    },
-    ES_AUG_ASSIGN_OPS: dict[(Tok, str)] = {
-        Tok.ADD_EQ: '+=',
-        Tok.SUB_EQ: '-=',
-        Tok.MUL_EQ: '*=',
-        Tok.DIV_EQ: '/=',
-        Tok.MOD_EQ: '%=',
-        Tok.BW_AND_EQ: '&=',
-        Tok.BW_OR_EQ: '|=',
-        Tok.BW_XOR_EQ: '^=',
-        Tok.LSHIFT_EQ: '<<=',
-        Tok.RSHIFT_EQ: '>>=',
-        Tok.STAR_POW_EQ: '**='
-    },
-    LiteralValue = str | bool | int | float | None;
+glob _T = TypeVar('_T', bound=es.Node),
+     ES_LOGICAL_OPS: dict[(Tok, str)] = {Tok.KW_AND: '&&', Tok.KW_OR: '||'},
+     ES_BINARY_OPS: dict[(Tok, str)] = {
+         Tok.EE: '===',
+         Tok.NE: '!==',
+         Tok.LT: '<',
+         Tok.GT: '>',
+         Tok.LTE: '<=',
+         Tok.GTE: '>=',
+         Tok.PLUS: '+',
+         Tok.MINUS: '-',
+         Tok.STAR_MUL: '*',
+         Tok.DIV: '/',
+         Tok.MOD: '%',
+         Tok.BW_AND: '&',
+         Tok.BW_OR: '|',
+         Tok.BW_XOR: '^',
+         Tok.LSHIFT: '<<',
+         Tok.RSHIFT: '>>'
+     },
+     ES_COMPARISON_OPS: dict[(Tok, str)] = {
+         Tok.EE: '===',
+         Tok.NE: '!==',
+         Tok.LT: '<',
+         Tok.GT: '>',
+         Tok.LTE: '<=',
+         Tok.GTE: '>=',
+         Tok.KW_IN: 'in',
+         Tok.KW_NIN: 'in'
+     },
+     ES_UNARY_OPS: dict[(Tok, str)] = {
+         Tok.MINUS: '-',
+         Tok.PLUS: '+',
+         Tok.NOT: '!',
+         Tok.BW_NOT: '~'
+     },
+     ES_AUG_ASSIGN_OPS: dict[(Tok, str)] = {
+         Tok.ADD_EQ: '+=',
+         Tok.SUB_EQ: '-=',
+         Tok.MUL_EQ: '*=',
+         Tok.DIV_EQ: '/=',
+         Tok.MOD_EQ: '%=',
+         Tok.BW_AND_EQ: '&=',
+         Tok.BW_OR_EQ: '|=',
+         Tok.BW_XOR_EQ: '^=',
+         Tok.LSHIFT_EQ: '<<=',
+         Tok.RSHIFT_EQ: '>>=',
+         Tok.STAR_POW_EQ: '**='
+     },
+     LiteralValue = str | bool | int | float | None;
 
 """Track declarations within a lexical scope."""
 @dataclass
 class ScopeInfo {
-    with entry {
-        <>node: uni.UniScopeNode;
-        declared: set[str] = field(default_factory=<>set);
+    has <>node: uni.UniScopeNode,
+        declared: set[str] = field(default_factory=<>set),
         hoisted: list[es.Statement] = field(default_factory=<>list);
-    }
 }
 
 """Container for processed assignment targets."""
 @dataclass
 class AssignmentTargetInfo {
-    with entry {
-        <>node: uni.Expr;
-        left: (es.Pattern | es.Expression);
-        reference: (es.Expression | None);
-        decl_name: (str | None);
-        pattern_names: list[tuple[(str, uni.Name)]];
+    has <>node: uni.Expr,
+        left: (es.Pattern | es.Expression),
+        reference: (es.Expression | None),
+        decl_name: (str | None),
+        pattern_names: list[tuple[(str, uni.Name)]],
         is_first: bool;
-    }
 }
 
 """Describes the walker-side of a spawn expression."""
 @dataclass
 class SpawnWalkerInfo {
-    with entry {
-        call_node: uni.FuncCall;
-        walker_name: str;
+    has call_node: uni.FuncCall,
+        walker_name: str,
         fields_object: es.ObjectExpression;
-    }
 }
 
 """Describes the target-side of a spawn expression."""
 @dataclass
 class SpawnTargetInfo {
-    with entry {
-        <>node: uni.Expr;
+    has <>node: uni.Expr,
         expression: es.Expression;
-    }
 }
 
 """Deconstructed spawn expression ready for runtime lowering."""
 @dataclass
 class SpawnCallParts {
-    with entry {
-        <>walker: SpawnWalkerInfo;
+    has <>walker: SpawnWalkerInfo,
         target: SpawnTargetInfo;
-    }
 }
 
 """Jac to ECMAScript AST transpilation pass."""
