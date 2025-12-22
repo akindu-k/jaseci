@@ -8,8 +8,6 @@ import os
 import shutil
 import tempfile
 import pickle
-import shelve
-import dbm.dumb
 from dataclasses import dataclass, field
 from unittest.mock import MagicMock, Mock, patch
 from uuid import UUID, uuid4
