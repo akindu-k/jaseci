@@ -1,25 +1,26 @@
 import warnings
+
+warnings.filterwarnings(
+    "ignore", category=DeprecationWarning, module="testcontainers.*"
+)
+warnings.filterwarnings("ignore", message=".*wait_container_is_ready.*")
+
 import contextlib
 import os
 import pickle
 import shutil
 import tempfile
 import pickle
-import pytest
-import redis
-
 from dataclasses import dataclass, field
 from unittest.mock import MagicMock, Mock, patch
 from uuid import UUID, uuid4
+
+import pytest
+import redis
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
 from testcontainers.mongodb import MongoDbContainer
 from testcontainers.redis import RedisContainer
-
-warnings.filterwarnings(
-    "ignore", category=DeprecationWarning, module="testcontainers.*"
-)
-warnings.filterwarnings("ignore", message=".*wait_container_is_ready.*")
 
 from jac_scale.memory_hierarchy import (
     MongoDB,
@@ -487,6 +488,7 @@ def real_containers():
     Spins up Docker containers for Redis and MongoDB.
     Scope='module' means they run once for all tests in this file.
     """
+    import warnings
 
     redis_c = RedisContainer("redis:latest")
     mongo_c = MongoDbContainer("mongo:latest")
