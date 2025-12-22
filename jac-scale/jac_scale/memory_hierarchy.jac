@@ -11,16 +11,11 @@ import from pymongo { MongoClient, UpdateOne }
 import from pymongo.errors { ConnectionFailure }
 import from jaclang.runtimelib.archetype { TANCH, Anchor }
 import from jaclang.runtimelib.memory { Memory }
+import traceback;
 
 glob ID = TypeVar('ID');
 
 obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
-    # has mem: Memory[(UUID, Anchor)] | None = None,
-    #     redis: RedisDB | None = None,
-    #     mongo: MongoDB | None = None,
-    #     shelf: ShelfDB | None = None,
-    #     redis_available: bool = False,
-    #     mongo_available: bool = False;
     def init -> None;
     def find_by_id(id: UUID) -> (Anchor | None);
     def commit(anchor: (Anchor | None) = None);
