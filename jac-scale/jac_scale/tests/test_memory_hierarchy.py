@@ -3,17 +3,16 @@ import os
 import pickle
 import shutil
 import tempfile
+import time
 from dataclasses import dataclass, field
 from unittest.mock import MagicMock, Mock, patch
 from uuid import UUID, uuid4
-import time
 
+import docker
 import pytest
 import redis
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
-
-import docker
 
 from jac_scale.memory_hierarchy import (
     MongoDB,
@@ -482,20 +481,17 @@ def real_containers():
     Scope='module' means they run once for all tests in this file.
     """
     client = docker.from_env()
-    
+
     try:
         redis_container = client.containers.run(
-            "redis:latest",
-            ports={'6379/tcp': None},
-            detach=True,
-            remove=True
+            "redis:latest", ports={"6379/tcp": None}, detach=True, remove=True
         )
-        
+
         redis_container.reload()
-        redis_port = redis_container.ports['6379/tcp'][0]['HostPort']
+        redis_port = redis_container.ports["6379/tcp"][0]["HostPort"]
         redis_host = "localhost"
         redis_url = f"redis://{redis_host}:{redis_port}/0"
-        
+
         redis_client = redis.Redis(host=redis_host, port=int(redis_port))
         for _ in range(30):  # Wait up to 30 seconds
             try:
@@ -505,23 +501,20 @@ def real_containers():
                 time.sleep(1)
         else:
             raise RuntimeError("Redis container did not start in time")
-        
+
         mongo_container = client.containers.run(
-            "mongo:latest",
-            ports={'27017/tcp': None},
-            detach=True,
-            remove=True
+            "mongo:latest", ports={"27017/tcp": None}, detach=True, remove=True
         )
-        
+
         mongo_container.reload()
-        mongo_port = mongo_container.ports['27017/tcp'][0]['HostPort']
+        mongo_port = mongo_container.ports["27017/tcp"][0]["HostPort"]
         mongo_host = "localhost"
         mongo_url = f"mongodb://{mongo_host}:{mongo_port}"
-        
+
         for _ in range(30):  # Wait up to 30 seconds
             try:
                 mongo_client = MongoClient(mongo_url, serverSelectionTimeoutMS=1000)
-                mongo_client.admin.command('ping')
+                mongo_client.admin.command("ping")
                 break
             except Exception:
                 time.sleep(1)
@@ -561,7 +554,6 @@ class TestIntegrationWorkflow:
         self.verify_mongo.drop_database("jac_db")
 
         self.memory = MultiHierarchyMemory()
-
 
         self.memory.mem = MagicMock()
         self.l1_store = {}  # to simulate RAM
