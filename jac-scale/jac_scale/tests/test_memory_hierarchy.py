@@ -22,6 +22,8 @@ from jac_scale.memory_hierarchy import (
     ShelfDB,
 )
 
+from jac_scale.config_loader import reset_scale_config
+
 
 @dataclass(frozen=True)
 class MockAnchor:
@@ -537,65 +539,81 @@ def real_containers():
             mongo_container.stop()
 
 
+
 class TestIntegrationWorkflow:
     @pytest.fixture(autouse=True)
     def setup_env(
         self, monkeypatch: pytest.MonkeyPatch, real_containers: dict[str, Any]
     ) -> None:
-        # add the URLs to env
-        monkeypatch.setenv("REDIS_URL", real_containers["redis_url"])
-        monkeypatch.setenv("MONGODB_URI", real_containers["mongo_url"])
+        # Reset the config instance first
+        reset_scale_config()
+        
+        # Patch the _db_config at the module level where it's imported
+        mock_db_config = {
+            'mongodb_uri': real_containers["mongo_url"],
+            'redis_url': real_containers["redis_url"],
+            'shelf_db_path': '/tmp/test_shelf.db'
+        }
+        
+        # Patch the global _db_config in the memory_hierarchy module
+        with patch('jac_scale.memory_hierarchy._db_config', mock_db_config):
+            self.verify_redis = real_containers["redis_client"]
+            self.verify_mongo = real_containers["mongo_client"]
 
-        self.verify_redis = real_containers["redis_client"]
-        self.verify_mongo = real_containers["mongo_client"]
+            self.verify_redis.flushall()
+            self.verify_mongo.drop_database("jac_db")
 
-        self.verify_redis.flushall()
-        self.verify_mongo.drop_database("jac_db")
+            # Create the memory instance inside the patch context
+            self.memory = MultiHierarchyMemory()
 
-        self.memory = MultiHierarchyMemory()
+            self.memory.mem = MagicMock()
+            self.l1_store: dict[UUID, MockAnchor] = {}  # to simulate RAM
 
-        self.memory.mem = MagicMock()
-        self.l1_store: dict[UUID, MockAnchor] = {}  # to simulate RAM
+            def mock_set(anchor: MockAnchor) -> None:
+                self.l1_store[anchor.id] = anchor
 
-        def mock_set(anchor: MockAnchor) -> None:
-            self.l1_store[anchor.id] = anchor
+            def mock_get(anchor_id: UUID) -> MockAnchor | None:
+                return self.l1_store.get(anchor_id)
 
-        def mock_get(anchor_id: UUID) -> MockAnchor | None:
-            return self.l1_store.get(anchor_id)
+            def mock_remove(anchor_id: UUID) -> None:
+                self.l1_store.pop(anchor_id, None)
 
-        def mock_remove(anchor_id: UUID) -> None:
-            self.l1_store.pop(anchor_id, None)
-
-        self.memory.mem.set.side_effect = mock_set
-        self.memory.mem.find_by_id.side_effect = mock_get
-        self.memory.mem.remove.side_effect = mock_remove
-        self.memory.mem.get_gc.return_value = set()  # nothing in Garbage collector
-        self.memory.mem.get_mem.return_value = self.l1_store
+            self.memory.mem.set.side_effect = mock_set
+            self.memory.mem.find_by_id.side_effect = mock_get
+            self.memory.mem.remove.side_effect = mock_remove
+            self.memory.mem.get_gc.return_value = set()  # nothing in Garbage collector
+            self.memory.mem.get_mem.return_value = self.l1_store
+            
+            # Store the patched config for use in tests
+            self._db_config_patch = mock_db_config
 
     def teardown_method(self) -> None:
-        self.memory.close()
+        if hasattr(self, 'memory'):
+            self.memory.close()
 
     def test_commit_workflow(self):
-        anchor_id = uuid4()
-        anchor = MockAnchor(id=anchor_id, data="This is test data")
+        # Re-apply the patch for this test method
+        with patch('jac_scale.memory_hierarchy._db_config', self._db_config_patch):
+            anchor_id = uuid4()
+            anchor = MockAnchor(id=anchor_id, data="This is test data")
 
-        self.memory.commit(anchor)
+            self.memory.commit(anchor)
 
-        # checking redis
-        redis_key = f"anchor:{anchor_id}"
-        assert self.verify_redis.exists(redis_key), "Data is not in Redis"
+            # checking redis
+            redis_key = f"anchor:{anchor_id}"
+            assert self.verify_redis.exists(redis_key), "Data is not in Redis"
 
-        # chekcking mongo
-        mongo_document = self.verify_mongo["jac_db"]["anchors"].find_one(
-            {"_id": str(anchor_id)}
-        )
-        assert mongo_document is not None, "Data is not in MongoDB"
+            # checking mongo
+            mongo_document = self.verify_mongo["jac_db"]["anchors"].find_one(
+                {"_id": str(anchor_id)}
+            )
+            assert mongo_document is not None, "Data is not in MongoDB"
 
-        # deserializng data and checking the content
-        data = pickle.loads(mongo_document["data"])
-        assert data.data == "This is test data", (
-            "Data content is not matching in MongoDB"
-        )
+            # deserializing data and checking the content
+            data = pickle.loads(mongo_document["data"])
+            assert data.data == "This is test data", (
+                "Data content is not matching in MongoDB"
+            )
 
     def test_l3_hit(self):
         anchor_id = uuid4()
