@@ -108,7 +108,7 @@ def _wait_for_endpoint(
 
 
 def test_all_in_one_app_endpoints() -> None:
-    """Create a Jac app, copy @all-in-one into it, install packages from config.json, then verify endpoints."""
+    """Create a Jac app, copy @all-in-one into it, install packages from jac.toml, then verify endpoints."""
     print(
         "[DEBUG] Starting test_all_in_one_app_endpoints using jac create_jac_app + @all-in-one"
     )
@@ -151,10 +151,10 @@ def test_all_in_one_app_endpoints() -> None:
             )
 
             # If the currently installed `jac` CLI does not support `create_jac_app`,
-            # skip this integration test instead of failing the whole suite.
+            # fail the test instead of skipping it.
             if returncode != 0 and "invalid choice: 'create_jac_app'" in stderr:
-                pytest.skip(
-                    "Skipping: installed `jac` CLI does not support `create_jac_app`."
+                pytest.fail(
+                    "Test failed: installed `jac` CLI does not support `create_jac_app`."
                 )
 
             assert returncode == 0, (
@@ -178,9 +178,9 @@ def test_all_in_one_app_endpoints() -> None:
                 else:
                     shutil.copy2(src, dst)
 
-            # 3. Install packages from config.json using `jac add --cl`
-            # This reads packages from config.json, generates package.json, and runs npm install
-            print("[DEBUG] Running 'jac add --cl' to install packages from config.json")
+            # 3. Install packages from jac.toml using `jac add --cl`
+            # This reads packages from jac.toml, generates package.json, and runs npm install
+            print("[DEBUG] Running 'jac add --cl' to install packages from jac.toml")
             jac_add_result = run(
                 ["jac", "add", "--cl"],
                 cwd=project_path,
@@ -195,8 +195,10 @@ def test_all_in_one_app_endpoints() -> None:
             )
 
             if jac_add_result.returncode != 0:
-                pytest.skip(
-                    "Skipping: jac add --cl failed or npm is not available in PATH."
+                pytest.fail(
+                    f"Test failed: jac add --cl failed or npm is not available in PATH.\n"
+                    f"STDOUT:\n{jac_add_result.stdout}\n"
+                    f"STDERR:\n{jac_add_result.stderr}\n"
                 )
 
             app_jac_path = os.path.join(project_path, "app.jac")

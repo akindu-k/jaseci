@@ -11,8 +11,11 @@ import from pymongo { MongoClient, UpdateOne }
 import from pymongo.errors { ConnectionFailure }
 import from jaclang.pycore.archetype { TANCH, Anchor }
 import from jaclang.pycore.memory { Memory }
+import from jac_scale.config_loader { get_scale_config }
 
-glob ID = TypeVar('ID');
+# Load database configuration from jac.toml with env var overrides
+glob _db_config = get_scale_config().get_database_config(),
+     ID = TypeVar('ID');
 
 obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
     def init -> None;
@@ -29,7 +32,7 @@ obj MongoDB {
     has client: (MongoClient | None) = None,
         db_name: str = 'jac_db',
         collection_name: str = 'anchors',
-        mongo_url: (str | None) = os.environ.get('MONGODB_URI', None);
+        mongo_url: str = _db_config['mongodb_uri'];
 
     """Initialize Mongodb."""
     def postinit -> None;
@@ -47,9 +50,7 @@ obj MongoDB {
 
 """Redis-based Memory Handler."""
 obj RedisDB {
-    has redis_url: (str | None) = os.environ.get(
-        'REDIS_URL', 'redis://:mypassword123@localhost:6379/0'
-    ),
+    has redis_url: str = _db_config['redis_url'],
         redis_client: (redis.Redis | None) = None;
 
     def postinit -> None;
@@ -68,7 +69,7 @@ Shelf-based Memory Handler — file-backed key/value storage.
 Uses dbm.dumb on all platforms to avoid gdbm locking issues in Linux.
 """
 obj ShelfDB {
-    has shelf_path: str = os.environ.get('SHELF_DB_PATH', 'anchor_store.db'),
+    has shelf_path: str = _db_config['shelf_db_path'],
         _shelf: shelve.Shelf | None = None,
         _lock: RLock | None = None;
 
