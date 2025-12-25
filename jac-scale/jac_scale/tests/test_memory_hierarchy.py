@@ -15,14 +15,13 @@ import redis
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
 
+from jac_scale.config_loader import reset_scale_config
 from jac_scale.memory_hierarchy import (
     MongoDB,
     MultiHierarchyMemory,
     RedisDB,
     ShelfDB,
 )
-
-from jac_scale.config_loader import reset_scale_config
 
 
 @dataclass(frozen=True)
@@ -539,7 +538,6 @@ def real_containers():
             mongo_container.stop()
 
 
-
 class TestIntegrationWorkflow:
     @pytest.fixture(autouse=True)
     def setup_env(
@@ -547,16 +545,16 @@ class TestIntegrationWorkflow:
     ) -> None:
         # Reset the config instance first
         reset_scale_config()
-        
+
         # Patch the _db_config at the module level where it's imported
         mock_db_config = {
-            'mongodb_uri': real_containers["mongo_url"],
-            'redis_url': real_containers["redis_url"],
-            'shelf_db_path': '/tmp/test_shelf.db'
+            "mongodb_uri": real_containers["mongo_url"],
+            "redis_url": real_containers["redis_url"],
+            "shelf_db_path": "/tmp/test_shelf.db",
         }
-        
+
         # Patch the global _db_config in the memory_hierarchy module
-        with patch('jac_scale.memory_hierarchy._db_config', mock_db_config):
+        with patch("jac_scale.memory_hierarchy._db_config", mock_db_config):
             self.verify_redis = real_containers["redis_client"]
             self.verify_mongo = real_containers["mongo_client"]
 
@@ -583,17 +581,17 @@ class TestIntegrationWorkflow:
             self.memory.mem.remove.side_effect = mock_remove
             self.memory.mem.get_gc.return_value = set()  # nothing in Garbage collector
             self.memory.mem.get_mem.return_value = self.l1_store
-            
+
             # Store the patched config for use in tests
             self._db_config_patch = mock_db_config
 
     def teardown_method(self) -> None:
-        if hasattr(self, 'memory'):
+        if hasattr(self, "memory"):
             self.memory.close()
 
     def test_commit_workflow(self):
         # Re-apply the patch for this test method
-        with patch('jac_scale.memory_hierarchy._db_config', self._db_config_patch):
+        with patch("jac_scale.memory_hierarchy._db_config", self._db_config_patch):
             anchor_id = uuid4()
             anchor = MockAnchor(id=anchor_id, data="This is test data")
 
