@@ -15,10 +15,7 @@ import redis
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
 
-from jac_scale.config_loader import reset_scale_config
-from jac_scale.config_loader import get_scale_config
-
-from jac_scale.config_loader import reset_scale_config
+from jac_scale.config_loader import get_scale_config, reset_scale_config
 from jac_scale.memory_hierarchy import (
     MongoDB,
     MultiHierarchyMemory,
@@ -486,9 +483,9 @@ def real_containers():
     Uses _db_config for configuration consistency.
     Scope='module' means they run once for all tests in this file.
     """
-        
+
     client = docker.from_env()
-    
+
     # Get default config for container settings
     config = get_scale_config()
     db_config = config.get_database_config()
@@ -536,9 +533,9 @@ def real_containers():
 
         # Create updated config that uses the real container URLs
         updated_db_config = {
-            'redis_url': redis_url,
-            'mongodb_uri': mongo_url,
-            'shelf_db_path': db_config.get('shelf_db_path', '/tmp/test_shelf.db')
+            "redis_url": redis_url,
+            "mongodb_uri": mongo_url,
+            "shelf_db_path": db_config.get("shelf_db_path", "/tmp/test_shelf.db"),
         }
 
         yield {
