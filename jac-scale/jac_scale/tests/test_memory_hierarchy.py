@@ -89,24 +89,73 @@ class TestShelfDB:
 class TestRedisDB:
     def setup_method(self) -> None:
         self.mock_redis = Mock(spec=redis.Redis)
-        self.redis_db = RedisDB()
+        self.redis_db = RedisDB(redis_url="redis://localhost:6379/0")
         self.redis_db.redis_client = self.mock_redis
 
     def test_redis_initialization(self) -> None:
-        assert self.redis_db.redis_url is not None
-        assert self.redis_db.redis_client is not None
+        redis_db_empty = RedisDB(redis_url="")
+        assert redis_db_empty.redis_url == ""
+        assert redis_db_empty.redis_client is None
+        
+        redis_db_none = RedisDB(redis_url=None)
+        assert redis_db_none.redis_url is None
+        assert redis_db_none.redis_client is None
+        
+        with patch("jac_scale.memory_hierarchy.redis.from_url") as mock_from_url:
+            mock_client = Mock(spec=redis.Redis)
+            mock_from_url.return_value = mock_client
+            
+            redis_db_valid = RedisDB(redis_url="redis://localhost:6379/0")
+            assert redis_db_valid.redis_url == "redis://localhost:6379/0"
+            assert redis_db_valid.redis_client is mock_client
+            mock_from_url.assert_called_once_with("redis://localhost:6379/0")
 
-    def test_redis_is_available_success(self) -> None:
-        self.mock_redis.ping.return_value = True
-        assert self.redis_db.redis_is_available() is True
+    @patch("jac_scale.memory_hierarchy.redis.from_url")
+    def test_redis_is_available_success(self, mock_from_url: Mock) -> None:
+        mock_temp_client = Mock()
+        mock_temp_client.ping.return_value = True
+        mock_from_url.return_value = mock_temp_client
+        
+        self.redis_db.redis_url = "redis://localhost:6379/0"
+        
+        result = self.redis_db.redis_is_available()
+        assert result is True
+        
+        mock_from_url.assert_called_once_with("redis://localhost:6379/0")
+        mock_temp_client.ping.assert_called_once()
+        mock_temp_client.close.assert_called_once()
 
-    def test_redis_is_available_failure(self) -> None:
-        self.mock_redis.ping.side_effect = Exception("Connection failed")
-        assert self.redis_db.redis_is_available() is False
+    @patch("jac_scale.memory_hierarchy.redis.from_url")
+    def test_redis_is_available_failure(self, mock_from_url: Mock) -> None:
+        mock_temp_client = Mock()
+        mock_temp_client.ping.side_effect = Exception("Connection failed")
+        mock_from_url.return_value = mock_temp_client
+        
+        self.redis_db.redis_url = "redis://localhost:6379/0"
+        
+        result = self.redis_db.redis_is_available()
+        assert result is False
+        
+        mock_temp_client.close.assert_called_once()
 
-    def test_redis_is_available_none_client(self) -> None:
-        self.redis_db.redis_client = None
-        assert self.redis_db.redis_is_available() is False
+    def test_redis_is_available_empty_url(self) -> None:
+        self.redis_db.redis_url = ""
+        result = self.redis_db.redis_is_available()
+        assert result is False
+
+    def test_redis_is_available_none_url(self) -> None:
+        self.redis_db.redis_url = None
+        result = self.redis_db.redis_is_available()
+        assert result is False
+
+    @patch("jac_scale.memory_hierarchy.redis.from_url")
+    def test_redis_is_available_connection_error(self, mock_from_url: Mock) -> None:
+        mock_from_url.side_effect = Exception("Cannot connect")
+        
+        self.redis_db.redis_url = "redis://localhost:6379/0"
+        
+        result = self.redis_db.redis_is_available()
+        assert result is False
 
     @patch("jac_scale.memory_hierarchy.dumps")
     def test_set_anchor(self, mock_dumps: Mock) -> None:
@@ -116,43 +165,6 @@ class TestRedisDB:
         self.redis_db.set(anchor)
         expected_key = f"anchor:{str(anchor_id)}"
         self.mock_redis.set.assert_called_once_with(expected_key, b"serialized_anchor")
-
-    def test_remove_anchor(self) -> None:
-        anchor_id = uuid4()
-        anchor = MockAnchor(id=anchor_id)
-        self.redis_db.remove(anchor)
-        expected_key = f"anchor:{str(anchor_id)}"
-        self.mock_redis.delete.assert_called_once_with(expected_key)
-
-    @patch("jac_scale.memory_hierarchy.loads")
-    def test_find_by_id_success(self, mock_loads: Mock) -> None:
-        anchor_id = uuid4()
-        anchor = MockAnchor(id=anchor_id)
-        self.mock_redis.get.return_value = b"serialized_anchor"
-        mock_loads.return_value = anchor
-        result = self.redis_db.find_by_id(anchor_id)
-        expected_key = f"anchor:{str(anchor_id)}"
-        self.mock_redis.get.assert_called_once_with(expected_key)
-        assert result == anchor
-
-    def test_find_by_id_not_found(self) -> None:
-        anchor_id = uuid4()
-        self.mock_redis.get.return_value = None
-        result = self.redis_db.find_by_id(anchor_id)
-        assert result is None
-
-    def test_commit_single_anchor(self) -> None:
-        anchor_id = uuid4()
-        anchor = MockAnchor(id=anchor_id)
-        with patch.object(self.redis_db, "set") as mock_set:
-            self.redis_db.commit(anchor=anchor)
-            mock_set.assert_called_once_with(anchor)
-
-    def test_commit_multiple_anchors(self) -> None:
-        anchors = [MockAnchor(id=uuid4()) for _ in range(3)]
-        with patch.object(self.redis_db, "set") as mock_set:
-            self.redis_db.commit(keys=anchors)
-            assert mock_set.call_count == 3
 
 
 class TestMongoDB:

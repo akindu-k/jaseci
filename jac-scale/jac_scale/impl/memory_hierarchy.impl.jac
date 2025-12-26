@@ -162,8 +162,6 @@ impl RedisDB._redis_key(id: UUID) -> str {
 impl RedisDB.redis_is_available -> bool {
     client = None;
     if (self.redis_url) {
-        print(f"printing redis url {self.redis_url}");
-        print("Checking Redis availability...");
         try {
             client = redis.from_url(self.redis_url);
 
@@ -364,8 +362,6 @@ impl MongoDB._to_uuid(id: (UUID | str)) -> UUID {
 impl MongoDB.mongo_is_available()  -> bool {
     client = None;
     if (self.mongo_url) {
-        print(f"printing mongo url {self.mongo_url}");
-        print("Checking MongoDB availability...");
         try {
             client = MongoClient(self.mongo_url);
 
