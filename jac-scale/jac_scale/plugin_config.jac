@@ -85,12 +85,12 @@ class JacScalePluginConfig {
                     "nested": {
                         "mongodb_uri": {
                             "type": "string",
-                            "default": None ,
+                            "default": None,
                             "description": "MongoDB connection URI"
                         },
                         "redis_url": {
                             "type": "string",
-                            "default": None ,
+                            "default": None,
                             "description": "Redis connection URL"
                         },
                         "shelf_db_path": {
