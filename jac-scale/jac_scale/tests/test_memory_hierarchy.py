@@ -23,7 +23,7 @@ from jac_scale.memory_hierarchy import (
 )
 
 from jac_scale.config_loader import reset_scale_config
-
+from jac_scale.config_loader import get_scale_config
 
 @dataclass(frozen=True)
 class MockAnchor:
@@ -481,11 +481,18 @@ class TestMultiHierarchyMemory:
 def real_containers():
     """
     Spins up Docker containers for Redis and MongoDB using docker-py directly.
+    Uses _db_config for configuration consistency.
     Scope='module' means they run once for all tests in this file.
     """
+        
     client = docker.from_env()
+    
+    # Get default config for container settings
+    config = get_scale_config()
+    db_config = config.get_database_config()
 
     try:
+        # Start Redis container
         redis_container = client.containers.run(
             "redis:latest", ports={"6379/tcp": None}, detach=True, remove=True
         )
@@ -505,6 +512,7 @@ def real_containers():
         else:
             raise RuntimeError("Redis container did not start in time")
 
+        # Start MongoDB container
         mongo_container = client.containers.run(
             "mongo:latest", ports={"27017/tcp": None}, detach=True, remove=True
         )
@@ -524,11 +532,19 @@ def real_containers():
         else:
             raise RuntimeError("MongoDB container did not start in time")
 
+        # Create updated config that uses the real container URLs
+        updated_db_config = {
+            'redis_url': redis_url,
+            'mongodb_uri': mongo_url,
+            'shelf_db_path': db_config.get('shelf_db_path', '/tmp/test_shelf.db')
+        }
+
         yield {
             "redis_url": redis_url,
             "mongo_url": mongo_url,
             "redis_client": redis_client,
             "mongo_client": mongo_client,
+            "db_config": updated_db_config,  # Include the config for patching
         }
 
     finally:
@@ -548,12 +564,8 @@ class TestIntegrationWorkflow:
         # Reset the config instance first
         reset_scale_config()
         
-        # Patch the _db_config at the module level where it's imported
-        mock_db_config = {
-            'mongodb_uri': real_containers["mongo_url"],
-            'redis_url': real_containers["redis_url"],
-            'shelf_db_path': '/tmp/test_shelf.db'
-        }
+        # Use the db_config from the real_containers fixture
+        mock_db_config = real_containers["db_config"]
         
         # Patch the global _db_config in the memory_hierarchy module
         with patch('jac_scale.memory_hierarchy._db_config', mock_db_config):
