@@ -96,15 +96,15 @@ class TestRedisDB:
         redis_db_empty = RedisDB(redis_url="")
         assert redis_db_empty.redis_url == ""
         assert redis_db_empty.redis_client is None
-        
+
         redis_db_none = RedisDB(redis_url=None)
         assert redis_db_none.redis_url is None
         assert redis_db_none.redis_client is None
-        
+
         with patch("jac_scale.memory_hierarchy.redis.from_url") as mock_from_url:
             mock_client = Mock(spec=redis.Redis)
             mock_from_url.return_value = mock_client
-            
+
             redis_db_valid = RedisDB(redis_url="redis://localhost:6379/0")
             assert redis_db_valid.redis_url == "redis://localhost:6379/0"
             assert redis_db_valid.redis_client is mock_client
@@ -115,12 +115,12 @@ class TestRedisDB:
         mock_temp_client = Mock()
         mock_temp_client.ping.return_value = True
         mock_from_url.return_value = mock_temp_client
-        
+
         self.redis_db.redis_url = "redis://localhost:6379/0"
-        
+
         result = self.redis_db.redis_is_available()
         assert result is True
-        
+
         mock_from_url.assert_called_once_with("redis://localhost:6379/0")
         mock_temp_client.ping.assert_called_once()
         mock_temp_client.close.assert_called_once()
@@ -130,12 +130,12 @@ class TestRedisDB:
         mock_temp_client = Mock()
         mock_temp_client.ping.side_effect = Exception("Connection failed")
         mock_from_url.return_value = mock_temp_client
-        
+
         self.redis_db.redis_url = "redis://localhost:6379/0"
-        
+
         result = self.redis_db.redis_is_available()
         assert result is False
-        
+
         mock_temp_client.close.assert_called_once()
 
     def test_redis_is_available_empty_url(self) -> None:
@@ -151,9 +151,9 @@ class TestRedisDB:
     @patch("jac_scale.memory_hierarchy.redis.from_url")
     def test_redis_is_available_connection_error(self, mock_from_url: Mock) -> None:
         mock_from_url.side_effect = Exception("Cannot connect")
-        
+
         self.redis_db.redis_url = "redis://localhost:6379/0"
-        
+
         result = self.redis_db.redis_is_available()
         assert result is False
 
