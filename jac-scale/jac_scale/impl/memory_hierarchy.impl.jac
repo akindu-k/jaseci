@@ -160,19 +160,37 @@ impl RedisDB._redis_key(id: UUID) -> str {
 
 """Check whether Redis connection is alive and reachable."""
 impl RedisDB.redis_is_available -> bool {
-    try {
-        if (self.redis_client is None) {
+    client = None;
+    if (self.redis_url) {
+        print(f"printing redis url {self.redis_url}");
+        print("Checking Redis availability...");
+        try {
+            client = redis.from_url(self.redis_url);
+
+            try {
+                client.ping();
+                return True;
+            } except Exception {
+                return False;
+            }
+        } except Exception {
             return False;
+        } finally {
+            if (client) {
+                try {
+                    client.close();
+                } except Exception { }
+            }
         }
-        return self.redis_client.ping();
-    } except Exception {
+    } else {
         return False;
     }
 }
 
 """Initialize Redis."""
 impl RedisDB.postinit -> None {
-    if (self.redis_client is None) {
+    # Only initialize if redis_url is not empty and client is None
+    if (self.redis_url and self.redis_client is None) {
         self.redis_client = redis.from_url(self.redis_url);
     }
 }
@@ -346,6 +364,8 @@ impl MongoDB._to_uuid(id: (UUID | str)) -> UUID {
 impl MongoDB.mongo_is_available()  -> bool {
     client = None;
     if (self.mongo_url) {
+        print(f"printing mongo url {self.mongo_url}");
+        print("Checking MongoDB availability...");
         try {
             client = MongoClient(self.mongo_url);
 
