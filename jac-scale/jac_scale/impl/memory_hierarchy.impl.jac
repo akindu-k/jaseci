@@ -3,12 +3,14 @@
 impl ShelfDB.commit(
     anchor: (Anchor | None) = None, keys: Iterable[Anchor] = []
 ) -> None {
-    if anchor {
-        self.set(anchor);
-        return;
-    }
-    for anc in keys {
-        self.set(anc);
+    with (self._lock){
+        if anchor {
+            self.set(anchor);
+            return;
+        }
+        for anc in keys {
+            self.set(anc);
+        }
     }
 }
 
