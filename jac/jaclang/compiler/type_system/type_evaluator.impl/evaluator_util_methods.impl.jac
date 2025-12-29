@@ -81,7 +81,7 @@ impl TypeEvaluator._convert_to_instance(
 impl TypeEvaluator._get_enclosing_class(
     self: TypeEvaluator, node_: uni.UniNode
 ) -> uni.Archetype | None {
-    impl_ = node_.find_parent_of_type(uni.ImplDef);
+    impl_ := node_.find_parent_of_type(uni.ImplDef);
     if impl_ and isinstance(impl_.decl_link, uni.Archetype) {
         return impl_.decl_link;
     }

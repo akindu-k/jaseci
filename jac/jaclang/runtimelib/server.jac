@@ -5,6 +5,8 @@ import inspect;
 import json;
 import os;
 import secrets;
+import from threading { Lock }
+import from collections { defaultdict }
 import from collections.abc { Callable }
 import from contextlib { suppress }
 import from http.server { BaseHTTPRequestHandler, HTTPServer }
@@ -50,7 +52,12 @@ obj UserManager {
     has session_path: str,
         _users: dict[(str, dict[(str, str)])] = {},
         _tokens: dict[(str, str)] = {},
-        _db_path: str = "";
+        _db_path: str = "",
+        _user_locks: Any = None,
+        _persist_lock: Any = None;
+
+    def postinit -> None;
+    def _load_db -> None;
 
     def postinit -> None;
     def _load_db -> None;

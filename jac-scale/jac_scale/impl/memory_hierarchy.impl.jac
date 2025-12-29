@@ -3,23 +3,18 @@
 impl ShelfDB.commit(
     anchor: (Anchor | None) = None, keys: Iterable[Anchor] = []
 ) -> None {
-    with (self._lock){
-        if anchor {
-            self.set(anchor);
-            return;
-        }
-        for anc in keys {
-            self.set(anc);
-        }
+    if anchor {
+        self.set(anchor);
+        return;
+    }
+    for anc in keys {
+        self.set(anc);
     }
 }
 
 impl ShelfDB.find_by_id(id: UUID) -> (Anchor | None) {
-    with (self._lock){
-        _id = self._to_uuid(id);
-        return self._load_anchor_from_shelf(_id);
-    }
-   
+    _id = self._to_uuid(id);
+    return self._load_anchor_from_shelf(_id);
 }
 
 """Remove anchor from shelf."""
@@ -69,35 +64,40 @@ impl ShelfDB._redis_key(id: UUID) -> str {
 
 """Cleanly close shelf storage."""
 impl ShelfDB.close{
-
+    self._shelf = self._ensure_shelf();
+    if (self._shelf is not None) {
+        self._shelf.close();
+        self._shelf = None;
+    }
 }
 
 impl ShelfDB._ensure_shelf -> shelve.Shelf {
+    if (self._shelf is None) {
+        self._shelf = self._open_shelf();
+    }
     return self._shelf;
 }
 
-"""Return existing shelf - shelf is now opened in postinit via shared registry."""
+"""Always use dbm.dumb backend to avoid Linux gdbm locking."""
 impl ShelfDB._open_shelf -> shelve.Shelf {
+    import dbm.dumb;
+    if (self._shelf is None) {
+        raw_db = dbm.dumb.open(self.shelf_path, 'c');
+        db_as_mapping = cast(MutableMapping[(<>bytes, <>bytes)], raw_db);
+        self._shelf = shelve.Shelf(db_as_mapping, writeback=False);
+    }
     return self._shelf;
 }
 
 """Initialize shelf DB on startup."""
 impl ShelfDB.postinit{
-    import dbm.dumb;
-    import from jac_scale.memory_hierarchy { _shelf_registry_lock, _shelf_registry }
-
-    with (_shelf_registry_lock){
-        if (self.shelf_path not in _shelf_registry) {
-            # Create new lock and shelf for this path
-            new_lock = RLock();
-            raw_db = dbm.dumb.open(self.shelf_path, 'c');
-            db_as_mapping = cast(MutableMapping[(<>bytes, <>bytes)], raw_db);
-            new_shelf = shelve.Shelf(db_as_mapping, writeback=False);
-            _shelf_registry[self.shelf_path] = (new_lock, new_shelf);
-        }
-        (self._lock, self._shelf) = _shelf_registry[self.shelf_path];  
+    import from jac_scale.memory_hierarchy { _shelf_locks }
+    # Use a global lock per shelf path to ensure thread safety across all instances
+    if (self.shelf_path not in _shelf_locks) {
+        _shelf_locks[self.shelf_path] = RLock();
     }
-
+    self._lock = _shelf_locks[self.shelf_path];
+    self._open_shelf();
 }
 
 """Commit behaves like MongoDB but also syncs Redis."""
