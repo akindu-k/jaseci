@@ -13,8 +13,11 @@ impl ShelfDB.commit(
 }
 
 impl ShelfDB.find_by_id(id: UUID) -> (Anchor | None) {
-    _id = self._to_uuid(id);
-    return self._load_anchor_from_shelf(_id);
+    with (self._lock){
+        _id = self._to_uuid(id);
+        return self._load_anchor_from_shelf(_id);
+    }
+   
 }
 
 """Remove anchor from shelf."""
