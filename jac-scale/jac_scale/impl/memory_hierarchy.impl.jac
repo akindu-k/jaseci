@@ -64,35 +64,35 @@ impl ShelfDB._redis_key(id: UUID) -> str {
 
 """Cleanly close shelf storage."""
 impl ShelfDB.close{
-    self._shelf = self._ensure_shelf();
-    if (self._shelf is not None) {
-        self._shelf.close();
-        self._shelf = None;
-    }
+
 }
 
 impl ShelfDB._ensure_shelf -> shelve.Shelf {
-    if (self._shelf is None) {
-        self._shelf = self._open_shelf();
-    }
     return self._shelf;
 }
 
-"""Always use dbm.dumb backend to avoid Linux gdbm locking."""
+"""Return existing shelf - shelf is now opened in postinit via shared registry."""
 impl ShelfDB._open_shelf -> shelve.Shelf {
-    import dbm.dumb;
-    if (self._shelf is None) {
-        raw_db = dbm.dumb.open(self.shelf_path, 'c');
-        db_as_mapping = cast(MutableMapping[(<>bytes, <>bytes)], raw_db);
-        self._shelf = shelve.Shelf(db_as_mapping, writeback=False);
-    }
     return self._shelf;
 }
 
 """Initialize shelf DB on startup."""
 impl ShelfDB.postinit{
-    self._lock = RLock();
-    self._open_shelf();
+    import dbm.dumb;
+    import from jac_scale.memory_hierarchy { _shelf_registry_lock, _shelf_registry }
+
+    with (_shelf_registry_lock){
+        if (self.shelf_path not in _shelf_registry) {
+            # Create new lock and shelf for this path
+            new_lock = RLock();
+            raw_db = dbm.dumb.open(self.shelf_path, 'c');
+            db_as_mapping = cast(MutableMapping[(<>bytes, <>bytes)], raw_db);
+            new_shelf = shelve.Shelf(db_as_mapping, writeback=False);
+            _shelf_registry[self.shelf_path] = (new_lock, new_shelf);
+        }
+        (self._lock, self._shelf) = _shelf_registry[self.shelf_path];  
+    }
+
 }
 
 """Commit behaves like MongoDB but also syncs Redis."""

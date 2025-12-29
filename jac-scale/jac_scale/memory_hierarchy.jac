@@ -14,7 +14,9 @@ import from jac_scale.config_loader { get_scale_config }
 
 # Load database configuration from jac.toml with env var overrides
 glob _db_config = get_scale_config().get_database_config(),
-     ID = TypeVar('ID');
+    ID = TypeVar('ID'),
+    _shelf_registry_lock: RLock = RLock(),
+    _shelf_registry: dict[(str, tuple[(RLock, shelve.Shelf)])] = {};
 
 obj MultiHierarchyMemory(Memory[(UUID, Anchor)]) {
     def init -> None;
