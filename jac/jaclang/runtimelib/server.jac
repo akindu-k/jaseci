@@ -5,6 +5,7 @@ import inspect;
 import json;
 import os;
 import secrets;
+import asyncio;
 import from threading { Lock }
 import from collections { defaultdict }
 import from collections.abc { Callable }
@@ -25,7 +26,8 @@ with entry {
 glob JsonValue: TypeAlias = None | str | int | float | bool | <>list['JsonValue'] | <>dict[
          (str, 'JsonValue')
      ],
-     StatusCode: TypeAlias = Literal[(200, 201, 400, 401, 404, 500, 503)];
+     StatusCode: TypeAlias = Literal[(200, 201, 400, 401, 404, 500, 503)],
+     _user_locks: dict[str,asyncio.Lock] = defaultdict(asyncio.Lock);
 
 """Base response container."""
 obj Response {
