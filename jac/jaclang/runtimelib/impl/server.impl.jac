@@ -163,6 +163,7 @@ impl UserManager.close -> None {
     with self._persist_lock {
         self._persist();
     }
+}
 
 """Execute a function in user's context."""
 impl ExecutionManager.execute_function(
