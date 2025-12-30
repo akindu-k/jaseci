@@ -5,7 +5,6 @@ import inspect;
 import json;
 import os;
 import secrets;
-import asyncio;
 import from threading { Lock }
 import from collections { defaultdict }
 import from collections.abc { Callable }
@@ -16,7 +15,6 @@ import from typing { TYPE_CHECKING, Any, Literal, TypeAlias, get_type_hints }
 import from urllib.parse { parse_qs, urlparse }
 import from jaclang.runtimelib.client_bundle { ClientBundleError }
 import from jaclang { JacRuntime as Jac }
-import from jaclang.pycore.constructs { Root }
 
 with entry {
     if TYPE_CHECKING {
@@ -27,8 +25,7 @@ with entry {
 glob JsonValue: TypeAlias = None | str | int | float | bool | <>list['JsonValue'] | <>dict[
          (str, 'JsonValue')
      ],
-     StatusCode: TypeAlias = Literal[(200, 201, 400, 401, 404, 500, 503)],
-     _user_locks: dict[str,asyncio.Lock] = defaultdict(asyncio.Lock);
+     StatusCode: TypeAlias = Literal[(200, 201, 400, 401, 404, 500, 503)];
 
 """Base response container."""
 obj Response {
