@@ -77,33 +77,35 @@ impl UserManager._persist -> None {
 }
 
 """Create a new user with their own root node. Returns dict with user data or error."""
-impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
-    import from jaclang.pycore.constructs { Root }
-    if (username in self._users) {
-        return {'error': 'User already exists'};
+async impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
+        import from jaclang.pycore.constructs { Root }
+    async with self._user_locks[username] { 
+        if (username in self._users) {
+            return {'error': 'User already exists'};
+        }
+        ctx = Jac.create_j_context(session=self.session_path);
+        Jac.set_context(ctx);
+        try {
+            user_root = Root();
+            root_anchor = user_root.__jac__;
+            Jac.save(root_anchor);
+            Jac.commit(root_anchor);
+            root_id = root_anchor.id.hex;
+        } finally {
+            ctx.mem.close();
+            Jac.set_context(Jac.create_j_context());
+        }
+        token = secrets.token_urlsafe(32);
+        password_hash = hashlib.sha256(password.encode()).hexdigest();
+        self._users[username] = {
+            'password_hash': password_hash,
+            'token': token,
+            'root_id': root_id
+        };
+        self._tokens[token] = username;
+        self._persist();
+        return {'username': username, 'token': token, 'root_id': root_id};
     }
-    ctx = Jac.create_j_context(session=self.session_path);
-    Jac.set_context(ctx);
-    try {
-        user_root = Root();
-        root_anchor = user_root.__jac__;
-        Jac.save(root_anchor);
-        Jac.commit(root_anchor);
-        root_id = root_anchor.id.hex;
-    } finally {
-        ctx.mem.close();
-        Jac.set_context(Jac.create_j_context());
-    }
-    token = secrets.token_urlsafe(32);
-    password_hash = hashlib.sha256(password.encode()).hexdigest();
-    self._users[username] = {
-        'password_hash': password_hash,
-        'token': token,
-        'root_id': root_id
-    };
-    self._tokens[token] = username;
-    self._persist();
-    return {'username': username, 'token': token, 'root_id': root_id};
 }
 
 """Authenticate a user and return their data."""
