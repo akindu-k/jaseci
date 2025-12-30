@@ -30,7 +30,7 @@ jobs:
           pip install pytest
           pip install pytest-asyncio
           pip install -e jac-client
-          
+
       - name: Run Backend tests
         run: |
           pytest -vv -s jac-scale/jac_scale/tests/test_serve.py
