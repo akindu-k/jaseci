@@ -16,6 +16,7 @@ import from typing { TYPE_CHECKING, Any, Literal, TypeAlias, get_type_hints }
 import from urllib.parse { parse_qs, urlparse }
 import from jaclang.runtimelib.client_bundle { ClientBundleError }
 import from jaclang { JacRuntime as Jac }
+import from jaclang.pycore.constructs { Root }
 
 with entry {
     if TYPE_CHECKING {

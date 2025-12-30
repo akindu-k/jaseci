@@ -78,7 +78,6 @@ impl UserManager._persist -> None {
 
 """Create a new user with their own root node. Returns dict with user data or error."""
 async impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
-        import from jaclang.pycore.constructs { Root }
     async with self._user_locks[username] { 
         if (username in self._users) {
             return {'error': 'User already exists'};
