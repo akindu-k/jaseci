@@ -1,19 +1,16 @@
 node Task {
-    has id: int;
-    has title: str;
-    has completed: bool = False;
+    has id: int,
+        title: str,
+        completed: bool = False;
 }
 
 walker CreateTask {
-    has id: int;
-    has title: str;
+    has id: int,
+        title: str;
 
-    can create with `root entry{
-        new_task = here ++> Task(
-            id=self.id,
-            title=self.title
-        );
-        report new_task;
+    can create with `root entry {
+        new_task = here ++> Task(id=self.id, title=self.title);
+        report new_task ;
     }
 }
 
@@ -47,12 +44,11 @@ walker CompleteTask {
         }
     }
 
-    can mark_complete with Task entry{
+    can mark_complete with Task entry {
         here.completed = True;
-        report here; # here is the visited task
+        report here ;  # here is the visited task
     }
 }
-
 
 walker DeleteTask {
     has id: int;
