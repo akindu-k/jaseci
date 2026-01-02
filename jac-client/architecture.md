@@ -94,21 +94,25 @@ Given the following source structure:
 
 ```
 nested-basic/
-├── app.jac                    (root module)
-├── buttonroot.jac
-└── components/
-    └── button.jac
+├── src/
+│   ├── app.jac                (root module)
+│   ├── buttonroot.jac
+│   └── components/
+│       └── button.jac
+└── jac.toml                   (entry-point = "src/app.jac")
 ```
 
 The compiled output in `compiled/` will be:
 
 ```
 compiled/
-├── app.js                     (from app.jac)
-├── buttonroot.js              (from buttonroot.jac)
+├── app.js                     (from src/app.jac)
+├── buttonroot.js              (from src/buttonroot.jac)
 └── components/
-    └── button.js              (from components/button.jac)
+    └── button.js              (from src/components/button.jac)
 ```
+
+**Note**: The `src/` directory is the `source_root`, so files are compiled to `compiled/` maintaining relative structure but without the `src/` prefix.
 
 #### Benefits
 
@@ -185,19 +189,30 @@ The `JacClientModuleIntrospector.render_page()` method:
 The `JacAPIServer` handles CSS file requests:
 
 - **Route**: `/static/*.css` (e.g., `/static/main.css`)
-- **Handler**: Reads CSS file from `dist/` directory
+- **Handler**: Reads CSS file from build output directory
 - **Response**: Serves with `text/css` content type
-- **Location**: `{base_path}/dist/{filename}.css`
+- **Locations checked** (in order):
+  1. `{base_path}/.client-build/dist/{filename}.css` (new structure)
+  2. `{base_path}/dist/{filename}.css` (legacy structure)
+  3. `{base_path}/assets/{filename}.css` (static assets)
 
-**Implementation** (`server.py`):
+**Implementation** (`server.impl.jac`):
 
-```python
-# CSS files from dist directory
-if path.startswith("/static/") and path.endswith(".css"):
-    css_file = base_path / "dist" / Path(path).name
-    if css_file.exists():
-        css_content = css_file.read_text(encoding="utf-8")
-        ResponseBuilder.send_css(self, css_content)
+```jac
+# CSS files from .client-build/dist/ (new) or dist/ (legacy)
+if path.endswith('.css') {
+    # Check .client-build/dist/ first (new structure)
+    if client_build_dist_file.exists() {
+        css_content = client_build_dist_file.read_text(encoding='utf-8');
+        Jac.send_css(self, css_content);
+        return;
+    } elif dist_file.exists() {
+        # Fallback to legacy dist/ location
+        css_content = dist_file.read_text(encoding='utf-8');
+        Jac.send_css(self, css_content);
+        return;
+    }
+}
 ```
 
 #### CSS File Flow
@@ -211,11 +226,11 @@ Babel: compiled/app.js → build/app.js (preserves import)
   ↓
 _copy_asset_files: compiled/styles.css → build/styles.css
   ↓
-Vite: Processes CSS import, extracts to dist/main.css
+Vite: Processes CSS import, extracts to .client-build/dist/main.css
   ↓
 HTML: <link href="/static/main.css?hash=..."/>
   ↓
-Server: Serves from dist/main.css
+Server: Serves from .client-build/dist/main.css (or dist/main.css for legacy)
 ```
 
 ### Key Design Decisions

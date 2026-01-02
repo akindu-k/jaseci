@@ -19,9 +19,11 @@ impl ViteCompiler.compile_and_bundle(
     self.create_entry_file();
     self.babel_processor.compile();
     self.babel_processor.copy_assets_after_compile(
-        self.compiled_dir, (self.project_dir / 'build'), self.asset_processor
+        self.compiled_dir,
+        (self.project_dir / '.client-build' / 'build'),
+        self.asset_processor
     );
-    entry_file = self.project_dir / 'build' / 'main.js';
+    entry_file = self.project_dir / '.client-build' / 'build' / 'main.js';
     self.vite_bundler.build(entry_file=entry_file);
     (bundle_code, bundle_hash) = self.vite_bundler.read_bundle();
     client_exports = sorted(collected_exports);
@@ -42,6 +44,11 @@ impl ViteCompiler.copy_root_assets(self: ViteCompiler) -> None {
     compiled_assets_dir = self.compiled_dir / 'assets';
     if (root_assets_dir.exists() and root_assets_dir.is_dir()) {
         self.asset_processor.copy_assets(root_assets_dir, compiled_assets_dir);
+    }
+    # Copy configured_asset files from root assets/ to build assets/ (bypassing compiled)
+    build_assets_dir = self.project_dir / '.client-build' / 'build' / 'assets';
+    if (root_assets_dir.exists() and root_assets_dir.is_dir()) {
+        self.asset_processor.copy_custom_asset_types(root_assets_dir, build_assets_dir);
     }
 }
 
@@ -139,9 +146,7 @@ impl ViteCompiler.compile_dependencies_recursively(
         }
     }
     collected_globals.update(non_root_globals);
-    export_block = self.jac_compiler.generate_export_block(exports_list);
     combined_js = self.jac_compiler.add_runtime_imports(module_js);
-    combined_js = f"{combined_js}\n{export_block}";
     try {
         relative_path = module_path.relative_to(source_root);
         output_path = self.compiled_dir / relative_path.with_suffix('.js');
@@ -189,8 +194,7 @@ impl ViteCompiler.compile_runtime_utils(self: ViteCompiler) -> tuple[str, list[s
         runtimeutils_manifest
     );
     all_exports = sorted(set((runtimeutils_exports_list + self.ROUTER_EXPORTS)));
-    export_block = self.jac_compiler.generate_export_block(all_exports);
-    combined_runtime_utils_js = f"{runtimeutils_js}\n{export_block}";
+    combined_runtime_utils_js = runtimeutils_js;
     self.compiled_dir.mkdir(parents=True, exist_ok=True);
     (self.compiled_dir / 'client_runtime.js').write_text(
         combined_runtime_utils_js, encoding='utf-8'
@@ -224,14 +228,19 @@ impl ViteCompiler.init(
         ) ;
     }
     self.vite_package_json = vite_package_json;
-    # If package.json is in .jac-client.configs/, go up one level to get project root
-    if (vite_package_json.parent.name == '.jac-client.configs') {
+    # If package.json is in .client-build/.jac-client.configs/, go up two levels to get project root
+    if (
+        vite_package_json.parent.name == '.jac-client.configs'
+        and vite_package_json.parent.parent.name == '.client-build'
+    ) {
+        self.project_dir = vite_package_json.parent.parent.parent;
+    } elif (vite_package_json.parent.name == '.jac-client.configs') {
         self.project_dir = vite_package_json.parent.parent;
     } else {
         self.project_dir = vite_package_json.parent;
     }
     self.runtime_path = runtime_path;
-    self.compiled_dir = self.project_dir / 'compiled';
+    self.compiled_dir = self.project_dir / '.client-build' / 'compiled';
     self.jac_compiler = JacToJSCompiler(
         compile_to_js_func, extract_exports_func, extract_globals_func
     );

@@ -1,5 +1,10 @@
 [project]
-name = "my-app"
+name = "basic"
 version = "1.0.0"
-description = "Jac application: my-app"
-entry-point = "app.jac"
+description = "Jac client application: basic"
+entry-point = "src/app.jac"
+
+[plugins.client]
+# Vite bundler configuration (optional overrides)
+# vite.plugins = []
+# vite.build = {}

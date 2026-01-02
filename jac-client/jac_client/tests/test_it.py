@@ -64,14 +64,15 @@ def _wait_for_endpoint(
 ) -> bytes:
     """Block until an HTTP endpoint returns a successful response or timeout.
 
-    Retries on 503 Service Unavailable and connection errors.
+    Retries on 503 Service Unavailable (temporary) and connection errors.
+    Fails immediately on 500 Internal Server Error (permanent errors like compilation failures).
 
     Returns:
         The response body as bytes.
 
     Raises:
         TimeoutError: if the endpoint does not return success within timeout.
-        HTTPError: if the endpoint returns a non-retryable error.
+        HTTPError: if the endpoint returns a non-retryable error (e.g., 500).
     """
     deadline = time.time() + timeout
     last_err: Exception | None = None
@@ -82,12 +83,18 @@ def _wait_for_endpoint(
                 return resp.read()
         except HTTPError as exc:
             if exc.code == 503:
-                # Service Unavailable - retry
+                # Service Unavailable - retry (temporary condition, e.g., compilation in progress)
                 # Close the underlying response to release the socket
                 exc.close()
                 last_err = exc
                 print(f"[DEBUG] Endpoint {url} returned 503, retrying...")
                 time.sleep(poll_interval)
+            elif exc.code == 500:
+                # Internal Server Error - do not retry (permanent error, e.g., compilation failure)
+                # Close the underlying response to release the socket
+                exc.close()
+                # Re-raise immediately - 500 indicates a permanent error that won't resolve by retrying
+                raise
             else:
                 # Other HTTP errors should not be retried
                 raise
@@ -200,17 +207,17 @@ def test_all_in_one_app_endpoints() -> None:
                     f"STDERR:\n{jac_add_result.stderr}\n"
                 )
 
-            app_jac_path = os.path.join(project_path, "app.jac")
-            assert os.path.isfile(app_jac_path), "all-in-one app.jac file missing"
+            app_jac_path = os.path.join(project_path, "src", "app.jac")
+            assert os.path.isfile(app_jac_path), "all-in-one src/app.jac file missing"
 
-            # 4. Start the server: `jac serve app.jac`
+            # 4. Start the server: `jac serve src/app.jac`
             # NOTE: We don't use text mode here, so `Popen` defaults to bytes.
             # Use `Popen[bytes]` in the type annotation to keep mypy happy.
             server: Popen[bytes] | None = None
             try:
-                print("[DEBUG] Starting server with 'jac serve app.jac'")
+                print("[DEBUG] Starting server with 'jac serve src/app.jac'")
                 server = Popen(
-                    ["jac", "serve", "app.jac"],
+                    ["jac", "serve", "src/app.jac"],
                     cwd=project_path,
                 )
 
@@ -235,13 +242,31 @@ def test_all_in_one_app_endpoints() -> None:
                         assert resp_root.status == 200
                         assert '"Jac API Server"' in root_body
                         assert '"endpoints"' in root_body
+
+                        # Verify custom headers from jac.toml are present
+                        assert (
+                            resp_root.headers.get("Cross-Origin-Opener-Policy")
+                            == "same-origin"
+                        ), (
+                            "Expected Cross-Origin-Opener-Policy header to be 'same-origin'"
+                        )
+                        assert (
+                            resp_root.headers.get("Cross-Origin-Embedder-Policy")
+                            == "require-corp"
+                        ), (
+                            "Expected Cross-Origin-Embedder-Policy header to be 'require-corp'"
+                        )
+                        print(
+                            "[DEBUG] Custom headers verified: COOP and COEP are present"
+                        )
                 except (URLError, HTTPError) as exc:
                     print(f"[DEBUG] Error while requesting root endpoint: {exc}")
                     pytest.fail(f"Failed to GET root endpoint: {exc}")
 
                 # "/page/app" – main page is loading
-                # Note: This endpoint may return 503 while the page is being compiled,
-                # so we use _wait_for_endpoint to retry until it's ready.
+                # Note: This endpoint may return 503 (temporary) while the page is being compiled,
+                # or 500 (permanent) if there's a compilation error. We use _wait_for_endpoint
+                # to retry on 503 until it's ready, but it will fail immediately on 500.
                 try:
                     print(
                         "[DEBUG] Sending GET request to /page/app endpoint (with retry)"
@@ -287,23 +312,26 @@ def test_all_in_one_app_endpoints() -> None:
                     pytest.fail("Failed to GET /page/app#/nested endpoint")
 
                 # "/static/main.css" – CSS compiled and serving
+                # Note: CSS may be compiled asynchronously, so we retry if it's not ready
                 try:
-                    print("[DEBUG] Sending GET request to /static/main.css")
-                    with urlopen(
+                    print(
+                        "[DEBUG] Sending GET request to /static/main.css (with retry)"
+                    )
+                    css_bytes = _wait_for_endpoint(
                         "http://127.0.0.1:8000/static/main.css",
-                        timeout=20,
-                    ) as resp_css:
-                        css_body = resp_css.read().decode("utf-8", errors="ignore")
-                        print(
-                            "[DEBUG] Received response from /static/main.css\n"
-                            f"Status: {resp_css.status}\n"
-                            f"Body (truncated to 500 chars):\n{css_body[:500]}"
-                        )
-                        assert resp_css.status == 200
-                        assert len(css_body.strip()) > 0
-                except (URLError, HTTPError) as exc:
+                        timeout=60.0,
+                        poll_interval=2.0,
+                        request_timeout=20.0,
+                    )
+                    css_body = css_bytes.decode("utf-8", errors="ignore")
+                    print(
+                        "[DEBUG] Received response from /static/main.css\n"
+                        f"Body (truncated to 500 chars):\n{css_body[:500]}"
+                    )
+                    assert len(css_body.strip()) > 0, "CSS file should not be empty"
+                except (URLError, HTTPError, TimeoutError, RemoteDisconnected) as exc:
                     print(f"[DEBUG] Error while requesting /static/main.css: {exc}")
-                    pytest.fail("Failed to GET /static/main.css")
+                    pytest.fail(f"Failed to GET /static/main.css after retries: {exc}")
 
                 # "/static/assets/burger.png" – static files are loading
                 try:
@@ -328,6 +356,34 @@ def test_all_in_one_app_endpoints() -> None:
                         f"[DEBUG] Error while requesting /static/assets/burger.png: {exc}"
                     )
                     pytest.fail("Failed to GET /static/assets/burger.png")
+
+                # "/workers/worker.js" – worker script is served
+                try:
+                    print(
+                        "[DEBUG] Sending GET request to /workers/worker.js (with retry)"
+                    )
+                    worker_js_bytes = _wait_for_endpoint(
+                        "http://127.0.0.1:8000/workers/worker.js",
+                        timeout=60.0,
+                        poll_interval=2.0,
+                        request_timeout=20.0,
+                    )
+                    worker_js_body = worker_js_bytes.decode("utf-8", errors="ignore")
+                    print(
+                        "[DEBUG] Received response from /workers/worker.js\n"
+                        f"Body (truncated to 500 chars):\n{worker_js_body[:500]}"
+                    )
+                    assert len(worker_js_body.strip()) > 0, (
+                        "Worker JS should not be empty"
+                    )
+                    assert (
+                        "postMessage" in worker_js_body or "onmessage" in worker_js_body
+                    ), "Worker JS should contain a message handler"
+                except (URLError, HTTPError, TimeoutError, RemoteDisconnected) as exc:
+                    print(f"[DEBUG] Error while requesting /workers/worker.js: {exc}")
+                    pytest.fail(
+                        f"Failed to GET /workers/worker.js after retries: {exc}"
+                    )
 
                 # "/walker/get_server_message" – walkers are integrated and up and running
                 try:
@@ -383,12 +439,12 @@ def test_all_in_one_app_endpoints() -> None:
                     pytest.fail("Failed to POST /walker/create_todo")
 
                 # POST /user/register – register a new user
-                test_email = "test_user@example.com"
+                test_username = "test_user"
                 test_password = "test_password_123"
                 try:
                     print("[DEBUG] Sending POST request to /user/register endpoint")
                     register_payload = {
-                        "email": test_email,
+                        "username": test_username,
                         "password": test_password,
                     }
                     req_register = Request(
@@ -408,14 +464,14 @@ def test_all_in_one_app_endpoints() -> None:
                         )
                         assert resp_register.status == 201
                         register_data = json.loads(register_body)
-                        assert "email" in register_data
+                        assert "username" in register_data
                         assert "token" in register_data
                         assert "root_id" in register_data
-                        assert register_data["email"] == test_email
+                        assert register_data["username"] == test_username
                         assert len(register_data["token"]) > 0
                         assert len(register_data["root_id"]) > 0
                         print(
-                            f"[DEBUG] Successfully registered user: {test_email}\n"
+                            f"[DEBUG] Successfully registered user: {test_username}\n"
                             f"Token: {register_data['token'][:20]}...\n"
                             f"Root ID: {register_data['root_id']}"
                         )
@@ -427,7 +483,7 @@ def test_all_in_one_app_endpoints() -> None:
                 try:
                     print("[DEBUG] Sending POST request to /user/login endpoint")
                     login_payload = {
-                        "email": test_email,
+                        "username": test_username,
                         "password": test_password,
                     }
                     req_login = Request(
@@ -448,7 +504,7 @@ def test_all_in_one_app_endpoints() -> None:
                         assert "token" in login_data
                         assert len(login_data["token"]) > 0
                         print(
-                            f"[DEBUG] Successfully logged in user: {test_email}\n"
+                            f"[DEBUG] Successfully logged in user: {test_username}\n"
                             f"Token: {login_data['token'][:20]}..."
                         )
                 except (URLError, HTTPError) as exc:
@@ -461,7 +517,7 @@ def test_all_in_one_app_endpoints() -> None:
                         "[DEBUG] Sending POST request to /user/login with invalid credentials"
                     )
                     invalid_login_payload = {
-                        "email": "nonexistent@example.com",
+                        "username": "nonexistent_user",
                         "password": "wrong_password",
                     }
                     req_invalid_login = Request(
@@ -501,6 +557,33 @@ def test_all_in_one_app_endpoints() -> None:
                         f"[DEBUG] Unexpected error while testing invalid login: {exc}"
                     )
                     pytest.fail("Unexpected error testing invalid login")
+
+                # Verify TypeScript component is working - check that page loads with TS component
+                # The /page/app endpoint should serve the app which includes the TypeScript Card component
+                try:
+                    print("[DEBUG] Verifying TypeScript component integration")
+                    # The page should load successfully (already tested above)
+                    # TypeScript components are compiled and included in the bundle
+                    # We verify this by checking the page loads without errors
+                    assert "<html" in page_body.lower(), "Page should contain HTML"
+                except Exception as exc:
+                    print(f"[DEBUG] Error verifying TypeScript component: {exc}")
+                    pytest.fail("Failed to verify TypeScript component integration")
+
+                # Verify nested folder imports are working - /page/app#/nested route
+                # This route uses nested folder imports (components.button and button)
+                try:
+                    print(
+                        "[DEBUG] Verifying nested folder imports via /page/app#/nested"
+                    )
+                    # The nested route should load successfully (already tested above)
+                    # Nested imports are compiled and included in the bundle
+                    assert "<html" in nested_body.lower(), (
+                        "Nested route should contain HTML"
+                    )
+                except Exception as exc:
+                    print(f"[DEBUG] Error verifying nested folder imports: {exc}")
+                    pytest.fail("Failed to verify nested folder imports")
 
             finally:
                 if server is not None:

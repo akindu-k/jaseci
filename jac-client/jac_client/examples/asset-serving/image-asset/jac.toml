@@ -1,5 +1,10 @@
 [project]
 name = "image-asset"
 version = "1.0.0"
-description = "Jac application: image-asset"
-entry-point = "app.jac"
+description = "Jac client application: image-asset"
+entry-point = "src/app.jac"
+
+[plugins.client]
+# Vite bundler configuration (optional overrides)
+# vite.plugins = []
+# vite.build = {}

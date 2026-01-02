@@ -1,5 +1,10 @@
 [project]
-name = "bootstrap-example"
+name = "nested-basic"
 version = "1.0.0"
-description = "Jac application: bootstrap-example"
-entry-point = "app.jac"
+description = "Jac client application: nested-basic"
+entry-point = "src/app.jac"
+
+[plugins.client]
+# Vite bundler configuration (optional overrides)
+# vite.plugins = []
+# vite.build = {}

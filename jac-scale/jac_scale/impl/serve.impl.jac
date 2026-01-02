@@ -85,7 +85,17 @@ impl JacAPIServer.serve_root_asset(self: JacAPIServer, file_path: str) -> Respon
     if file_path.startswith(('page/', 'walker/', 'function/', 'user/', 'static/')) {
         return Response(status_code=404, content='Not found', media_type='text/plain');
     }
-    base_path = Path(Jac.base_path_dir) if Jac.base_path_dir else Path.cwd();
+    # Find project root (where jac.toml is) instead of using base_path_dir
+    # base_path_dir might be src/ when serving src/app.jac, but we need project root
+    import from jaclang.project.config { find_project_root }
+    base_path_dir = Path(Jac.base_path_dir) if Jac.base_path_dir else Path.cwd();
+    project_root_result = find_project_root(base_path_dir);
+    if project_root_result {
+        (base_path, _) = project_root_result;
+    } else {
+        # Fallback to base_path_dir if no project root found
+        base_path = base_path_dir;
+    }
     file_name = Path(file_path).name;
     candidates = [
         base_path / 'dist' / file_path,
@@ -93,6 +103,8 @@ impl JacAPIServer.serve_root_asset(self: JacAPIServer, file_path: str) -> Respon
         base_path / 'assets' / file_path,
         base_path / 'assets' / file_name,
         base_path / 'public' / file_path,
+        base_path / 'src' / file_path,
+        base_path / 'src' / file_name,
         (base_path / file_path)
     ];
     for candidate_file in candidates {
@@ -143,14 +155,37 @@ impl JacAPIServer.register_root_asset_endpoint(self: JacAPIServer) -> None {
 """Serve a static file given its path."""
 impl JacAPIServer.serve_static_file(self: JacAPIServer, file_path: str) -> Response {
     try {
-        base_path = Path(Jac.base_path_dir) if Jac.base_path_dir else Path.cwd();
+        # Find project root (where jac.toml is) instead of using base_path_dir
+        # base_path_dir might be src/ when serving src/app.jac, but we need project root
+        import from jaclang.project.config { find_project_root }
+        base_path_dir = Path(Jac.base_path_dir) if Jac.base_path_dir else Path.cwd();
+        project_root_result = find_project_root(base_path_dir);
+        if project_root_result {
+            (base_path, _) = project_root_result;
+        } else {
+            # Fallback to base_path_dir if no project root found
+            base_path = base_path_dir;
+        }
         file_name = Path(file_path).name;
+        # Check multiple locations for files
+        # 1. .client-build/dist/ (Jac-client build output)
+        client_build_dist_file = base_path / '.client-build' / 'dist' / file_path;
+        client_build_dist_file_simple = base_path / '.client-build' / 'dist' / file_name;
+        # 2. dist/ (jac core build output)
         dist_file = base_path / 'dist' / file_path;
         dist_file_simple = base_path / 'dist' / file_name;
+        # 3. assets/ (static assets)
         assets_file = base_path / 'assets' / file_path;
         assets_file_simple = base_path / 'assets' / file_name;
         if file_name.endswith('.css') {
-            if dist_file.exists() {
+            # Check .client-build/dist/ first (jac-client)
+            if client_build_dist_file.exists() {
+                css_content = client_build_dist_file.read_text(encoding='utf-8');
+                return Response(content=css_content, media_type='text/css');
+            } elif client_build_dist_file_simple.exists() {
+                css_content = client_build_dist_file_simple.read_text(encoding='utf-8');
+                return Response(content=css_content, media_type='text/css');
+            } elif dist_file.exists() {
                 css_content = dist_file.read_text(encoding='utf-8');
                 return Response(content=css_content, media_type='text/css');
             } elif dist_file_simple.exists() {
@@ -171,6 +206,8 @@ impl JacAPIServer.serve_static_file(self: JacAPIServer, file_path: str) -> Respo
             }
         }
         for candidate_file in [
+            client_build_dist_file,
+            client_build_dist_file_simple,
             dist_file,
             dist_file_simple,
             assets_file,
@@ -292,6 +329,7 @@ impl JacAPIServer.render_page_callback(
         } except ValueError as exc {
             return HTMLResponse(content=f"<h1>404 Not Found</h1>", status_code=404);
         } except RuntimeError as exc {
+            print(f"Error rendering page '{page_name}': {exc}");
             return HTMLResponse(
                 content=f"<h1>503 Service Unavailable</h1>", status_code=503
             );
@@ -517,7 +555,7 @@ impl JacAPIServer.register_create_user_endpoint(self: JacAPIServer) -> None {
             callback=self.create_user,
             parameters=[
                 APIParameter(
-                    name='email',
+                    name='username',
                     data_type='string',
                     required=True,
                     default=None,
@@ -563,15 +601,15 @@ impl JacAPIServer.refresh_token(
 }
 
 impl JacAPIServer.create_user(
-    self: JacAPIServer, email: str, password: str
+    self: JacAPIServer, username: str, password: str
 ) -> JSONResponse {
     import traceback;
     try {
-        res = self.user_manager.create_user(email, password);
+        res = self.user_manager.create_user(username, password);
         if ('error' in res) {
             return JSONResponse(content=res, status_code=400);
         }
-        res['token'] = self.create_jwt_token(email);
+        res['token'] = self.create_jwt_token(username);
         return JSONResponse(content=res, status_code=201);
     } except Exception as e {
         error_trace = traceback.format_exc();
@@ -590,11 +628,11 @@ impl JacAPIServer.register_login_endpoint(self: JacAPIServer) -> None {
             callback=self.login,
             parameters=[
                 APIParameter(
-                    name='email',
+                    name='username',
                     data_type='string',
                     required=True,
                     default=None,
-                    description='Email for login',
+                    description='username for login',
                     type=ParameterType.BODY
                 ),
                 APIParameter(
@@ -614,17 +652,19 @@ impl JacAPIServer.register_login_endpoint(self: JacAPIServer) -> None {
     );
 }
 
-impl JacAPIServer.login(self: JacAPIServer, email: str, password: str) -> JSONResponse {
-    if (not email or not password) {
+impl JacAPIServer.login(
+    self: JacAPIServer, username: str, password: str
+) -> JSONResponse {
+    if (not username or not password) {
         return JSONResponse(
-            status_code=400, content={'error': 'Email and password required'}
+            status_code=400, content={'error': 'Username and password required'}
         );
     }
-    result = self.user_manager.authenticate(email, password);
+    result = self.user_manager.authenticate(username, password);
     if not result {
         return JSONResponse(status_code=401, content={'error': 'Invalid credentials'});
     }
-    result['token'] = self.create_jwt_token(email);
+    result['token'] = self.create_jwt_token(username);
     return JSONResponse(status_code=200, content=dict[(str, JsonValue)](result));
 }
 

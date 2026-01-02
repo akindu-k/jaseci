@@ -1,8 +1,8 @@
 [project]
 name = "tailwind-example"
 version = "1.0.0"
-description = "Jac application: tailwind-example"
-entry-point = "app.jac"
+description = "Jac client application: tailwind-example"
+entry-point = "src/app.jac"
 
 [plugins.client.vite]
 plugins = ["tailwindcss()"]

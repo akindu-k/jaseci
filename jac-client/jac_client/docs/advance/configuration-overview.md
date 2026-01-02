@@ -69,7 +69,7 @@ Jac Client uses `jac.toml` (the standard Jac project configuration file) for all
 name = "my-app"
 version = "1.0.0"
 description = "My Jac application"
-entry-point = "app.jac"
+entry-point = "src/app.jac"
 
 # Vite configuration
 [plugins.client.vite]
@@ -273,8 +273,9 @@ jac serve src/app.jac
 ```
 project-root/
 ├── jac.toml                   # ← Source of truth (committed)
-├── app.jac                    # Your Jac application
-├── components/                # TypeScript components (optional)
+├── src/
+│   ├── app.jac                # Your Jac application
+│   └── components/            # TypeScript components (optional)
 ├── assets/                    # Static assets
 ├── compiled/                  # Compiled output
 │   ├── client_runtime.js
@@ -291,8 +292,8 @@ project-root/
 **Commit**:
 
 - `jac.toml` - Your configuration
-- `app.jac` - Your application code
-- `components/` - Your components
+- `src/app.jac` - Your application code
+- `src/components/` - Your components
 - `assets/` - Your assets
 
 **Don't Commit** (automatically gitignored):

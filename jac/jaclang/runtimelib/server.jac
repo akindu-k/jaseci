@@ -128,6 +128,7 @@ obj ResponseBuilder {
     static def send_javascript(handler: BaseHTTPRequestHandler, code: str) -> None;
     static def send_css(handler: BaseHTTPRequestHandler, css: str) -> None;
     static def _add_cors_headers(handler: BaseHTTPRequestHandler) -> None;
+    static def _add_custom_headers(handler: BaseHTTPRequestHandler) -> None;
 }
 
 """Base route handler."""
@@ -143,8 +144,8 @@ obj AuthHandler {
         execution_manager: ExecutionManager,
         user_manager: UserManager;
 
-    def create_user(email: str, password: str) -> Response;
-    def login(email: str, password: str) -> Response;
+    def create_user(username: str, password: str) -> Response;
+    def login(username: str, password: str) -> Response;
 }
 
 """Handle introspection routes."""

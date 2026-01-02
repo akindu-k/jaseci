@@ -1,5 +1,6 @@
-"""Serialize objects to JSON-compatible format."""
+import from jaclang.project.config { get_config }
 
+"""Serialize objects to JSON-compatible format."""
 impl JacSerializer.serialize(<>obj: object) -> JsonValue {
     import from jaclang.pycore.constructs { Archetype }
     if ((<>obj is None) or isinstance(<>obj, (str, int, float, bool))) {
@@ -103,7 +104,7 @@ impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
     };
     self._tokens[token] = username;
     self._persist();
-    return {'email': username, 'token': token, 'root_id': root_id};
+    return {'username': username, 'token': token, 'root_id': root_id};
 }
 
 """Authenticate a user and return their data."""
@@ -116,7 +117,11 @@ impl UserManager.authenticate(
     user = self._users[username];
     password_hash = hashlib.sha256(password.encode()).hexdigest();
     if (user['password_hash'] == password_hash) {
-        return {'email': username, 'token': user['token'], 'root_id': user['root_id']};
+        return {
+            'username': username,
+            'token': user['token'],
+            'root_id': user['root_id']
+        };
     }
     return None;
 }
@@ -527,6 +532,7 @@ impl ResponseBuilder.send_json(
     handler.send_response(status);
     handler.send_header('Content-Type', 'application/json');
     ResponseBuilder._add_cors_headers(handler);
+    ResponseBuilder._add_custom_headers(handler);
     handler.end_headers();
     handler.wfile.write(json.dumps(data).encode());
 }
@@ -540,6 +546,7 @@ impl ResponseBuilder.send_html(
     handler.send_header('Content-Type', 'text/html; charset=utf-8');
     handler.send_header('Content-Length', str(len(payload)));
     ResponseBuilder._add_cors_headers(handler);
+    ResponseBuilder._add_custom_headers(handler);
     handler.end_headers();
     handler.wfile.write(payload);
 }
@@ -554,6 +561,7 @@ impl ResponseBuilder.send_javascript(
     handler.send_header('Content-Length', str(len(payload)));
     handler.send_header('Cache-Control', 'no-cache');
     ResponseBuilder._add_cors_headers(handler);
+    ResponseBuilder._add_custom_headers(handler);
     handler.end_headers();
     handler.wfile.write(payload);
 }
@@ -566,6 +574,7 @@ impl ResponseBuilder.send_css(handler: BaseHTTPRequestHandler, css: str) -> None
     handler.send_header('Content-Length', str(len(payload)));
     handler.send_header('Cache-Control', 'no-cache');
     ResponseBuilder._add_cors_headers(handler);
+    ResponseBuilder._add_custom_headers(handler);
     handler.end_headers();
     handler.wfile.write(payload);
 }
@@ -577,12 +586,25 @@ impl ResponseBuilder._add_cors_headers(handler: BaseHTTPRequestHandler) -> None 
     handler.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
 
-"""Create new user."""
-impl AuthHandler.create_user(email: str, password: str) -> Response {
-    if (not email or not password) {
-        return Response(status=400, body={'error': 'Email and password required'});
+"""Add security headers to response."""
+impl ResponseBuilder._add_custom_headers(handler: BaseHTTPRequestHandler) -> None {
+    config = get_config();
+    if config
+    and config.environments
+    and "response" in config.environments
+    and "headers" in config.environments["response"] {
+        for (header_name, header_value) in config.environments["response"]["headers"].items() {
+            handler.send_header(header_name, header_value);
+        }
     }
-    result = self.user_manager.create_user(email, password);
+}
+
+"""Create new user."""
+impl AuthHandler.create_user(username: str, password: str) -> Response {
+    if (not username or not password) {
+        return Response(status=400, body={'error': 'Username and password required'});
+    }
+    result = self.user_manager.create_user(username, password);
     if ('error' in result) {
         return Response(status=400, body=result);
     }
@@ -590,11 +612,11 @@ impl AuthHandler.create_user(email: str, password: str) -> Response {
 }
 
 """Authenticate user."""
-impl AuthHandler.login(email: str, password: str) -> Response {
-    if (not email or not password) {
-        return Response(status=400, body={'error': 'Email and password required'});
+impl AuthHandler.login(username: str, password: str) -> Response {
+    if (not username or not password) {
+        return Response(status=400, body={'error': 'Username and password required'});
     }
-    result = self.user_manager.authenticate(email, password);
+    result = self.user_manager.authenticate(username, password);
     if not result {
         return Response(status=401, body={'error': 'Invalid credentials'});
     }
@@ -727,6 +749,7 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
         def do_OPTIONS(self: JacRequestHandler) -> None {
             self.send_response(200);
             ResponseBuilder._add_cors_headers(self);
+            ResponseBuilder._add_custom_headers(self);
             self.end_headers();
         }
 
@@ -740,11 +763,17 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                     server.introspector.ensure_bundle();
                     Jac.send_javascript(self, server.introspector._bundle.code);
                 } except RuntimeError as exc {
-                    Jac.send_json(self, 503, {'error': str(exc)});
+                    Jac.send_json(self, 500, {'error': str(exc)});
                 }
                 return;
             }
             is_static_path = path.startswith('/static/');
+            import from jaclang.project.config { get_config }
+            ;
+            config = get_config();
+            client_cfg = config.get_plugin_config("client") if config else None;
+            assets_config = client_cfg.get("assets", {}) if client_cfg else {};
+            custom_asset_extensions = set(assets_config.get("custom_extensions", []));
             is_asset_file = (
                 not is_static_path
                 and (path != '/')
@@ -756,26 +785,56 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                 and not path.startswith('/walkers')
                 and not path.startswith('/protected')
                 and (
-                    Path(path).suffix in {'.png','.jpg','.jpeg','.gif','.webp','.svg','.ico','.woff','.woff2','.ttf','.otf','.eot','.mp4','.webm','.mp3','.wav','.css'}
+                    Path(path).suffix in custom_asset_extensions
+                    or {'.png','.jpg','.jpeg','.gif','.webp','.svg','.ico','.woff','.woff2','.ttf','.otf','.eot','.mp4','.webm','.mp3','.wav','.css'}
                 )
             );
             if (is_static_path or is_asset_file) {
                 try {
-                    base_path = Path(Jac.base_path_dir)
+                    # Find project root (where jac.toml is) instead of using base_path_dir
+                    # base_path_dir might be src/ when serving src/app.jac, but we need project root
+                    import from jaclang.project.config { find_project_root }
+                    base_path_dir = Path(Jac.base_path_dir)
                     if Jac.base_path_dir
                     else Path.cwd();
+                    project_root_result = find_project_root(base_path_dir);
+                    if project_root_result {
+                        (base_path, _) = project_root_result;
+                    } else {
+                        # Fallback to base_path_dir if no project root found
+                        base_path = base_path_dir;
+                    }
                     if is_static_path {
                         relative_path = path[8:];
                     } else {
                         relative_path = path[1:];
                     }
                     file_name = Path(relative_path).name;
+                    # Check multiple locations for CSS files
+                    # 1. .client-build/dist/ (new structure)
+                    client_build_dist_file = base_path / '.client-build' / 'dist' / relative_path;
+                    client_build_dist_file_simple = base_path / '.client-build' / 'dist' / file_name;
+                    # 2. dist/ (legacy structure)
                     dist_file = base_path / 'dist' / relative_path;
                     dist_file_simple = base_path / 'dist' / file_name;
+                    # 3. assets/ (static assets)
                     assets_file = base_path / 'assets' / relative_path;
                     assets_file_simple = base_path / 'assets' / file_name;
                     if path.endswith('.css') {
-                        if dist_file.exists() {
+                        # Check .client-build/dist/ first (jac-client)
+                        if client_build_dist_file.exists() {
+                            css_content = client_build_dist_file.read_text(
+                                encoding='utf-8'
+                            );
+                            Jac.send_css(self, css_content);
+                            return;
+                        } elif client_build_dist_file_simple.exists() {
+                            css_content = client_build_dist_file_simple.read_text(
+                                encoding='utf-8'
+                            );
+                            Jac.send_css(self, css_content);
+                            return;
+                        } elif dist_file.exists() {
                             css_content = dist_file.read_text(encoding='utf-8');
                             Jac.send_css(self, css_content);
                             return;
@@ -799,6 +858,8 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                         }
                     }
                     for candidate_file in [
+                        client_build_dist_file,
+                        client_build_dist_file_simple,
                         dist_file,
                         dist_file_simple,
                         assets_file,
@@ -859,7 +920,7 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                 } except ValueError as exc {
                     Jac.send_json(self, 404, {'error': str(exc)});
                 } except RuntimeError as exc {
-                    Jac.send_json(self, 503, {'error': str(exc)});
+                    Jac.send_json(self, 500, {'error': str(exc)});
                 }
                 return;
             }
@@ -921,14 +982,14 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
             }
             if (path == '/user/register') {
                 response = server.auth_handler.create_user(
-                    data.get('email', ''), data.get('password', '')
+                    data.get('username', ''), data.get('password', '')
                 );
                 self._send_response(response);
                 return;
             }
             if (path == '/user/login') {
                 response = server.auth_handler.login(
-                    data.get('email', ''), data.get('password', '')
+                    data.get('username', ''), data.get('password', '')
                 );
                 self._send_response(response);
                 return;
@@ -1106,13 +1167,13 @@ impl print_endpoint_docs(server: JacAPIServer) -> None {
         'POST',
         '/user/register',
         'Create new user account',
-        'Body: { "email": str, "password": str }'
+        'Body: { "username": str, "password": str }'
     );
     endpoint(
         'POST',
         '/user/login',
         'Authenticate and get token',
-        'Body: { "email": str, "password": str }'
+        'Body: { "username": str, "password": str }'
     );
     section('INTROSPECTION', 'Authenticated');
     endpoint('GET', '/functions', 'List all functions → string[]');

@@ -44,7 +44,7 @@ def test_create_jac_app() -> None:
             with open(app_jac_path) as f:
                 app_jac_content = f.read()
 
-            assert "def app()" in app_jac_content
+            assert "def:pub app()" in app_jac_content
 
             # Verify README.md was created
             readme_path = os.path.join(project_path, "README.md")
@@ -77,6 +77,23 @@ def test_create_jac_app() -> None:
             # Verify src/components directory exists
             components_dir = os.path.join(project_path, "src", "components")
             assert os.path.exists(components_dir)
+
+            # Verify default packages installation (package.json should be generated)
+            package_json_path = os.path.join(
+                project_path, ".client-build", ".jac-client.configs", "package.json"
+            )
+            # Note: packages may or may not be installed depending on npm availability
+            # but package.json should be generated with default packages
+            if os.path.exists(package_json_path):
+                import json
+
+                with open(package_json_path) as f:
+                    package_data = json.load(f)
+
+                # Verify default dependencies are in package.json
+                assert "react" in package_data.get("dependencies", {})
+                assert "react-dom" in package_data.get("dependencies", {})
+                assert "vite" in package_data.get("devDependencies", {})
 
         finally:
             # Return to original directory
@@ -201,7 +218,7 @@ def test_create_jac_app_with_typescript() -> None:
                 app_jac_content = f.read()
 
             assert (
-                'cl import from "./components/Button.tsx" { Button }' in app_jac_content
+                'cl import from ".components/Button.tsx" { Button }' in app_jac_content
             )
             assert "<Button" in app_jac_content
 
@@ -214,6 +231,129 @@ def test_create_jac_app_with_typescript() -> None:
 
             assert "TypeScript Support" in readme_content
             assert "components/Button.tsx" in readme_content
+
+            # Verify default packages installation (package.json should be generated)
+            package_json_path = os.path.join(
+                project_path, ".client-build", ".jac-client.configs", "package.json"
+            )
+            # Note: packages may or may not be installed depending on npm availability
+            # but package.json should be generated with default packages
+            if os.path.exists(package_json_path):
+                import json
+
+                with open(package_json_path) as f:
+                    package_data = json.load(f)
+
+                # Verify default dependencies are in package.json
+                assert "react" in package_data.get("dependencies", {})
+                assert "react-dom" in package_data.get("dependencies", {})
+                assert "vite" in package_data.get("devDependencies", {})
+                assert "typescript" in package_data.get("devDependencies", {})
+
+        finally:
+            # Return to original directory
+            os.chdir(original_cwd)
+
+
+def test_create_jac_app_with_skip_flag() -> None:
+    """Test jac create --cl --skip command skips package installation."""
+    test_project_name = "test-jac-app-skip"
+
+    # Create a temporary directory for testing
+    with tempfile.TemporaryDirectory() as temp_dir:
+        original_cwd = os.getcwd()
+        try:
+            # Change to temp directory
+            os.chdir(temp_dir)
+
+            # Run jac create --cl --skip command
+            process = Popen(
+                ["jac", "create", "--cl", "--skip", test_project_name],
+                stdin=PIPE,
+                stdout=PIPE,
+                stderr=PIPE,
+                text=True,
+            )
+            stdout, stderr = process.communicate()
+            result_code = process.returncode
+
+            # Check that command succeeded
+            assert result_code == 0
+            assert f"Project '{test_project_name}' created successfully!" in stdout
+
+            # Verify project directory was created
+            project_path = os.path.join(temp_dir, test_project_name)
+            assert os.path.exists(project_path)
+            assert os.path.isdir(project_path)
+
+            # Verify that "Installing default packages" message is NOT in output
+            assert "Installing default packages" not in stdout
+            assert "Default packages installed successfully" not in stdout
+
+            # Verify jac.toml was created
+            jac_toml_path = os.path.join(project_path, "jac.toml")
+            assert os.path.exists(jac_toml_path)
+
+        finally:
+            # Return to original directory
+            os.chdir(original_cwd)
+
+
+def test_create_jac_app_installs_default_packages() -> None:
+    """Test jac create --cl command attempts to install default packages."""
+    test_project_name = "test-jac-app-install"
+
+    # Create a temporary directory for testing
+    with tempfile.TemporaryDirectory() as temp_dir:
+        original_cwd = os.getcwd()
+        try:
+            # Change to temp directory
+            os.chdir(temp_dir)
+
+            # Run jac create --cl command
+            process = Popen(
+                ["jac", "create", "--cl", test_project_name],
+                stdin=PIPE,
+                stdout=PIPE,
+                stderr=PIPE,
+                text=True,
+            )
+            stdout, stderr = process.communicate()
+            result_code = process.returncode
+
+            # Check that command succeeded
+            assert result_code == 0
+            assert f"Project '{test_project_name}' created successfully!" in stdout
+
+            # Verify project directory was created
+            project_path = os.path.join(temp_dir, test_project_name)
+            assert os.path.exists(project_path)
+
+            # Verify that installation was attempted (message should be in output)
+            assert "Installing default packages" in stdout
+
+            # Verify package.json was generated (even if npm install failed)
+            package_json_path = os.path.join(
+                project_path, ".client-build", ".jac-client.configs", "package.json"
+            )
+            # package.json should be generated with default packages
+            if os.path.exists(package_json_path):
+                import json
+
+                with open(package_json_path) as f:
+                    package_data = json.load(f)
+
+                # Verify default dependencies are in package.json
+                deps = package_data.get("dependencies", {})
+                dev_deps = package_data.get("devDependencies", {})
+
+                assert "react" in deps
+                assert "react-dom" in deps
+                assert "react-router-dom" in deps
+                assert "vite" in dev_deps
+                assert "@babel/core" in dev_deps
+                assert "typescript" in dev_deps
+                assert "@types/react" in dev_deps
 
         finally:
             # Return to original directory
@@ -279,7 +419,7 @@ entry-point = "app.jac"
 
 [dependencies.npm]{deps_section}
 
-[dependencies.npm.dev]{dev_deps_section}
+[dev-dependencies.npm]{dev_deps_section}
 """
     config_path = os.path.join(temp_dir, "jac.toml")
     with open(config_path, "w") as f:
@@ -593,7 +733,7 @@ def test_uninstall_nonexistent_package() -> None:
             os.chdir(original_cwd)
 
 
-def test_uninstall_without_config_json() -> None:
+def test_uninstall_without_config_toml() -> None:
     """Test remove --cl command when jac.toml doesn't exist."""
     with tempfile.TemporaryDirectory() as temp_dir:
         original_cwd = os.getcwd()

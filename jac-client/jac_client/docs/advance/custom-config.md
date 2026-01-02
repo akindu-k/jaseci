@@ -16,7 +16,7 @@ Vite configuration is placed under `[plugins.client.vite]` in your `jac.toml`:
 [project]
 name = "my-app"
 version = "1.0.0"
-entry-point = "app.jac"
+entry-point = "src/app.jac"
 
 [plugins.client.vite]
 plugins = []
@@ -183,6 +183,18 @@ noUnusedParameters = false
 include = ["components/**/*", "lib/**/*", "types/**/*"]
 ```
 
+### Response Configuration
+
+#### Configure Custom Headers
+
+Custom headers can be added by using an enviornmental variable and mentioning the custom headers.
+
+```toml
+[environments.response.headers]
+"Cross-Origin-Opener-Policy" = "same-origin"
+"Cross-Origin-Embedder-Policy" = "require-corp"
+```
+
 ## How It Works
 
 ### Configuration Workflow
@@ -298,7 +310,7 @@ lib_imports = ["import myPlugin from 'my-plugin'"]
 After modifying `jac.toml`, test your build:
 
 ```bash
-jac serve app.jac
+jac serve src/app.jac
 ```
 
 ## Troubleshooting
