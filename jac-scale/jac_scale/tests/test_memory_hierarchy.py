@@ -1,9 +1,13 @@
+import contextlib
+import gc
+import os
 import socket
 import subprocess
+import time
 from pathlib import Path
-from testcontainers.redis import RedisContainer
-from testcontainers.mongodb import MongoDbContainer
+
 import redis
+import requests
 from pymongo import MongoClient
 import contextlib
 import time
@@ -15,11 +19,11 @@ import pickle
 
 def get_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("",0))
-        return s.getsockname()[1] 
-    
-class TestMemoryHierarchy:
+        s.bind(("", 0))
+        return s.getsockname()[1]
 
+
+class TestMemoryHierarchy:
     fixtures_dir: Path
     jac_file: Path
     base_url: str
@@ -36,9 +40,9 @@ class TestMemoryHierarchy:
 
         if not cls.jac_file.exists():
             raise FileNotFoundError(f"Missing Jac file: {cls.jac_file}")
-        
+
         # start redis container
-        cls.redis_container = RedisContainer("redis:latest",port=6379)
+        cls.redis_container = RedisContainer("redis:latest", port=6379)
         cls.redis_container.start()
 
         redis_host = cls.redis_container.get_container_host_ip()
@@ -80,9 +84,8 @@ class TestMemoryHierarchy:
         cls.port = get_free_port()
         cls.base_url = f"http://localhost:{cls.port}"
 
-
         cls._start_server()
-    
+
     @classmethod
     def teardown_class(cls) -> None:
         if cls.server:
@@ -101,11 +104,10 @@ class TestMemoryHierarchy:
 
         time.sleep(0.5)
         gc.collect()
-    
+
     @classmethod
     def _start_server(cls) -> None:
         cmd = [
-            
             "jac",
             "serve",
             str(cls.jac_file.name),
@@ -113,7 +115,6 @@ class TestMemoryHierarchy:
             str(cls.port),
         ]
 
-        
         env = os.environ.copy()
 
         cls.server = subprocess.Popen(
@@ -122,9 +123,8 @@ class TestMemoryHierarchy:
             stderr=subprocess.PIPE,
             text=True,
             cwd=str(cls.fixtures_dir),
-            env=env
+            env=env,
         )
-        
 
         for _ in range(30):
             try:

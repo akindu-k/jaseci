@@ -66,5 +66,3 @@ walker DeleteTask {
         report {"deleted": True, "id": self.id};
     }
 }
-
-
