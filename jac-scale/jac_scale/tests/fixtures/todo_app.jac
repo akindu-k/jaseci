@@ -4,10 +4,6 @@ node Task {
     has completed: bool = False;
 }
 
-node TaskList {
-    has name: str = "Test Task";
-}
-
 walker CreateTask {
     has id: int;
     has title: str;
@@ -23,7 +19,7 @@ walker CreateTask {
 
 walker GetAllTasks {
     can read with `root entry{
-        tasks = [-->]; 
+        tasks = [-->Task]; 
         report tasks;
     }
 }
@@ -32,7 +28,7 @@ walker GetTask {
     has id: int;
 
     can get with `root entry{
-        for task in [-->]{
+        for task in [-->Task]{
             if (self.id == task.id){
                 report task;
             }
@@ -44,7 +40,7 @@ walker CompleteTask {
     has id: int;
 
     can complete with `root entry {
-        for task in [-->] {
+        for task in [-->Task] {
             if (self.id == task.id){
                 visit task;
             }
@@ -61,13 +57,18 @@ walker CompleteTask {
 walker DeleteTask {
     has id: int;
 
-    can delete with `root entry {
+    can visit_node with `root entry {
         for task in [-->] {
             if (self.id == task.id){
-                del task;
-                report {"deleted": True, "id": self.id};
+                visit task;
             }
         }
     }
+
+    can delete with `root entry {
+        del here;
+        report {"deleted": True, "id": self.id};
+    }
 }
+
 

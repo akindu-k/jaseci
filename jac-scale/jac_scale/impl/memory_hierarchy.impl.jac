@@ -362,6 +362,7 @@ impl MongoDB._to_uuid(id: (UUID | str)) -> UUID {
 impl MongoDB.mongo_is_available()  -> bool {
     client = None;
     if (self.mongo_url) {
+        print(f"printing mongo url: {self.mongo_url}");
         try {
             client = MongoClient(self.mongo_url);
 
@@ -407,6 +408,7 @@ impl MongoDB.postinit -> None {
 
 impl MultiHierarchyMemory.<>set(anchor: TANCH) {
     self.mem.set(anchor);
+    print(f"inside set in memory hierarchy");
 }
 
 impl MultiHierarchyMemory.delete(anchor: Anchor) {
@@ -444,6 +446,7 @@ impl MultiHierarchyMemory.close{
 }
 
 impl MultiHierarchyMemory.commit(anchor: (Anchor | None) = None) {
+    print(f"inside commit in memory hierarchy");
     gc = self.mem.get_gc();
     memory = self.mem.get_mem();
     if (anchor) {
@@ -451,10 +454,8 @@ impl MultiHierarchyMemory.commit(anchor: (Anchor | None) = None) {
             self.delete(anchor);
             self.mem.remove_from_gc(anchor);
         } else {
-            if (self.redis_available) {
-                self.redis.set(anchor);
-            }
             if (self.mongo_available) {
+                print(f"committing to mongo from memory hierarchy");
                 self.mongo.set(anchor);
             } elif (self.shelf) {
                 self.shelf.set(anchor);
@@ -498,6 +499,7 @@ impl MultiHierarchyMemory.find_by_id(id: UUID) -> (Anchor | None) {
 }
 
 impl MultiHierarchyMemory.init -> None {
+    print("Initializing MultiHierarchyMemory");
     super.init();
     self.mem = Memory[(UUID, Anchor)]();
     self.redis = RedisDB();
@@ -505,6 +507,10 @@ impl MultiHierarchyMemory.init -> None {
     self.shelf: (ShelfDB | None) = None;
     self.redis_available = self.redis.redis_is_available();
     self.mongo_available = self.mongo.mongo_is_available();
+
+    print(f"redis available: {self.redis_available}")
+    print(f"mongo status: {self.mongo_available}")
+
     if (not self.redis_available and not self.mongo_available) {
         self.shelf = ShelfDB();
     }
