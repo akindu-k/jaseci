@@ -10,7 +10,7 @@ import time
 import gc
 import requests
 import os
-import textwrap
+import pickle
 
 
 def get_free_port() -> int:
@@ -34,8 +34,6 @@ class TestMemoryHierarchy:
         cls.fixtures_dir = Path(__file__).parent / "fixtures"
         cls.jac_file = cls.fixtures_dir / "todo_app.jac"
 
-        cls.config_file = cls.fixtures_dir / "jac.toml"
-
         if not cls.jac_file.exists():
             raise FileNotFoundError(f"Missing Jac file: {cls.jac_file}")
         
@@ -51,40 +49,32 @@ class TestMemoryHierarchy:
         cls.redis_client = redis.Redis(
             host=redis_host,
             port=int(redis_port),
-            decode_responses=True
+            decode_responses=False
         )
         print(f"redis db size: {cls.redis_client.dbsize()}")
+
+        # here we are verifying that redis is empty before starting tests
         assert cls.redis_client.dbsize() == 0
 
-
+        # start mongo container
         cls.mongo_container = MongoDbContainer("mongo:latest")
         cls.mongo_container.start()
 
         mongo_uri = cls.mongo_container.get_connection_url()
         cls.mongo_client = MongoClient(mongo_uri)
 
-        print(f"printing mongo uri{mongo_uri}")
-        print(f"printing redis url {redis_url}")
-
-        # toml_content = textwrap.dedent(f"""
-        # [plugins.scale.database]
-        # mongodb_uri = "${mongo_uri}"
-        # redis_url = "${redis_url}"
-        # """).strip()
-
-        # with open(cls.config_file, "w") as f:
-        #             f.write(toml_content)
-
         os.environ["mongodb_uri"] = mongo_uri
         os.environ["redis_url"] = redis_url
 
-        system_dbs = {'admin', 'config', 'local'}
-        current_dbs = set(cls.mongo_client.list_database_names())
+        # verify there are no additional mongo dbs
+        system_dbs = {
+            "admin",
+            "config",
+            "local"
+        }
 
-        print(f"printing current dbs {current_dbs}")
-
-        # Assert that current_dbs only contains system databases (or fewer)
-        assert current_dbs.issubset(system_dbs), f"Found unexpected user databases: {current_dbs - system_dbs}"
+        initial_dbs = set(cls.mongo_client.list_database_names()) - system_dbs
+        assert (not initial_dbs), "there exists other databases in the initial stage"
 
         # setting up
         cls.port = get_free_port()
@@ -100,12 +90,14 @@ class TestMemoryHierarchy:
             with contextlib.suppress(Exception):
                 cls.server.wait(timeout=5)
 
+        system_dbs = {"admin", "config", "local"}
+        for db_name in cls.mongo_client.list_database_names():
+            if db_name not in system_dbs:
+                cls.mongo_client.drop_database(db_name)
+
         cls.mongo_container.stop()
         cls.redis_container.stop()
 
-        # removing the config file
-        # if (hasattr(cls, 'config_file') and cls.config_file.exists()):
-        #     cls.config_file.unlink()
 
         time.sleep(0.5)
         gc.collect()
@@ -146,13 +138,11 @@ class TestMemoryHierarchy:
         raise RuntimeError(
             f"jac serve failed to start\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}"
         )
-    
         
-
-    def _register(self, email: str) -> str:
+    def _register(self, username: str, password: str="password123") -> str:
         res = requests.post(
             f"{self.base_url}/user/register",
-            json={"email": email, "password": "password123"},
+            json={"username": username, "password": password},
             timeout=5,
         )
         assert res.status_code == 201
@@ -167,88 +157,107 @@ class TestMemoryHierarchy:
         )
         assert res.status_code == 200
         return res.json()
+    
+    def _redis_snapshot(self) -> set[str]:
+        return set(self.redis_client.keys("anchor:*"))
+    
+    def _redis_contains_task(self) -> bool:
+        for key in self.redis_client.keys("anchor:*"):
+            raw = self.redis_client.get(key)
+            try:
+                obj = pickle.loads(raw)
+                print(obj.archetype.__class__.__name__)
+                if obj.archetype.__class__.__name__ == "Task":
+                    return True
+            except Exception:
+                pass
+        return False
+
+    def test_write(self) -> None:
+
+        token = self._register("akindu", "pass123")        
+       
+        system_dbs = {
+            "admin",
+            "config",
+            "local"
+        }
 
 
-    # def test_read_all_tasks(self) -> None:
-    #         token = self._register("crud_read@example.com")
-
-    #         self._post("/walker/CreateTask", {"id": 1, "title": "A"}, token)
-    #         self._post("/walker/CreateTask", {"id": 2, "title": "B"}, token)
-
-    #         res = self._post("/walker/GetAllTasks", {}, token)
-    #         tasks = res["reports"][0]
-
-    #         # assert len(tasks) == 2
-
-    #         '''
-    #         NEED TO FIX TASKS NOT GOING TO PERSISTENT ISSUE
-    #         '''
-            
-    #         # --- NEW CODE TO VERIFY DB ---
-    #         print("\n-------------------------------------------")
-    #         print("Checking MongoDB after creating tasks...")
-    #         all_dbs = self.mongo_client.list_database_names()
-    #         print(f"Current Databases: {all_dbs}")
-            
-    #         # Check if we have a non-system database now
-    #         user_dbs = set(all_dbs) - {'admin', 'config', 'local'}
-    #         if user_dbs:
-    #             print(f"SUCCESS! Found user data in: {user_dbs}")
-    #         else:
-    #             print("WARNING: No new database found. Is the server using the Mongo URI?")
-    #         print("-------------------------------------------\n")
-
-    #         print("\n>>> PINGING DATABASES <<<")
-
-    def _print_mongo_state(self, max_docs_per_collection: int = 5) -> None:
-        print("\n================= MONGO STATE DUMP =================")
-
-        system_dbs = {"admin", "config", "local"}
-        all_dbs = self.mongo_client.list_database_names()
-        user_dbs = [db for db in all_dbs if db not in system_dbs]
-
-        if not user_dbs:
-            print("⚠️  No user databases found.")
-            print("===================================================\n")
-            
-
-        for db_name in system_dbs:
-            print(f"\n📦 Database: {db_name}")
-            db = self.mongo_client[db_name]
-
-            collections = db.list_collection_names()
-            if not collections:
-                print("  └── (no collections)")
-                continue
-
-            for coll_name in collections:
-                collection = db[coll_name]
-                count = collection.count_documents({})
-
-                print(f"  📂 Collection: {coll_name}")
-                print(f"     ├── Document count: {count}")
-
-                if count == 0:
-                    print("     └── (empty)")
-                    continue
-
-                print("     └── Sample documents:")
-                for i, doc in enumerate(collection.find().limit(max_docs_per_collection), start=1):
-                    print(f"         [{i}] {doc}")
-
-        print("\n================ END MONGO STATE ===================\n")
-
-
-    def test_read_all_tasks(self) -> None:
-        token = self._register("ak@example.com")
-
-        self._post("/walker/CreateTask", {"id": 1, "title": "A"}, token)
-        self._post("/walker/CreateTask", {"id": 2, "title": "B"}, token)
-
-        res = self._post("/walker/GetAllTasks", {}, token)
-        tasks = res["reports"][0]
-
-        # Debug persistent state
-        self._print_mongo_state()
-
+        # create tasks
+        self._post(
+            "/walker/CreateTask",
+            {
+                "id" : 1,
+                "title" : "Task 1"
+            },
+            token
+        )
         
+        self._post(
+            "/walker/CreateTask",
+            {
+                "id" : 2,
+                "title" : "Task 2"
+            },
+            token
+        )
+
+        # checking whether new data bases are created
+        current_dbs = set(self.mongo_client.list_database_names())
+        new_user_dbs = current_dbs - system_dbs
+        
+        assert new_user_dbs, "user dbs are not created"
+        assert len(current_dbs) > len(system_dbs)
+
+
+        assert not self._redis_contains_task(), "Task objects leaked into Redis"
+
+        self._post(
+            "/walker/DeleteTask",
+            {
+                "id" : 1
+            },
+            token
+        )
+
+        self._post(
+            "/walker/DeleteTask",
+            {
+                "id" : 2
+            },
+            token
+        )
+
+    # def test_read(self) -> None:
+    #     # Register a user
+    #     token = self._register("reader", "pass123")
+
+    #     # Create tasks
+    #     created_tasks = [
+    #         {"id": 203, "title": "Task 203"},
+    #         {"id": 204, "title": "Task 204"},
+    #     ]
+
+    #     for task_payload in created_tasks:
+    #         self._post("/walker/CreateTask", task_payload, token)
+
+    #     # --- Test GetAllTasks ---
+    #     response = self._post("/walker/GetAllTasks", {}, token)
+    
+    #     # Extract tasks from Jac reports
+    #     all_tasks = response["reports"][0]  # reports is a list of lists
+    
+    #     assert len(all_tasks) == len(created_tasks), "Number of tasks returned doesn't match"
+
+    #     # tasks should be stored in redis now
+    #     assert self._redis_contains_task(), "tasks not in redis"
+
+
+
+
+
+
+
+
+   

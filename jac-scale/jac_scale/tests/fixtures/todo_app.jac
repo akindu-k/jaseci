@@ -16,7 +16,7 @@ walker CreateTask {
 
 walker GetAllTasks {
     can read with `root entry{
-        tasks = [-->Task]; 
+        tasks = [-->]; 
         report tasks;
     }
 }
@@ -25,7 +25,7 @@ walker GetTask {
     has id: int;
 
     can get with `root entry{
-        for task in [-->Task]{
+        for task in [-->]{
             if (self.id == task.id){
                 report task;
             }
