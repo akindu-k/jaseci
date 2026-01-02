@@ -16,7 +16,7 @@ walker CreateTask {
 
 walker GetAllTasks {
     can read with `root entry{
-        tasks = [-->Task]; 
+        tasks = [-->Task];
         report tasks;
     }
 }
@@ -66,5 +66,3 @@ walker DeleteTask {
         report {"deleted": True, "id": self.id};
     }
 }
-
-

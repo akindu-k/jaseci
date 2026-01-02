@@ -1,25 +1,25 @@
+import contextlib
+import gc
+import os
 import socket
 import subprocess
-from pathlib import Path
-from testcontainers.redis import RedisContainer
-from testcontainers.mongodb import MongoDbContainer
-import redis
-from pymongo import MongoClient
-import contextlib
 import time
-import gc
+from pathlib import Path
+
+import redis
 import requests
-import os
-import textwrap
+from pymongo import MongoClient
+from testcontainers.mongodb import MongoDbContainer
+from testcontainers.redis import RedisContainer
 
 
 def get_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("",0))
-        return s.getsockname()[1] 
-    
-class TestMemoryHierarchy:
+        s.bind(("", 0))
+        return s.getsockname()[1]
 
+
+class TestMemoryHierarchy:
     fixtures_dir: Path
     jac_file: Path
     base_url: str
@@ -38,9 +38,9 @@ class TestMemoryHierarchy:
 
         if not cls.jac_file.exists():
             raise FileNotFoundError(f"Missing Jac file: {cls.jac_file}")
-        
+
         # start redis container
-        cls.redis_container = RedisContainer("redis:latest",port=6379)
+        cls.redis_container = RedisContainer("redis:latest", port=6379)
         cls.redis_container.start()
 
         redis_host = cls.redis_container.get_container_host_ip()
@@ -49,13 +49,10 @@ class TestMemoryHierarchy:
         redis_url = f"redis://{redis_host}:{redis_port}/0"
 
         cls.redis_client = redis.Redis(
-            host=redis_host,
-            port=int(redis_port),
-            decode_responses=True
+            host=redis_host, port=int(redis_port), decode_responses=True
         )
         print(f"redis db size: {cls.redis_client.dbsize()}")
         assert cls.redis_client.dbsize() == 0
-
 
         cls.mongo_container = MongoDbContainer("mongo:latest")
         cls.mongo_container.start()
@@ -78,21 +75,22 @@ class TestMemoryHierarchy:
         os.environ["mongodb_uri"] = mongo_uri
         os.environ["redis_url"] = redis_url
 
-        system_dbs = {'admin', 'config', 'local'}
+        system_dbs = {"admin", "config", "local"}
         current_dbs = set(cls.mongo_client.list_database_names())
 
         print(f"printing current dbs {current_dbs}")
 
         # Assert that current_dbs only contains system databases (or fewer)
-        assert current_dbs.issubset(system_dbs), f"Found unexpected user databases: {current_dbs - system_dbs}"
+        assert current_dbs.issubset(system_dbs), (
+            f"Found unexpected user databases: {current_dbs - system_dbs}"
+        )
 
         # setting up
         cls.port = get_free_port()
         cls.base_url = f"http://localhost:{cls.port}"
 
-
         cls._start_server()
-    
+
     @classmethod
     def teardown_class(cls) -> None:
         if cls.server:
@@ -109,11 +107,10 @@ class TestMemoryHierarchy:
 
         time.sleep(0.5)
         gc.collect()
-    
+
     @classmethod
     def _start_server(cls) -> None:
         cmd = [
-            
             "jac",
             "serve",
             str(cls.jac_file.name),
@@ -121,7 +118,6 @@ class TestMemoryHierarchy:
             str(cls.port),
         ]
 
-        
         env = os.environ.copy()
 
         cls.server = subprocess.Popen(
@@ -130,9 +126,8 @@ class TestMemoryHierarchy:
             stderr=subprocess.PIPE,
             text=True,
             cwd=str(cls.fixtures_dir),
-            env=env
+            env=env,
         )
-        
 
         for _ in range(30):
             try:
@@ -146,8 +141,6 @@ class TestMemoryHierarchy:
         raise RuntimeError(
             f"jac serve failed to start\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}"
         )
-    
-        
 
     def _register(self, email: str) -> str:
         res = requests.post(
@@ -168,7 +161,6 @@ class TestMemoryHierarchy:
         assert res.status_code == 200
         return res.json()
 
-
     # def test_read_all_tasks(self) -> None:
     #         token = self._register("crud_read@example.com")
 
@@ -183,13 +175,13 @@ class TestMemoryHierarchy:
     #         '''
     #         NEED TO FIX TASKS NOT GOING TO PERSISTENT ISSUE
     #         '''
-            
+
     #         # --- NEW CODE TO VERIFY DB ---
     #         print("\n-------------------------------------------")
     #         print("Checking MongoDB after creating tasks...")
     #         all_dbs = self.mongo_client.list_database_names()
     #         print(f"Current Databases: {all_dbs}")
-            
+
     #         # Check if we have a non-system database now
     #         user_dbs = set(all_dbs) - {'admin', 'config', 'local'}
     #         if user_dbs:
@@ -210,7 +202,6 @@ class TestMemoryHierarchy:
         if not user_dbs:
             print("⚠️  No user databases found.")
             print("===================================================\n")
-            
 
         for db_name in system_dbs:
             print(f"\n📦 Database: {db_name}")
@@ -233,11 +224,12 @@ class TestMemoryHierarchy:
                     continue
 
                 print("     └── Sample documents:")
-                for i, doc in enumerate(collection.find().limit(max_docs_per_collection), start=1):
+                for i, doc in enumerate(
+                    collection.find().limit(max_docs_per_collection), start=1
+                ):
                     print(f"         [{i}] {doc}")
 
         print("\n================ END MONGO STATE ===================\n")
-
 
     def test_read_all_tasks(self) -> None:
         token = self._register("ak@example.com")
@@ -250,5 +242,3 @@ class TestMemoryHierarchy:
 
         # Debug persistent state
         self._print_mongo_state()
-
-        
