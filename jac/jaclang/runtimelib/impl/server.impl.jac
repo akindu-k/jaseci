@@ -54,9 +54,6 @@ impl JacSerializer._serialize_archetype(arch: Archetype) -> dict[str, JsonValue]
 impl UserManager.postinit -> None {
     import from threading { Lock }
     import from collections { defaultdict }
-    # Use per-user locks for better concurrency
-    # Only blocks when the SAME username is being created concurrently
-    # Threading locks work in both sync and async contexts (though not optimal for async)
     self._user_locks = defaultdict(Lock);
     self._persist_lock = Lock();  # Separate lock for file writes
     self._db_path = f"{self.session_path}.users.json";
@@ -112,7 +109,6 @@ impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
             'root_id': root_id
         };
         self._tokens[token] = username;
-        # Use separate persist lock to avoid holding user lock during file I/O
         with self._persist_lock {
             self._persist();
         }
