@@ -45,6 +45,11 @@ impl ViteCompiler.copy_root_assets(self: ViteCompiler) -> None {
     if (root_assets_dir.exists() and root_assets_dir.is_dir()) {
         self.asset_processor.copy_assets(root_assets_dir, compiled_assets_dir);
     }
+    # Copy configured_asset files from root assets/ to build assets/ (bypassing compiled)
+    build_assets_dir = self.project_dir / '.client-build' / 'build' / 'assets';
+    if (root_assets_dir.exists() and root_assets_dir.is_dir()) {
+        self.asset_processor.copy_custom_asset_types(root_assets_dir, build_assets_dir);
+    }
 }
 
 """Copy an asset file to the compiled directory."""
@@ -141,9 +146,7 @@ impl ViteCompiler.compile_dependencies_recursively(
         }
     }
     collected_globals.update(non_root_globals);
-    export_block = self.jac_compiler.generate_export_block(exports_list);
     combined_js = self.jac_compiler.add_runtime_imports(module_js);
-    combined_js = f"{combined_js}\n{export_block}";
     try {
         relative_path = module_path.relative_to(source_root);
         output_path = self.compiled_dir / relative_path.with_suffix('.js');
@@ -191,8 +194,7 @@ impl ViteCompiler.compile_runtime_utils(self: ViteCompiler) -> tuple[str, list[s
         runtimeutils_manifest
     );
     all_exports = sorted(set((runtimeutils_exports_list + self.ROUTER_EXPORTS)));
-    export_block = self.jac_compiler.generate_export_block(all_exports);
-    combined_runtime_utils_js = f"{runtimeutils_js}\n{export_block}";
+    combined_runtime_utils_js = runtimeutils_js;
     self.compiled_dir.mkdir(parents=True, exist_ok=True);
     (self.compiled_dir / 'client_runtime.js').write_text(
         combined_runtime_utils_js, encoding='utf-8'

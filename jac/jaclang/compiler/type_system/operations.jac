@@ -67,8 +67,12 @@ def get_type_of_binary_operation(
         }
         (magic, rmagic) = BINARY_OPERATOR_MAP[expr.op.name];
         return (
-            evaluator.get_type_of_magic_method_call(left_type, magic)
-            or evaluator.get_type_of_magic_method_call(right_type, rmagic)
+            evaluator.get_type_of_magic_method_call(
+                left_type, magic, [expr.right], expr
+            )
+            or evaluator.get_type_of_magic_method_call(
+                right_type, rmagic, [expr.left], expr
+            )
             or jtypes.UnknownType()
         );
     }
@@ -136,6 +140,15 @@ def get_type_of_binary_operation(
             }
             return right_type;
         }
+    }
+    #  walrus assignment
+    if isinstance(expr.op, uni.Token) and expr.op.name == Tok.WALRUS_EQ {
+        # Walrus operator: (x := expr) assigns right to left and returns right's type
+        if isinstance(expr.left, uni.Name) and expr.left.sym {
+            expr.left.sym.type = right_type;
+            expr.left.type = right_type;
+        }
+        return right_type;
     }
     return jtypes.UnknownType();
 }
