@@ -13,6 +13,7 @@ import from typing { TYPE_CHECKING, Any, Literal, TypeAlias, get_type_hints }
 import from urllib.parse { parse_qs, urlparse }
 import from jaclang.runtimelib.client_bundle { ClientBundleError }
 import from jaclang { JacRuntime as Jac }
+import from jaclang.project.config { get_config }
 
 with entry {
     if TYPE_CHECKING {
@@ -45,12 +46,16 @@ obj JacSerializer {
     static def _serialize_archetype(arch: Archetype) -> dict[str, JsonValue];
 }
 
+obj User{
+    has username: str,
+        password_hash: str,
+        token: str,
+        root_id: str;
+}
+
 """Manage users and their persistent roots."""
 obj UserManager {
-    has session_path: str,
-        _users: dict[(str, dict[(str, str)])] = {},
-        _tokens: dict[(str, str)] = {},
-        _db_path: str = "";
+    has memory: Memory;
 
     def postinit -> None;
     def _load_db -> None;
