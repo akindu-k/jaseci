@@ -12,8 +12,10 @@ import from pathlib { Path }
 import from typing { TYPE_CHECKING, Any, Literal, TypeAlias, get_type_hints }
 import from urllib.parse { parse_qs, urlparse }
 import from jaclang.runtimelib.client_bundle { ClientBundleError }
+import from jaclang.runtimelib.memory {PersistentMemory}
 import from jaclang { JacRuntime as Jac }
 import from jaclang.project.config { get_config }
+import from jaclang.pycore.archetype { NodeAnchor }
 
 with entry {
     if TYPE_CHECKING {
@@ -34,8 +36,9 @@ obj Response {
 }
 
 """User authentication data."""
-obj UserData {
+obj User {
     has username: str,
+        password_hash: str,
         token: str,
         root_id: str;
 }
@@ -46,20 +49,12 @@ obj JacSerializer {
     static def _serialize_archetype(arch: Archetype) -> dict[str, JsonValue];
 }
 
-obj User{
-    has username: str,
-        password_hash: str,
-        token: str,
-        root_id: str;
-}
-
 """Manage users and their persistent roots."""
 obj UserManager {
-    has memory: Memory;
-
-    def postinit -> None;
-    def _load_db -> None;
-    def _persist -> None;
+    has memory: PersistentMemory;
+        
+    def _find_user_by_username(username: str) -> (User | None);
+    def _find_user_by_token(token: str) -> (User | None);
     def create_user(username: str, password: str) -> dict[str, str];
     def authenticate(username: str, password: str) -> (dict[(str, str)] | None);
     def validate_token(token: str) -> (str | None);

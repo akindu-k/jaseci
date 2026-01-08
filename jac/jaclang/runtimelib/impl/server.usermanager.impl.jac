@@ -1,32 +1,19 @@
-impl UserManager.postinit -> None {
-    self._db_path = f"{self.session_path}.users.json";
-    self._load_db();
-}
-
-"""Load user data from persistent storage."""
-impl UserManager._load_db -> None {
-    try {
-        with open(self._db_path, encoding='utf-8') as fh {
-            data = json.load(fh);
-            self._users = data.get('__jac_users__', {});
-            self._tokens = data.get('__jac_tokens__', {});
-        }
-    } except Exception {
-        (self._users, self._tokens) = ({}, {});
+impl UserManager._find_user_by_username(username: str) -> (User | None) {
+    for anc in self.memory.query(
+        filter=lambda a: isinstance(a, NodeAnchor)
+                            and isinstance(a.archetype, User)
+                            and a.archetype.username == username
+    ) {
+        return anc.archetype;
     }
-}
-
-"""Save user data to persistent storage."""
-impl UserManager._persist -> None {
-    with open(self._db_path, 'w', encoding='utf-8') as fh {
-        json.dump({'__jac_users__': self._users, '__jac_tokens__': self._tokens}, fh);
-    }
+    return None;
 }
 
 """Create a new user with their own root node. Returns dict with user data or error."""
 impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
     import from jaclang.pycore.constructs { Root }
-    if (username in self._users) {
+
+    if (self._find_user_by_username(username)){
         return {'error': 'User already exists'};
     }
     # Use existing context instead of creating new one (avoids shelf locking issues)
@@ -35,17 +22,25 @@ impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
     root_anchor = user_root.__jac__;
     Jac.save(root_anchor);
     Jac.commit(root_anchor);
-    root_id = root_anchor.id.hex;
-    token = secrets.token_urlsafe(32);
-    password_hash = hashlib.sha256(password.encode()).hexdigest();
-    self._users[username] = {
-        'password_hash': password_hash,
-        'token': token,
-        'root_id': root_id
+
+    user = User(
+        username=username,
+        password_hash=hashlib.sha256(password.encode()).hexdigest(),
+        token = secrets.token_urlsafe(32),
+        root_id = root_anchor.id.hex;
+    );
+    
+    user_anchor = user.__jac__;
+    Jac.save(user_anchor);
+    Jac.commit(user_anchor);
+
+    return {
+        "username" : username,
+        "token" : user.token,
+        "root_id" : root_anchor.id.hex
     };
-    self._tokens[token] = username;
-    self._persist();
-    return {'username': username, 'token': token, 'root_id': root_id};
+
+
 }
 
 """Authenticate a user and return their data."""
