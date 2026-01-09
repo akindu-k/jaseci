@@ -57,7 +57,7 @@ obj UserAnchor(Anchor) {
 """Manage users and their persistent roots."""
 obj UserManager {
     has session_path: str,
-        mem: (PersistentMemory | None) = None,
+        mem: (PersistentMemory | None) = None;
 
     def postinit -> None;
     def create_user(username: str, password: str) -> dict[str, str];

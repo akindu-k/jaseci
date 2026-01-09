@@ -69,7 +69,7 @@ impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
         filter=lambda a: isinstance(a,UserAnchor)
                       and a.username == username
     ) {
-        return {'error': 'User already exists'}
+        return {'error': 'User already exists'};
     }
     # Use existing context instead of creating new one (avoids shelf locking issues)
     ctx = Jac.get_context();
