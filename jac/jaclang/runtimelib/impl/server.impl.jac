@@ -64,7 +64,7 @@ impl UserManager.postinit -> None {
 """Create a new user with their own root node. Returns dict with user data or error."""
 impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
     import from jaclang.pycore.constructs { Root }
-    
+
     for anc in self.mem.query(
         filter=lambda a: isinstance(a,UserAnchor)
                       and a.username == username
@@ -91,8 +91,8 @@ impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
     self.mem.sync();
 
     return {
-        'username': username, 
-        'token': token, 
+        'username': username,
+        'token': token,
         'root_id': root_id
     };
 }
