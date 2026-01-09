@@ -53,35 +53,23 @@ impl JacSerializer._serialize_archetype(arch: Archetype) -> dict[str, JsonValue]
 }
 
 impl UserManager.postinit -> None {
-    self._db_path = f"{self.session_path}.users.json";
-    self._load_db();
-}
-
-"""Load user data from persistent storage."""
-impl UserManager._load_db -> None {
-    try {
-        with open(self._db_path, encoding='utf-8') as fh {
-            data = json.load(fh);
-            self._users = data.get('__jac_users__', {});
-            self._tokens = data.get('__jac_tokens__', {});
-        }
-    } except Exception {
-        (self._users, self._tokens) = ({}, {});
+    # if persistent memory is not avaialable, use ShelfDB
+    if (self.mem is None) {
+        db_path = f"{self.session_path}.users";
+        self.mem = ShelfMemory(path=db_path);
     }
 }
 
-"""Save user data to persistent storage."""
-impl UserManager._persist -> None {
-    with open(self._db_path, 'w', encoding='utf-8') as fh {
-        json.dump({'__jac_users__': self._users, '__jac_tokens__': self._tokens}, fh);
-    }
-}
 
 """Create a new user with their own root node. Returns dict with user data or error."""
 impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
     import from jaclang.pycore.constructs { Root }
-    if (username in self._users) {
-        return {'error': 'User already exists'};
+    
+    for anc in self.mem.query(
+        filter=lambda a: isinstance(a,UserAnchor)
+                      and a.username == username
+    ) {
+        return {'error': 'User already exists'}
     }
     # Use existing context instead of creating new one (avoids shelf locking issues)
     ctx = Jac.get_context();
@@ -92,57 +80,88 @@ impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
     root_id = root_anchor.id.hex;
     token = secrets.token_urlsafe(32);
     password_hash = hashlib.sha256(password.encode()).hexdigest();
-    self._users[username] = {
-        'password_hash': password_hash,
-        'token': token,
+
+    user_anchor = UserAnchor();
+    user_anchor.username = username;
+    user_anchor.password_hash = password_hash;
+    user_anchor.token = token;
+    user_anchor.root_id = root_id;
+
+    self.mem.put(user_anchor);
+    self.mem.sync();
+
+    return {
+        'username': username, 
+        'token': token, 
         'root_id': root_id
     };
-    self._tokens[token] = username;
-    self._persist();
-    return {'username': username, 'token': token, 'root_id': root_id};
 }
 
 """Authenticate a user and return their data."""
 impl UserManager.authenticate(
     username: str, password: str
 ) -> (dict[(str, str)] | None) {
-    if (username not in self._users) {
+    for anc in self.mem.query(
+        filter=lambda a: isinstance(a, UserAnchor)
+                      and a.username == username
+    ) {
+        user = anc;
+        password_hash = hashlib.sha256(password.encode()).hexdigest();
+        if (user.password_hash == password_hash) {
+            return {
+                'username': username,
+                'token': user.token,
+                'root_id': user.root_id
+            };
+        }
         return None;
-    }
-    user = self._users[username];
-    password_hash = hashlib.sha256(password.encode()).hexdigest();
-    if (user['password_hash'] == password_hash) {
-        return {
-            'username': username,
-            'token': user['token'],
-            'root_id': user['root_id']
-        };
     }
     return None;
 }
 
 """Validate token and return username."""
 impl UserManager.validate_token(token: str) -> (str | None) {
-    return self._tokens.get(token);
+    for anc in self.mem.query(
+        filter=lambda a: isinstance(a, UserAnchor)
+                      and a.token == token
+    ) {
+        return anc.username;
+    }
+    return None;
 }
 
 """Get user's root node ID."""
 impl UserManager.get_root_id(username: str) -> (str | None) {
-    return self._users[username]['root_id'] if (username in self._users) else None;
+    for anc in self.mem.query(
+        filter=lambda a: isinstance(a, UserAnchor)
+                      and a.username == username
+    ) {
+        return anc.root_id;
+    }
+    return None;
 }
 
 """Get user data by username."""
 impl UserManager.get_user(username: str) -> (dict[(str, str)] | None) {
-    if (username not in self._users) {
-        return None;
+    for anc in self.mem.query(
+        filter=lambda a: isinstance(a, UserAnchor)
+                      and a.username == username
+    ) {
+        return {
+            'username': anc.username,
+            'token': anc.token,
+            'root_id': anc.root_id
+        };
     }
-    user = self._users[username];
-    return {'email': username, 'token': user['token'], 'root_id': user['root_id']};
+    return None;
 }
 
-"""Close and persist user data."""
+"""Close and sync user data."""
 impl UserManager.close -> None {
-    self._persist();
+    if (self.mem is not None) {
+        self.mem.sync();
+        self.mem.close();
+    }
 }
 
 """Execute a function in user's context."""
@@ -884,11 +903,22 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                         if (key != 'mode')
                     };
                     username = self._authenticate();
-                    if not username {
-                        username = '__guest__';
-                        if (username not in server.user_manager._users) {
+                    if (not username) {
+                        username = "__guest__";
+                        guest_user_exists = False;
+
+                        for anc in server.user_manager.mem.query(
+                            filter=lambda a: isinstance(a, UserAnchor)
+                                            and a.username == "__guest__"
+                        ) {
+                            guest_user_exists = True;
+                            break;
+                        }
+
+                        if (not guest_user_exists) {
                             server.user_manager.create_user(
-                                username, '__no_password__'
+                                "__guest__",
+                                "__no_password__"
                             );
                         }
                     }
@@ -933,10 +963,23 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                     if (key != 'mode')
                 };
                 username = self._authenticate();
-                if not username {
-                    username = '__guest__';
-                    if (username not in server.user_manager._users) {
-                        server.user_manager.create_user(username, '__no_password__');
+                if (not username) {
+                    username = "__guest__";
+                    guest_user_exists = False;
+
+                    for anc in server.user_manager.mem.query(
+                        filter=lambda a: isinstance(a, UserAnchor)
+                                        and a.username == "__guest__"
+                    ) {
+                        guest_user_exists = True;
+                        break;
+                    }
+
+                    if (not guest_user_exists) {
+                        server.user_manager.create_user(
+                            "__guest__",
+                            "__no_password__"
+                        );
                     }
                 }
                 try {
@@ -1032,11 +1075,22 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                     }
                 } else {
                     username = self._authenticate();
-                    if not username {
-                        username = '__guest__';
-                        if (username not in server.user_manager._users) {
+                    if (not username) {
+                        username = "__guest__";
+                        guest_user_exists = False;
+
+                        for anc in server.user_manager.mem.query(
+                            filter=lambda a: isinstance(a, UserAnchor)
+                                            and a.username == "__guest__"
+                        ) {
+                            guest_user_exists = True;
+                            break;
+                        }
+
+                        if (not guest_user_exists) {
                             server.user_manager.create_user(
-                                username, '__no_password__'
+                                "__guest__",
+                                "__no_password__"
                             );
                         }
                     }
@@ -1058,11 +1112,22 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                     }
                 } else {
                     username = self._authenticate();
-                    if not username {
-                        username = '__guest__';
-                        if (username not in server.user_manager._users) {
+                    if (not username) {
+                        username = "__guest__";
+                        guest_user_exists = False;
+
+                        for anc in server.user_manager.mem.query(
+                            filter=lambda a: isinstance(a, UserAnchor)
+                                            and a.username == "__guest__"
+                        ) {
+                            guest_user_exists = True;
+                            break;
+                        }
+
+                        if (not guest_user_exists) {
                             server.user_manager.create_user(
-                                username, '__no_password__'
+                                "__guest__",
+                                "__no_password__"
                             );
                         }
                     }
