@@ -1,6 +1,6 @@
 """Validate that the argument types can be assigned to the parameter types."""
 impl TypeEvaluator.validate_arg_types(
-    self: TypeEvaluator, args: MatchArgsToParamsResult, checking_overload: bool = False
+    args: MatchArgsToParamsResult, checking_overload: bool = False
 ) -> bool {
     has_errors: bool = False;
     for (arg, param) in args.arg_params.items() {
@@ -35,13 +35,11 @@ Specializes the call based on arg types, and returns the specialized
 type of the return value. If it detects an error along the way, it emits
 a diagnostic and sets argumentErrors to true.
 """
-impl TypeEvaluator.validate_call_args(
-    self: TypeEvaluator, expr: uni.FuncCall
-) -> TypeBase {
+impl TypeEvaluator.validate_call_args(expr: uni.FuncCall) -> TypeBase {
     caller_type = self.get_type_of_expression(expr.target);
     # 1. Call to a function.
     if isinstance(caller_type, types.FunctionType) {
-        arg_param_match = self.match_args_to_params(expr, caller_type);
+        arg_param_match = self.match_args_to_params(expr.params, expr, caller_type);
         if not arg_param_match.argument_errors {
             self.validate_arg_types(arg_param_match);
         }
@@ -51,7 +49,7 @@ impl TypeEvaluator.validate_call_args(
     if isinstance(caller_type, types.OverloadedType) {
         for overload in caller_type.overloads {
             arg_param_match = self.match_args_to_params(
-                expr, overload, checking_overload=True
+                expr.params, expr, overload, checking_overload=True
             );
             if not arg_param_match.argument_errors {
                 if self.validate_arg_types(arg_param_match, checking_overload=True) {
@@ -84,9 +82,24 @@ impl TypeEvaluator.validate_call_args(
             # Only validate __new__ if it's not from object (the base class)
             # object.__new__ accepts (*args, **kwargs) which matches anything
             is_from_object = new_method.class_type.shared.class_name == "object";
+            # TODO: This bellow logic to extract overloads is also used in another place
+            # unify them and place them in a helper method.
+            method_ty = self.get_type_of_symbol(new_method.symbol);
+            overloaded_fns: list[types.FunctionType] = [method_ty];
+            for overload in new_method.overloads {
+                overload_member_ty = self.get_type_of_symbol(overload);
+                if isinstance(overload_member_ty, types.FunctionType) {
+                    overload_member_ty = overload_member_ty.specialize(caller_type);
+                    overloaded_fns.append(overload_member_ty);
+                }
+            }
+            overloaded_ty: types.OverloadedType | None = None;
+            if len(overloaded_fns) > 1 {
+                overloaded_ty = types.OverloadedType(overloaded_fns);
+            }
             if not is_from_object {
                 validated = self._validate_constructor_method(
-                    expr, self.get_type_of_symbol(new_method.symbol)
+                    expr, overloaded_ty or method_ty
                 );
             }
         }
@@ -107,7 +120,9 @@ impl TypeEvaluator.validate_call_args(
     # 5. Call to a callable object (__call__).
     if caller_type.is_class_instance() {
         # TODO: validate args.
-        magic_call_ret = self.get_type_of_magic_method_call(caller_type, "__call__");
+        magic_call_ret = self.get_type_of_magic_method_call(
+            caller_type, "__call__", expr.params, expr
+        );
         if magic_call_ret {
             return magic_call_ret;
         }
@@ -123,8 +138,8 @@ validation is left to the caller.
 This logic is based on PEP 3102: https://www.python.org/dev/peps/pep-3102/
 """
 impl TypeEvaluator.match_args_to_params(
-    self: TypeEvaluator,
-    expr: uni.FuncCall,
+    arg_nodes: list[uni.Expr | uni.KWPair],
+    node_for_error: uni.Expr | None,
     func_type: types.FunctionType,
     checking_overload: bool = False,
 ) -> MatchArgsToParamsResult {
@@ -151,7 +166,7 @@ impl TypeEvaluator.match_args_to_params(
     #          We match positional with          |  We match named arguments with
     #          tracked parameter index.          |  param name lookup.
     #
-    for arg in expr.params {
+    for arg in arg_nodes {
         try {
             if isinstance(arg, uni.KWPair) {
                 # Match parameter based on name lookup.
@@ -173,10 +188,14 @@ impl TypeEvaluator.match_args_to_params(
         argument_errors = True;
         names = ", ".join([f"'{p.name}'" for p in unmatched_params]);
         if not checking_overload {
-            self.add_diagnostic(
-                expr,
-                f"Not all required parameters were provided in the function call: {names}",
-            );
+            # Use node_for_error if available, otherwise fall back to first arg
+            error_node = node_for_error or (arg_nodes[0] if arg_nodes else None);
+            if error_node {
+                self.add_diagnostic(
+                    error_node,
+                    f"Not all required parameters were provided in the function call: {names}",
+                );
+            }
         }
     }
     return MatchArgsToParamsResult(
@@ -189,19 +208,20 @@ Validate constructor method arguments. Handles both FunctionType and OverloadedT
 Returns True if validation was performed (method has meaningful parameters), False otherwise.
 """
 impl TypeEvaluator._validate_constructor_method(
-    self: TypeEvaluator, expr: uni.FuncCall, method_type: TypeBase
+    expr: uni.FuncCall, method_type: TypeBase
 ) -> bool {
     if isinstance(method_type, types.FunctionType) {
         # Check if method has meaningful params to validate.
         # In Jac, self is not included in the parameter list, so we check > 0.
         # In Python stubs, self/cls is included, so we check > 1.
         has_params = len(method_type.parameters) > 0;
-        if has_params and method_type.parameters[0].is_self {
+        if has_params
+        and (method_type.parameters[0].is_self or method_type.parameters[0].is_cls) {
             # Skip self/cls parameter if present (Python stubs)
             has_params = len(method_type.parameters) > 1;
         }
         if has_params {
-            arg_param_match = self.match_args_to_params(expr, method_type);
+            arg_param_match = self.match_args_to_params(expr.params, expr, method_type);
             if not arg_param_match.argument_errors {
                 self.validate_arg_types(arg_param_match);
             }
@@ -213,13 +233,19 @@ impl TypeEvaluator._validate_constructor_method(
         # Try each overload until one matches
         for overload in method_type.overloads {
             arg_param_match = self.match_args_to_params(
-                expr, overload, checking_overload=True
+                expr.params, expr, overload, checking_overload=True
             );
             if not arg_param_match.argument_errors {
                 if self.validate_arg_types(arg_param_match, checking_overload=True) {
                     return True;
                 }
             }
+        }
+        # If none of the overloads matched, emit a diagnostic using the first overload
+        if method_type.overloads {
+            self.match_args_to_params(
+                expr.params, expr, method_type.overloads[0], checking_overload=False
+            );
         }
         # Overloaded methods always count as "validated" to prevent
         # falling back to inherited object.__init__ with no params

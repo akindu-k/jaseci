@@ -9,12 +9,29 @@ entry-point = "src/app.jac"
 # vite.plugins = []
 # vite.build = {}
 
+[plugins.client.app_meta_data]
+"title" = "all-in-one"
+"description" = "All-in-one Jac client application"
+"icon" = "/assets/burger.png"
+"viewport" = "width=device-width, initial-scale=1.0"
+
+[plugins.client.vite]
+plugins = ["tailwindcss()"]
+lib_imports = ["import tailwindcss from '@tailwindcss/vite'"]
+
+[plugins.client.assets]
+custom_extensions = [".py", ".js"]
+
 [dependencies.npm]
-react = "^18.2.0"
-"react-dom" = "^18.2.0"
-"react-router-dom" = "^6.22.0"
 antd = "^6.0.0"
+"jac-client-node" = "1.0.3"
+recharts = "latest"
+tailwindcss = "latest"
 
 [dependencies.npm.dev]
-"@types/react" = "^18.2.0"
-"@types/react-dom" = "^18.2.0"
+"@jac-client/dev-deps" = "1.0.0"
+"@tailwindcss/vite" = "^4.1.17"
+
+[environments.response.headers]
+"Cross-Origin-Opener-Policy" = "same-origin"
+"Cross-Origin-Embedder-Policy" = "require-corp"

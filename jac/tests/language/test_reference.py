@@ -15,20 +15,17 @@ import pytest
 import jaclang
 from jaclang import JacRuntime as Jac
 from jaclang.pycore.program import JacProgram
+from tests.fixtures_list import REFERENCE_JAC_FILES
 
 
 def get_reference_jac_files() -> list[str]:
-    """Get all .jac files from examples/reference directory."""
-    files = []
-    ref_dir = os.path.join(
-        os.path.dirname(os.path.dirname(jaclang.__file__)),
-        "examples/reference",
-    )
-    for root, _, filenames in os.walk(ref_dir):
-        for name in filenames:
-            if name.endswith(".jac") and not name.startswith("err"):
-                files.append(os.path.normpath(os.path.join(root, name)))
-    return files
+    """Get all .jac files from examples/reference directory.
+
+    Uses a fixed list of files from fixtures_list.py for deterministic testing.
+    To add new test files, update REFERENCE_JAC_FILES in tests/fixtures_list.py.
+    """
+    base_dir = os.path.dirname(os.path.dirname(jaclang.__file__))
+    return [os.path.normpath(os.path.join(base_dir, f)) for f in REFERENCE_JAC_FILES]
 
 
 def execute_and_capture_output(code: str | bytes | CodeType, filename: str = "") -> str:
@@ -65,6 +62,8 @@ def test_reference_file(filename: str) -> None:
         pytest.skip("Skipping test file")
     if "by_expressions.jac" in filename:
         pytest.skip("Skipping by_expressions - by operator not yet implemented")
+    if "semstrings.jac" in filename:
+        pytest.skip("Skipping semstrings - byllm not installed")
 
     try:
         jacast = JacProgram().compile(filename)

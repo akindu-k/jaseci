@@ -1,6 +1,7 @@
 """Shared pytest fixtures for the tests directory."""
 
 import contextlib
+import glob
 import inspect
 import io
 import os
@@ -100,12 +101,12 @@ def pytest_configure(config: pytest.Config) -> None:
     to ensure a clean test environment without MongoDB connections or other
     plugin-specific dependencies.
 
-    Also sets JAC_DISABLE_PLUGINS env var for subprocess-based tests.
+    Uses JAC_DISABLED_PLUGINS=* for subprocess-based tests that spawn new jac processes.
     """
     from jaclang.pycore.runtime import JacRuntimeImpl, plugin_manager
 
     # Set env var for subprocess-based tests that spawn new jac processes
-    os.environ["JAC_DISABLE_PLUGINS"] = "1"
+    os.environ["JAC_DISABLED_PLUGINS"] = "*"
 
     global _external_plugins
     for name, plugin in list(plugin_manager.list_name_plugin()):
@@ -120,10 +121,30 @@ def pytest_unconfigure(config: pytest.Config) -> None:
     from jaclang.pycore.runtime import plugin_manager
 
     # Remove env var
-    os.environ.pop("JAC_DISABLE_PLUGINS", None)
+    os.environ.pop("JAC_DISABLED_PLUGINS", None)
 
     global _external_plugins
     for name, plugin in _external_plugins:
         with contextlib.suppress(ValueError):
             plugin_manager.register(plugin, name=name)
     _external_plugins.clear()
+
+
+def _cleanup_shelf_db_files() -> None:
+    """Remove anchor_store.db files that may be created by jac-scale plugin."""
+    for pattern in [
+        "anchor_store.db.dat",
+        "anchor_store.db.bak",
+        "anchor_store.db.dir",
+    ]:
+        for file in glob.glob(pattern):
+            with contextlib.suppress(Exception):
+                Path(file).unlink()
+
+
+@pytest.fixture(autouse=True)
+def cleanup_plugin_artifacts():
+    """Clean up files created by external plugins before and after each test."""
+    _cleanup_shelf_db_files()
+    yield
+    _cleanup_shelf_db_files()

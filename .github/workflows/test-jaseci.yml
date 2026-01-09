@@ -30,7 +30,7 @@ jobs:
         pip install pytest-xdist
 
     - name: Run Jac core tests
-      run: pytest -x jac -n auto --ignore=jac/tests/langserve/
+      run: pytest -x jac -n auto
 
   test-client:
     runs-on: ubuntu-latest
@@ -60,7 +60,7 @@ jobs:
     - name: Run package tests
       run: pytest -x jac-client
 
-  test-packages:
+  test-packages-and-docs:
     runs-on: ubuntu-latest
     steps:
     - name: Check out code
@@ -89,30 +89,8 @@ jobs:
     - name: Run package tests
       run: pytest -x jac-byllm jac-streamlit
 
-  test-langserve:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Check out code
-      uses: actions/checkout@v5
-      with:
-        submodules: true
-
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v3
-      with:
-        python-version: 3.12
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e jac
-        pip install pytest
-        pip install pytest-xdist
-
-    - name: Run language server tests
-      run: | # work-around for github CI
-        pytest -x jac/tests/langserve/test_server.py
-        pytest -x jac/tests/langserve/server_test/test_lang_serve.py
+    - name: Run documentation validation tests
+      run: pytest -q -x docs/tests/test_validate_md_files.py
 
   test-scale:
     runs-on: ubuntu-latest
@@ -135,10 +113,15 @@ jobs:
         pip install pytest
         pip install pytest-asyncio
         pip install -e jac-client
+        pip install testcontainers
 
     - name: Run Backend tests
       run: |
-        pytest -x jac-scale/jac_scale/tests/test_serve.py
+        pytest -x -vv -s jac-scale/jac_scale/tests/test_serve.py
+
+    - name: Run Memory Hierarchy tests
+      run: |
+        pytest -x -vv -s jac-scale/jac_scale/tests/test_memory_hierarchy.py
 
     - name: Run jac-client examples
       run: |
@@ -147,3 +130,100 @@ jobs:
     - name: Run SSO tests
       run: |
         pytest -x jac-scale/jac_scale/tests/test_sso.py
+
+  test-scale-k8s:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+
+      - name: Install Jaseci scale package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e jac
+          pip install -e jac-scale
+          pip install pytest
+          pip install pytest-asyncio
+
+
+      - name: Check for Kubernetes changes
+        id: k8s-changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            k8s:
+              - 'jac-scale/jac_scale/kubernetes/**'
+
+      - name: Install Kind (Kubernetes in Docker)
+        if: steps.k8s-changes.outputs.k8s == 'true'
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.25.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+          kind version
+
+      - name: Create Kubernetes cluster with Kind
+        if: steps.k8s-changes.outputs.k8s == 'true'
+        run: |
+          kind create cluster --name jaseci-test --wait 60s
+          kubectl cluster-info
+          kubectl get nodes
+
+      - name: Run K8 tests
+        if: steps.k8s-changes.outputs.k8s == 'true'
+        run: |
+          pytest -v jac-scale/jac_scale/tests/test_deploy_k8s.py
+          pytest -v jac-scale/jac_scale/tests/test_k8s_utils.py
+
+      - name: Delete Kind cluster
+        if: always() && steps.k8s-changes.outputs.k8s == 'true'
+        run: kind delete cluster --name jaseci-test
+
+  test-pypi-build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v5
+      with:
+        submodules: true
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v3
+      with:
+        python-version: 3.12
+
+    - name: Install build package
+      run: |
+        python -m pip install --upgrade pip
+        pip install build
+
+    - name: Build and install packages
+      run: |
+        python -m build jac --wheel
+        python -m build jac-client --wheel
+        python -m build jac-scale --wheel
+        python -m build jac-byllm --wheel
+        python -m build jac-streamlit --wheel
+        pip install jac/dist/jaclang-*.whl
+        pip install jac-client/dist/jac_client-*.whl
+        pip install jac-scale/dist/jac_scale-*.whl
+        pip install jac-byllm/dist/byllm-*.whl
+        pip install jac-streamlit/dist/jac_streamlit-*.whl
+        pip install pytest
+        pip install pytest-asyncio
+
+    - name: Run integration tests
+      run: python scripts/integration_tests.py
+
+    - name: Run tests on built packages
+      run: |
+        jac check jac/tests/compiler/passes/main/fixtures/checker_type_ref.jac
+        pytest jac-client/jac_client/tests/test_cli.py::test_create_jac_app
+        pytest jac-byllm/tests/test_byllm.py

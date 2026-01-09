@@ -47,7 +47,7 @@ Open `src/app.jac` in your code editor and replace everything with this:
 
 ```jac
 cl {
-    def app() -> any {
+    def:pub app() -> any {
         return <div>
             <h1>Hello, Jac!</h1>
             <p>My first full-stack app</p>
@@ -78,7 +78,7 @@ INFO:     Uvicorn running on http://127.0.0.1:8000
 Open your browser and go to:
 
 ```
-http://localhost:8000/page/app
+http://localhost:8000/cl/app
 ```
 
 You should see "Hello, Jac!" and "My first full-stack app"
@@ -111,7 +111,7 @@ Think of it like this:
 This is your **main entry point** - the function that Jac calls first.
 
 ```jac
-def app() -> any {
+def:pub app() -> any {
     return <div>...</div>;
 }
 ```
@@ -130,7 +130,7 @@ if __name__ == "__main__":
     run_app()
 
 # Jac
-def app() -> any {
+def:pub app() -> any {
     # Start here
 }
 ```
@@ -228,13 +228,13 @@ pip install jac-client
 jac serve src/app.jac --port 8080
 ```
 
-Then visit `http://localhost:8080/page/app`
+Then visit `http://localhost:8080/cl/app`
 
 ### Issue: Blank page in browser
 
 **Check:**
 
-- Did you visit `/page/app` (not just `/`)?
+- Did you visit `/cl/app` (not just `/`)?
 - Check terminal for errors
 - Make sure `app()` has a `return` statement
 
@@ -254,7 +254,7 @@ Before moving on, try changing the text:
 
 ```jac
 cl {
-    def app() -> any {
+    def:pub app() -> any {
         return <div>
             <h1>My Todo App</h1>
             <p>Built with Jac</p>
