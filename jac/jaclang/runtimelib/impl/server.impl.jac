@@ -111,14 +111,13 @@ impl UserManager.authenticate(
 
 """Validate token and return username."""
 impl UserManager.validate_token(token: str) -> (str | None) {
-
     found_user = None;
-
     for anc in self.mem.query(
-        filter=lambda a: User: (isinstance(a, User) and a.token == token)
+        filter=lambda  a: User: (isinstance(a, User) and a.token == token)
     ) {
         if found_user is not None {
             return None;  # Multiple users with same token, invalid state
+
         }
         found_user = anc;
     }
