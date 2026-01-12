@@ -105,6 +105,7 @@ class JacCmd {
             server = JacAPIServer(
                 module_name=mod, session_path=session_path, port=port, base_path=base
             );
+            print(server);
             if faux {
                 try {
                     server.print_endpoint_docs();
@@ -120,7 +121,9 @@ class JacCmd {
                 }
             }
             try {
+                print(f"try to start server on port {port}");
                 server.start();
+                
             } except KeyboardInterrupt {
                 print('\nServer stopped.');
                 mach.close();

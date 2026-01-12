@@ -13,7 +13,6 @@ import from typing { TYPE_CHECKING, Any, Literal, TypeAlias, get_type_hints }
 import from urllib.parse { parse_qs, urlparse }
 import from jaclang.runtimelib.client_bundle { ClientBundleError }
 import from jaclang { JacRuntime as Jac }
-import from jaclang.pycore.archetype { Anchor }
 import from jaclang.runtimelib.memory { PersistentMemory, ShelfMemory }
 
 with entry {
@@ -47,7 +46,7 @@ obj JacSerializer {
     static def _serialize_archetype(arch: Archetype) -> dict[str, JsonValue];
 }
 
-obj UserAnchor(Anchor) {
+obj UserAnchor {
     has username: str,
         password_hash: str,
         token: str,
