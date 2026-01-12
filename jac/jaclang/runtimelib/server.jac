@@ -47,10 +47,10 @@ obj JacSerializer {
 }
 
 obj User {
-    has username: str="",
-        password_hash: str="",
-        token: str="",
-        root_id: str="";
+    has username: str = "",
+        password_hash: str = "",
+        token: str = "",
+        root_id: str = "";
 }
 
 """Manage users and their persistent roots."""
@@ -59,7 +59,7 @@ obj UserManager {
         _users: dict[(str, dict[(str, str)])] = {},
         _tokens: dict[(str, str)] = {},
         _db_path: str = "",
-        mem : (PersistentMemory | None) = None;
+        mem: (PersistentMemory | None) = None;
 
     def postinit -> None;
     def create_user(username: str, password: str) -> dict[str, str];
