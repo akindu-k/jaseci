@@ -90,11 +90,9 @@ impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
 impl UserManager.authenticate(
     username: str, password: str
 ) -> (dict[(str, str)] | None) {
-
     password_hash = hashlib.sha256(password.encode()).hexdigest();
-
     for anc in self.mem.query(
-        filter=lambda a: User: (isinstance(a, User) and a.username == username)
+        filter=lambda  a: User: (isinstance(a, User) and a.username == username)
     ) {
         user = anc;
 
@@ -108,10 +106,8 @@ impl UserManager.authenticate(
 
         return None;
     }
-
     return None;
 }
-
 
 """Validate token and return username."""
 impl UserManager.validate_token(token: str) -> (str | None) {
