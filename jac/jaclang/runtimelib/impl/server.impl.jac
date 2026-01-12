@@ -136,14 +136,9 @@ impl UserManager.get_root_id(username: str) -> (str | None) {
 """Get user data by username."""
 impl UserManager.get_user(username: str) -> (dict[(str, str)] | None) {
     for anc in self.mem.query(
-        filter=lambda a: User: (isinstance(a,User)
-                      and a.username == username)
-    ){
-        return {
-            'username': anc.username,
-            'token': anc.token,
-            'root_id': anc.root_id
-        };
+        filter=lambda  a: User: (isinstance(a, User) and a.username == username)
+    ) {
+        return {'username': anc.username, 'token': anc.token, 'root_id': anc.root_id};
     }
     return None;
 }
