@@ -53,21 +53,17 @@ impl JacSerializer._serialize_archetype(arch: Archetype) -> dict[str, JsonValue]
 }
 
 impl UserManager.postinit -> None {
-    if (self.mem is None){
-        self._db_path = ".jac/data/anchor_store.db" ;
+    if (self.mem is None) {
+        self._db_path = ".jac/data/anchor_store.db";
         self.mem = ShelfMemory(path=self._db_path);
     }
-
 }
-
 
 """Create a new user with their own root node. Returns dict with user data or error."""
 impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
     import from jaclang.pycore.constructs { Root }
-
     for anc in self.mem.query(
-        filter=lambda a: User: (isinstance(a,User)
-                      and a.username == username)
+        filter=lambda  a: User: (isinstance(a, User) and a.username == username)
     ) {
         return {'error': 'User already exists'};
     }
@@ -80,13 +76,11 @@ impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
     root_id = root_anchor.id.hex;
     token = secrets.token_urlsafe(32);
     password_hash = hashlib.sha256(password.encode()).hexdigest();
-
     user_anchor = User();
     user_anchor.username = username;
     user_anchor.password_hash = password_hash;
     user_anchor.token = token;
     user_anchor.root_id = root_id;
-
     self.mem.put(user_anchor.__jac__);
     self.mem.sync();
     return {'username': username, 'token': token, 'root_id': root_id};
@@ -96,19 +90,13 @@ impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
 impl UserManager.authenticate(
     username: str, password: str
 ) -> (dict[(str, str)] | None) {
-
     for anc in self.mem.query(
-        filter=lambda a: User: (isinstance(a,User)
-                      and a.username == username)
-    ){
+        filter=lambda  a: User: (isinstance(a, User) and a.username == username)
+    ) {
         user = anc;
         password_hash = hashlib.sha256(password.encode()).hexdigest();
         if (user.password_hash == password_hash) {
-            return {
-                'username': username,
-                'token': user.token,
-                'root_id': user.root_id
-            };
+            return {'username': username, 'token': user.token, 'root_id': user.root_id};
         }
         return None;
     }
@@ -118,8 +106,7 @@ impl UserManager.authenticate(
 """Validate token and return username."""
 impl UserManager.validate_token(token: str) -> (str | None) {
     for anc in self.mem.query(
-        filter=lambda a: User: (isinstance(a,User)
-                      and a.token == token)
+        filter=lambda  a: User: (isinstance(a, User) and a.token == token)
     ) {
         return anc.username;
     }
@@ -129,9 +116,8 @@ impl UserManager.validate_token(token: str) -> (str | None) {
 """Get user's root node ID."""
 impl UserManager.get_root_id(username: str) -> (str | None) {
     for anc in self.mem.query(
-        filter=lambda a: User: (isinstance(a,User)
-                      and a.username == username)
-    ){
+        filter=lambda  a: User: (isinstance(a, User) and a.username == username)
+    ) {
         return anc.root_id;
     }
     return None;
@@ -702,14 +688,14 @@ impl ExecutionHandler.spawn_walker(
 
 """Initialize the API server."""
 impl JacAPIServer.postinit -> None {
-    self.user_manager = UserManager(session_path=self.session_path); 
-    print("UserManager initialized." );
+    self.user_manager = UserManager(session_path=self.session_path);
+    print("UserManager initialized.");
     self.introspector = Jac.get_module_introspector(self.module_name, self.base_path);
-    print("ModuleIntrospector initialized." );
+    print("ModuleIntrospector initialized.");
     self.execution_manager = ExecutionManager(
         session_path=self.session_path, user_manager=self.user_manager
     );
-    print("ExecutionManager initialized." );
+    print("ExecutionManager initialized.");
     self.auth_handler = AuthHandler(
         introspector=self.introspector,
         execution_manager=self.execution_manager,
@@ -909,19 +895,16 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                     if (not username) {
                         username = "__guest__";
                         guest_user_exists = False;
-
                         for anc in server.user_manager.mem.query(
-                            filter=lambda a:User: (isinstance(a, User)
-                                            and a.username == "__guest__")
+                            filter=lambda  a: User:
+                                (isinstance(a, User) and a.username == "__guest__")
                         ) {
                             guest_user_exists = True;
                             break;
                         }
-
                         if (not guest_user_exists) {
                             server.user_manager.create_user(
-                                "__guest__",
-                                "__no_password__"
+                                "__guest__", "__no_password__"
                             );
                         }
                     }
@@ -966,25 +949,20 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                     if (key != 'mode')
                 };
                 username = self._authenticate();
-                    if (not username) {
-                        username = "__guest__";
-                        guest_user_exists = False;
-
-                        for anc in server.user_manager.mem.query(
-                            filter=lambda a:User: (isinstance(a, User)
-                                            and a.username == "__guest__")
-                        ) {
-                            guest_user_exists = True;
-                            break;
-                        }
-
-                        if (not guest_user_exists) {
-                            server.user_manager.create_user(
-                                "__guest__",
-                                "__no_password__"
-                            );
-                        }
+                if (not username) {
+                    username = "__guest__";
+                    guest_user_exists = False;
+                    for anc in server.user_manager.mem.query(
+                        filter=lambda  a: User:
+                            (isinstance(a, User) and a.username == "__guest__")
+                    ) {
+                        guest_user_exists = True;
+                        break;
                     }
+                    if (not guest_user_exists) {
+                        server.user_manager.create_user("__guest__", "__no_password__");
+                    }
+                }
                 try {
                     render_payload = server.introspector.render_page(
                         func_name, args, username
@@ -1078,22 +1056,19 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                     }
                 } else {
                     username = self._authenticate();
-                       if (not username) {
+                    if (not username) {
                         username = "__guest__";
                         guest_user_exists = False;
-
                         for anc in server.user_manager.mem.query(
-                            filter=lambda a:User: (isinstance(a, User)
-                                            and a.username == "__guest__")
+                            filter=lambda  a: User:
+                                (isinstance(a, User) and a.username == "__guest__")
                         ) {
                             guest_user_exists = True;
                             break;
                         }
-
                         if (not guest_user_exists) {
                             server.user_manager.create_user(
-                                "__guest__",
-                                "__no_password__"
+                                "__guest__", "__no_password__"
                             );
                         }
                     }
@@ -1118,19 +1093,16 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                     if (not username) {
                         username = "__guest__";
                         guest_user_exists = False;
-
                         for anc in server.user_manager.mem.query(
-                            filter=lambda a:User: (isinstance(a, User)
-                                            and a.username == "__guest__")
+                            filter=lambda  a: User:
+                                (isinstance(a, User) and a.username == "__guest__")
                         ) {
                             guest_user_exists = True;
                             break;
                         }
-
                         if (not guest_user_exists) {
                             server.user_manager.create_user(
-                                "__guest__",
-                                "__no_password__"
+                                "__guest__", "__no_password__"
                             );
                         }
                     }
