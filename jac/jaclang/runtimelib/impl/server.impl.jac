@@ -115,12 +115,18 @@ impl UserManager.authenticate(
 
 """Validate token and return username."""
 impl UserManager.validate_token(token: str) -> (str | None) {
+
+    found_user = None;
+
     for anc in self.mem.query(
-        filter=lambda  a: User: (isinstance(a, User) and a.token == token)
+        filter=lambda a: User: (isinstance(a, User) and a.token == token)
     ) {
-        return anc.username;
+        if found_user is not None {
+            return None;  # Multiple users with same token, invalid state
+        }
+        found_user = anc;
     }
-    return None;
+    return found_user.username if found_user is not None else None;
 }
 
 """Get user's root node ID."""
@@ -138,7 +144,7 @@ impl UserManager.get_user(username: str) -> (dict[(str, str)] | None) {
     for anc in self.mem.query(
         filter=lambda  a: User: (isinstance(a, User) and a.username == username)
     ) {
-        return {'username': anc.username, 'token': anc.token, 'root_id': anc.root_id};
+        return {'email': anc.username, 'token': anc.token, 'root_id': anc.root_id};
     }
     return None;
 }
