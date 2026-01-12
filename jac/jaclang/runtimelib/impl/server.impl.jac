@@ -144,7 +144,7 @@ impl UserManager.get_user(username: str) -> (dict[(str, str)] | None) {
                       and a.username == username)
     ){
         return {
-            'email': anc.username,
+            'username': anc.username,
             'token': anc.token,
             'root_id': anc.root_id
         };
