@@ -62,8 +62,9 @@ impl UserManager.postinit -> None {
 """Create a new user with their own root node. Returns dict with user data or error."""
 impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
     import from jaclang.pycore.constructs { Root }
+    # Check if user already exists
     for anc in self.mem.query(
-        filter=lambda  a: User: (isinstance(a, User) and a.username == username)
+        filter=lambda a: Anchor: (isinstance(a.archetype, User) and a.archetype.username == username)
     ) {
         return {'error': 'User already exists'};
     }
@@ -92,9 +93,9 @@ impl UserManager.authenticate(
 ) -> (dict[(str, str)] | None) {
     password_hash = hashlib.sha256(password.encode()).hexdigest();
     for anc in self.mem.query(
-        filter=lambda  a: User: (isinstance(a, User) and a.username == username)
+        filter=lambda a: Anchor: (isinstance(a.archetype, User) and a.archetype.username == username)
     ) {
-        user = anc;
+        user = anc.archetype;
 
         if (user.password_hash == password_hash) {
             return {
@@ -113,13 +114,13 @@ impl UserManager.authenticate(
 impl UserManager.validate_token(token: str) -> (str | None) {
     found_user = None;
     for anc in self.mem.query(
-        filter=lambda  a: User: (isinstance(a, User) and a.token == token)
+        filter=lambda a: Anchor: (isinstance(a.archetype, User) and a.archetype.token == token)
     ) {
         if found_user is not None {
             return None;  # Multiple users with same token, invalid state
 
         }
-        found_user = anc;
+        found_user = anc.archetype;
     }
     return found_user.username if found_user is not None else None;
 }
@@ -127,9 +128,9 @@ impl UserManager.validate_token(token: str) -> (str | None) {
 """Get user's root node ID."""
 impl UserManager.get_root_id(username: str) -> (str | None) {
     for anc in self.mem.query(
-        filter=lambda  a: User: (isinstance(a, User) and a.username == username)
+        filter=lambda a: Anchor: (isinstance(a.archetype, User) and a.archetype.username == username)
     ) {
-        return anc.root_id;
+        return anc.archetype.root_id;
     }
     return None;
 }
@@ -137,9 +138,10 @@ impl UserManager.get_root_id(username: str) -> (str | None) {
 """Get user data by username."""
 impl UserManager.get_user(username: str) -> (dict[(str, str)] | None) {
     for anc in self.mem.query(
-        filter=lambda  a: User: (isinstance(a, User) and a.username == username)
+        filter=lambda a: Anchor: (isinstance(a.archetype, User) and a.archetype.username == username)
     ) {
-        return {'email': anc.username, 'token': anc.token, 'root_id': anc.root_id};
+        user = anc.archetype;
+        return {'email': user.username, 'token': user.token, 'root_id': user.root_id};
     }
     return None;
 }
@@ -902,8 +904,7 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                         username = "__guest__";
                         guest_user_exists = False;
                         for anc in server.user_manager.mem.query(
-                            filter=lambda  a: User:
-                                (isinstance(a, User) and a.username == "__guest__")
+                            filter=lambda a: Anchor: (isinstance(a.archetype, User) and a.archetype.username == "__guest__")
                         ) {
                             guest_user_exists = True;
                             break;
@@ -959,8 +960,7 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                     username = "__guest__";
                     guest_user_exists = False;
                     for anc in server.user_manager.mem.query(
-                        filter=lambda  a: User:
-                            (isinstance(a, User) and a.username == "__guest__")
+                        filter=lambda a: Anchor: (isinstance(a.archetype, User) and a.archetype.username == "__guest__")
                     ) {
                         guest_user_exists = True;
                         break;
@@ -1066,8 +1066,7 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                         username = "__guest__";
                         guest_user_exists = False;
                         for anc in server.user_manager.mem.query(
-                            filter=lambda  a: User:
-                                (isinstance(a, User) and a.username == "__guest__")
+                            filter=lambda a: Anchor: (isinstance(a.archetype, User) and a.archetype.username == "__guest__")
                         ) {
                             guest_user_exists = True;
                             break;
@@ -1100,8 +1099,7 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                         username = "__guest__";
                         guest_user_exists = False;
                         for anc in server.user_manager.mem.query(
-                            filter=lambda  a: User:
-                                (isinstance(a, User) and a.username == "__guest__")
+                            filter=lambda a: Anchor: (isinstance(a.archetype, User) and a.archetype.username == "__guest__")
                         ) {
                             guest_user_exists = True;
                             break;
