@@ -54,7 +54,7 @@ impl JacSerializer._serialize_archetype(arch: Archetype) -> dict[str, JsonValue]
 
 impl UserManager.postinit -> None {
     if (self.mem is None) {
-        self._db_path = ".jac/data/anchor_store.db";
+        self._db_path = ".jac/data/user_anchor_store.db";
         self.mem = ShelfMemory(path=self._db_path);
     }
 }
@@ -697,13 +697,10 @@ impl ExecutionHandler.spawn_walker(
 """Initialize the API server."""
 impl JacAPIServer.postinit -> None {
     self.user_manager = UserManager(session_path=self.session_path);
-    print("UserManager initialized.");
     self.introspector = Jac.get_module_introspector(self.module_name, self.base_path);
-    print("ModuleIntrospector initialized.");
     self.execution_manager = ExecutionManager(
         session_path=self.session_path, user_manager=self.user_manager
     );
-    print("ExecutionManager initialized.");
     self.auth_handler = AuthHandler(
         introspector=self.introspector,
         execution_manager=self.execution_manager,
