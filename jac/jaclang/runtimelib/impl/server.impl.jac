@@ -54,9 +54,11 @@ impl JacSerializer._serialize_archetype(arch: Archetype) -> dict[str, JsonValue]
 
 impl UserManager.postinit -> None {
     if (self.mem is None) {
-        self._db_path = ".jac/data/user_anchor_store.db";
-        self.mem = ShelfMemory(path=self._db_path);
+        ctx = Jac.get_context();
+        self.mem = ctx.mem;
     }
+
+
 }
 
 """Create a new user with their own root node. Returns dict with user data or error."""
@@ -84,7 +86,6 @@ impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
     user_anchor.token = token;
     user_anchor.root_id = root_id;
     self.mem.put(user_anchor.__jac__);
-    self.mem.sync();
     return {'username': username, 'token': token, 'root_id': root_id};
 }
 
