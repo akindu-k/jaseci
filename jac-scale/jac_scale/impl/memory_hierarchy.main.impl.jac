@@ -56,7 +56,6 @@ impl ScaleTieredMemory.close -> None {
     self.__mem__.clear();
     self.__gc__.clear();
 }
-
 # impl ScaleTieredMemory.close -> None {
 #     for anchor in self.__mem__.values() {
 #         self.commit(anchor);
