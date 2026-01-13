@@ -523,17 +523,17 @@ impl TieredMemory.query(
     # }
 
     if self.l3 {
-        if hasattr(self.l3, "find_all"){  # MongoMemory
-            for anchor in self.l3.find_all(){
-                if anchor.id not in seen_ids{
-                    if filter is None or filter(anchor){
-                        seen_ids.add(anchor.id);
-                        yield anchor;
-                    }
-                }
-            }
-        }
-        elif hasattr(self.l3, "__shelf__"){  # ShelfMemory
+        # if hasattr(self.l3, "find_all"){  # MongoMemory
+        #     for anchor in self.l3.find_all(){
+        #         if anchor.id not in seen_ids{
+        #             if filter is None or filter(anchor){
+        #                 seen_ids.add(anchor.id);
+        #                 yield anchor;
+        #             }
+        #         }
+        #     }
+        # }
+        if hasattr(self.l3, "__shelf__"){  # ShelfMemory
             for key in self.l3.__shelf__.keys() {
                 anchor_id = UUID(key);
                 if anchor_id not in seen_ids {
