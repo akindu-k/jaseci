@@ -235,4 +235,7 @@ obj TieredMemory(VolatileMemory) {
     def close -> None;
     def has(id: UUID) -> bool;
     def commit(anchor: (Anchor | None) = None) -> None;
+    def query(
+        filter: (Callable[[Anchor], bool] | None) = None
+    ) -> Generator[Anchor, None, None];
 }

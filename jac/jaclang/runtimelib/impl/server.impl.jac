@@ -84,6 +84,8 @@ impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
     user_anchor.token = token;
     user_anchor.root_id = root_id;
     self.mem.put(user_anchor.__jac__);
+    Jac.save(user_anchor);
+    Jac.commit(user_anchor);
     return {'username': username, 'token': token, 'root_id': root_id};
 }
 

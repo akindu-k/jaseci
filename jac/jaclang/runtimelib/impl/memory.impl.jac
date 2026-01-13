@@ -477,3 +477,48 @@ impl TieredMemory.commit(anchor: (Anchor | None) = None) -> None {
         self.l3.sync();
     }
 }
+
+impl TieredMemory.query(
+    filter: (Callable[[Anchor], bool] | None) = None
+) -> Generator[Anchor, None, None] {
+    seen_ids = set();
+    # Query L1
+    for anchor in self.__mem__.values() {
+        if filter is None or filter(anchor) {
+            seen_ids.add(anchor.id);
+            yield anchor;
+        }
+    }
+    # Query L2
+    # if self.l2 {
+    #     for anchor in self.l2.query(filter) {
+    #         if anchor.id not in seen_ids {
+    #             seen_ids.add(anchor.id);
+    #             yield anchor;
+    #         }
+    #     }
+    # }
+    # Query L3
+    if self.l3 {
+        for key in self.l3.__shelf__.keys() {
+            # # print("key:", key);
+            # try{
+            #     print("value:", self.l3.__shelf__[key].archetype.username);
+            # }
+            # except Exception as e {
+            #     print("error:", e);
+            # }
+            
+            anchor_id = UUID(key);
+            if (anchor_id not in seen_ids) {
+                if (anchor := self.l3.get(anchor_id)) {
+                    if filter is None or filter(anchor) {
+                        seen_ids.add(anchor.id);
+                        yield anchor;
+                    }
+                }
+            }
+
+        }
+    }
+}
