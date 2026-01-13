@@ -57,8 +57,6 @@ impl UserManager.postinit -> None {
         ctx = Jac.get_context();
         self.mem = ctx.mem;
     }
-
-
 }
 
 """Create a new user with their own root node. Returns dict with user data or error."""
