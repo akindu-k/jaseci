@@ -158,8 +158,7 @@ impl UserManager.close -> None {
         self.mem.close();
     }
     for anc in self.mem.query(
-        filter=lambda a: Anchor :
-            (isinstance(a.archetype, User))
+        filter=lambda a: Anchor : (isinstance(a.archetype, User))
     ) {
         Jac.save(anc);
         Jac.commit(anc);
