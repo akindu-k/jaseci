@@ -56,12 +56,10 @@ impl ScaleTieredMemory.init(
 #     self.__mem__.clear();
 #     self.__gc__.clear();
 # }
-
 impl ScaleTieredMemory.close -> None {
     for anchor in self.__mem__.values() {
         self.commit(anchor);
     }
-
     if self.l3 {
         self.l3.sync();
         self.l3.close();
@@ -72,5 +70,3 @@ impl ScaleTieredMemory.close -> None {
     self.__mem__.clear();
     self.__gc__.clear();
 }
-
-
