@@ -532,7 +532,8 @@ impl TieredMemory.query(
         #         }
         #     }
         # }
-        if hasattr(self.l3, "__shelf__"){  # ShelfMemory
+        if self.l3?.__shelf__ {  # ShelfMemory
+
             for key in self.l3.__shelf__.keys() {
                 anchor_id = UUID(key);
                 if anchor_id not in seen_ids {
