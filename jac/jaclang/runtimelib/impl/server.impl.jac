@@ -208,6 +208,7 @@ impl ExecutionManager.spawn_walker(
             target_node = ctx.get_root();
         }
         Jac.spawn(<>walker, target_node);
+        Jac.commit();
         return {
             'result': JacSerializer.serialize(<>walker),
             'reports': JacSerializer.serialize(ctx.reports)
