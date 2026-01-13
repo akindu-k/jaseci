@@ -508,7 +508,6 @@ impl TieredMemory.query(
             # except Exception as e {
             #     print("error:", e);
             # }
-            
             anchor_id = UUID(key);
             if (anchor_id not in seen_ids) {
                 if (anchor := self.l3.get(anchor_id)) {
@@ -518,7 +517,6 @@ impl TieredMemory.query(
                     }
                 }
             }
-
         }
     }
 }
