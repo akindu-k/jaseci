@@ -41,32 +41,33 @@ impl ScaleTieredMemory.init(
     }
 }
 
-# """Close all backends."""
-# impl ScaleTieredMemory.close -> None {
-#     # Sync and close L3 persistence
-#     if self.l3 {
-#         self.l3.sync();
-#         self.l3.close();
-#     }
-#     # Close L2 cache
-#     if self.l2 {
-#         self.l2.close();
-#     }
-#     # Clear L1 (inherited from VolatileMemory)
-#     self.__mem__.clear();
-#     self.__gc__.clear();
-# }
+"""Close all backends."""
 impl ScaleTieredMemory.close -> None {
-    for anchor in self.__mem__.values() {
-        self.commit(anchor);
-    }
+    # Sync and close L3 persistence
     if self.l3 {
         self.l3.sync();
         self.l3.close();
     }
+    # Close L2 cache
     if self.l2 {
         self.l2.close();
     }
+    # Clear L1 (inherited from VolatileMemory)
     self.__mem__.clear();
     self.__gc__.clear();
 }
+
+# impl ScaleTieredMemory.close -> None {
+#     for anchor in self.__mem__.values() {
+#         self.commit(anchor);
+#     }
+#     if self.l3 {
+#         self.l3.sync();
+#         self.l3.close();
+#     }
+#     if self.l2 {
+#         self.l2.close();
+#     }
+#     self.__mem__.clear();
+#     self.__gc__.clear();
+# }
