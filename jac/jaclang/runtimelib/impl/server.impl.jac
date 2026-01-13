@@ -157,6 +157,13 @@ impl UserManager.close -> None {
     if (self.mem is not None) {
         self.mem.close();
     }
+    for anc in self.mem.query(
+        filter=lambda a: Anchor :
+            (isinstance(a.archetype, User))
+    ) {
+        Jac.save(anc);
+        Jac.commit(anc);
+    }
 }
 
 """Execute a function in user's context."""
