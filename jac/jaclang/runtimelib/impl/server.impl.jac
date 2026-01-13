@@ -153,7 +153,6 @@ impl UserManager.get_user(username: str) -> (dict[(str, str)] | None) {
 """Close and sync user data."""
 impl UserManager.close -> None {
     if (self.mem is not None) {
-        self.mem.sync();
         self.mem.close();
     }
 }
