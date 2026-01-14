@@ -21,7 +21,7 @@ import from jaclang.runtimelib.transport {
 }
 import from jaclang { JacRuntime as Jac }
 import from jaclang.runtimelib.memory { PersistentMemory, ShelfMemory }
-import from jaclang.runtimelib.models {User}
+import from jaclang.runtimelib.models { User }
 import from jaclang.project.config { get_config }
 
 with entry {
@@ -54,7 +54,6 @@ obj JacSerializer {
     static def serialize(<>obj: object) -> JsonValue;
     static def _serialize_archetype(arch: Archetype) -> dict[str, JsonValue];
 }
-
 
 """Manage users and their persistent roots."""
 obj UserManager {
