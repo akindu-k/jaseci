@@ -57,10 +57,8 @@ impl UserManager.postinit -> None {
     }
 }
 
-
 """Create a new user with their own root node. Returns dict with user data or error."""
 impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
-
     print("Creating user:", username);
     import from jaclang.pycore.constructs { Root }
     # Check if user already exists
@@ -189,25 +187,19 @@ impl ExecutionManager.spawn_walker(
     walker_cls: type[WalkerArchetype], fields: dict[(str, Any)], username: str
 ) -> dict[str, JsonValue] {
     import from jaclang.pycore.constructs { NodeArchetype }
-
     import traceback;
-
     print(traceback.format_stack());
-    
     print("starting walker spawn");
     root_id = self.user_manager.get_root_id(username);
     if not root_id {
         return {'error': 'User not found'};
     }
-
     print(fields);
     target_node_id = fields.pop('_jac_spawn_node', None);
-
     # Use existing context and set entry node to user's root (avoids shelf locking issues)
     ctx = Jac.get_context();
     ctx.set_entry_node(root_id);
     ctx.reports = [];  # Clear reports for this request
-
     try {
         print("spawning walker");
         <>walker = walker_cls(**fields);
@@ -791,7 +783,7 @@ impl ExecutionHandler.spawn_walker(
 
 """Initialize the API server."""
 impl JacAPIServer.postinit -> None {
-    Jac.exec_ctx=Jac.create_j_context(session=self.session_path);
+    Jac.exec_ctx = Jac.create_j_context(session=self.session_path);
     self.user_manager = UserManager(session_path=self.session_path);
     self.introspector = Jac.get_module_introspector(self.module_name, self.base_path);
     self.execution_manager = ExecutionManager(
@@ -1156,7 +1148,6 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
             print("Parsed JSON data:", data);
             print("Handling POST request for path:", path);
             if (path == '/user/register') {
-                
                 response = server.auth_handler.create_user(
                     data.get('username', ''), data.get('password', '')
                 );
@@ -1240,7 +1231,7 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                     }
                 }
                 fields = data;
-                if (node_id){
+                if (node_id) {
                     {'_jac_spawn_node': node_id};
                 }
                 print("Spawning walker with fields:", fields);
