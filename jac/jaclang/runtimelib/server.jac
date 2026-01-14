@@ -56,9 +56,6 @@ obj User {
 """Manage users and their persistent roots."""
 obj UserManager {
     has session_path: str,
-        _users: dict[(str, dict[(str, str)])] = {},
-        _tokens: dict[(str, str)] = {},
-        _db_path: str = "",
         mem: (PersistentMemory | None) = None;
 
     def postinit -> None;
