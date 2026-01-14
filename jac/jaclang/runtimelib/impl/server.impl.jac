@@ -801,17 +801,16 @@ impl JacAPIServer.postinit -> None {
         execution_manager=self.execution_manager,
         user_manager=self.user_manager
     );
-
     atexit.register(self._cleanup);
 }
 
 impl JacAPIServer._cleanup -> None {
     try {
-        if hasattr(self, 'user_manager') and self.user_manager {
+        if self?.user_manager and self.user_manager {
             self.user_manager.close();
         }
-        if hasattr(Jac, 'exec_ctx') and Jac.exec_ctx {
-            if hasattr(Jac.exec_ctx, 'mem') and Jac.exec_ctx.mem {
+        if Jac?.exec_ctx and Jac.exec_ctx {
+            if Jac.exec_ctx?.mem and Jac.exec_ctx.mem {
                 Jac.exec_ctx.mem.close();
             }
         }
