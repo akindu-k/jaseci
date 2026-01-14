@@ -783,9 +783,7 @@ impl ExecutionHandler.spawn_walker(
 
 """Initialize the API server."""
 impl JacAPIServer.postinit -> None {
-
     import atexit;
-    
     # Clean up any stale lock files
     if self.session_path and os.path.exists(self.session_path) {
         # Try to detect and clean stale locks
@@ -807,15 +805,7 @@ impl JacAPIServer.postinit -> None {
             }
         }
     }
-
-
-
-
-
-
-
-
-    Jac.exec_ctx=Jac.create_j_context(session=self.session_path);
+    Jac.exec_ctx = Jac.create_j_context(session=self.session_path);
     self.user_manager = UserManager(session_path=self.session_path);
     self.introspector = Jac.get_module_introspector(self.module_name, self.base_path);
     self.execution_manager = ExecutionManager(
