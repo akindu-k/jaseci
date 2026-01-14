@@ -836,6 +836,23 @@ impl JacAPIServer.postinit -> None {
         execution_manager=self.execution_manager,
         user_manager=self.user_manager
     );
+
+    atexit.register(self._cleanup);
+}
+
+impl JacAPIServer._cleanup -> None {
+    try {
+        if hasattr(self, 'user_manager') and self.user_manager {
+            self.user_manager.close();
+        }
+        if hasattr(Jac, 'exec_ctx') and Jac.exec_ctx {
+            if hasattr(Jac.exec_ctx, 'mem') and Jac.exec_ctx.mem {
+                Jac.exec_ctx.mem.close();
+            }
+        }
+    } except Exception as e {
+        print(f"Warning during cleanup: {e}");
+    }
 }
 
 """Create HTTP request handler."""

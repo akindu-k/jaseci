@@ -489,7 +489,7 @@ impl TieredMemory.query(
         }
     }
     if self.l3 {
-        if self.l3?.find_all {  # MongoMemory
+        if hasattr(self.l3, 'find_all') and callable(self.l3.find_all) {  # MongoMemory
 
             for anchor in self.l3.find_all() {
                 if anchor.id not in seen_ids {
@@ -499,7 +499,7 @@ impl TieredMemory.query(
                     }
                 }
             }
-        } elif self.l3.__shelf__ {  # ShelfMemory
+        } elif hasattr(self.l3, '__shelf__') and self.l3.__shelf__ {  # ShelfMemory
 
             for key in self.l3.__shelf__.keys() {
                 anchor_id = UUID(key);

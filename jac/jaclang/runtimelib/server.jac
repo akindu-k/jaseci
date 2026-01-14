@@ -196,6 +196,7 @@ obj JacAPIServer {
         base_path: (str | None) = None;
 
     def postinit -> None;
+    def _cleanup -> None;
     def create_handler -> type[BaseHTTPRequestHandler];
     def load_module(force_reload: bool = False) -> None;
     @property
