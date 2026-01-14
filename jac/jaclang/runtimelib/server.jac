@@ -61,7 +61,6 @@ obj User {
         root_id: str = "";
 }
 
-
 """Manage users and their persistent roots."""
 obj UserManager {
     has session_path: str,
