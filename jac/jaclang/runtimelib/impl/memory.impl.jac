@@ -489,38 +489,6 @@ impl TieredMemory.query(
             yield anchor;
         }
     }
-    # Query L2
-    # if self.l2 {
-    #     for anchor in self.l2.query(filter) {
-    #         if anchor.id not in seen_ids {
-    #             seen_ids.add(anchor.id);
-    #             yield anchor;
-    #         }
-    #     }
-    # }
-    # Query L3
-    # if self.l3 {
-    #     for key in self.l3.__shelf__.keys() {
-    #         # # print("key:", key);
-    #         # try{
-    #         #     print("value:", self.l3.__shelf__[key].archetype.username);
-    #         # }
-    #         # except Exception as e {
-    #         #     print("error:", e);
-    #         # }
-
-    #         anchor_id = UUID(key);
-    #         if (anchor_id not in seen_ids) {
-    #             if (anchor := self.l3.get(anchor_id)) {
-    #                 if filter is None or filter(anchor) {
-    #                     seen_ids.add(anchor.id);
-    #                     yield anchor;
-    #                 }
-    #             }
-    #         }
-
-    #     }
-    # }
     if self.l3 {
         if hasattr(self.l3, "find_all"){  # MongoMemory
             for anchor in self.l3.find_all(){
