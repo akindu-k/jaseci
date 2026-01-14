@@ -59,8 +59,11 @@ impl UserManager.postinit -> None {
     }
 }
 
+
 """Create a new user with their own root node. Returns dict with user data or error."""
 impl UserManager.create_user(username: str, password: str) -> dict[str, str] {
+
+    print("Creating user:", username);
     import from jaclang.pycore.constructs { Root }
     # Check if user already exists
     for anc in self.mem.query(
@@ -188,27 +191,44 @@ impl ExecutionManager.spawn_walker(
     walker_cls: type[WalkerArchetype], fields: dict[(str, Any)], username: str
 ) -> dict[str, JsonValue] {
     import from jaclang.pycore.constructs { NodeArchetype }
+
+    import traceback;
+
+    print(traceback.format_stack());
+    
+    print("starting walker spawn");
     root_id = self.user_manager.get_root_id(username);
     if not root_id {
         return {'error': 'User not found'};
     }
+
+    print(fields);
     target_node_id = fields.pop('_jac_spawn_node', None);
+
     # Use existing context and set entry node to user's root (avoids shelf locking issues)
     ctx = Jac.get_context();
     ctx.set_entry_node(root_id);
     ctx.reports = [];  # Clear reports for this request
+
     try {
+        print("spawning walker");
         <>walker = walker_cls(**fields);
+        print("target_node_id:", target_node_id);
         if target_node_id {
             target_node = Jac.get_object(target_node_id);
+            print("got target node:", target_node);
+            Jac.save(target_node);
             if not isinstance(target_node, NodeArchetype) {
                 return {'error': f"Invalid target node: {target_node_id}"};
             }
         } else {
             target_node = ctx.get_root();
+            print("using root node as target:", target_node);
+            Jac.save(target_node);
         }
         Jac.spawn(<>walker, target_node);
         Jac.commit();
+        print("committed walker spawn");
         return {
             'result': JacSerializer.serialize(<>walker),
             'reports': JacSerializer.serialize(ctx.reports)
@@ -691,6 +711,7 @@ impl ExecutionHandler.call_function(
 impl ExecutionHandler.spawn_walker(
     name: str, fields: dict[(str, Any)], username: str
 ) -> Response {
+    print("ExecutionHandler.spawn_walker called");
     self.introspector.load();
     walkers = self.introspector.get_walkers();
     if (name not in walkers) {
@@ -702,6 +723,7 @@ impl ExecutionHandler.spawn_walker(
 
 """Initialize the API server."""
 impl JacAPIServer.postinit -> None {
+    Jac.exec_ctx=Jac.create_j_context(session=self.session_path);
     self.user_manager = UserManager(session_path=self.session_path);
     self.introspector = Jac.get_module_introspector(self.module_name, self.base_path);
     self.execution_manager = ExecutionManager(
@@ -1040,6 +1062,7 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
 
         """Handle POST requests."""
         def do_POST(self: JacRequestHandler) -> None {
+            print("Received POST request for path:", self.path);
             parsed_path = urlparse(self.path);
             path = parsed_path.path;
             try {
@@ -1048,7 +1071,10 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                 Jac.send_json(self, 400, {'error': 'Invalid JSON'});
                 return;
             }
+            print("Parsed JSON data:", data);
+            print("Handling POST request for path:", path);
             if (path == '/user/register') {
+                
                 response = server.auth_handler.create_user(
                     data.get('username', ''), data.get('password', '')
                 );
@@ -1101,6 +1127,7 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                 name_parts = path.split('/');
                 name = name_parts[-2] if (len(name_parts) > 3) else name_parts[-1];
                 node_id = name_parts[-1] if (len(name_parts) > 3) else '';
+                print("Spawning walker:", name, "on node:", node_id);
                 server.introspector.load();
                 if server.introspector.is_auth_required_for_walker(name) {
                     username = self._authenticate();
@@ -1130,7 +1157,11 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                         }
                     }
                 }
-                fields = data | {'_jac_spawn_node': node_id};
+                fields = data;
+                if (node_id){
+                    {'_jac_spawn_node': node_id};
+                }
+                print("Spawning walker with fields:", fields);
                 response = server.execution_handler.spawn_walker(
                     name, fields, username
                 );
