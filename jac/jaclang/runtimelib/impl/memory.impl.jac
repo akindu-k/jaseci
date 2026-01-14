@@ -477,9 +477,20 @@ impl TieredMemory.commit(anchor: (Anchor | None) = None) -> None {
     }
 }
 
+impl TieredMemory.query(
+    filter: (Callable[[Anchor], bool] | None) = None
+) -> Generator[Anchor, None, None] {
+    seen_ids = set();
+    # Query L1
+    for anchor in self.__mem__.values() {
+        if filter is None or filter(anchor) {
+            seen_ids.add(anchor.id);
+            yield anchor;
+        }
+    }
     if self.l3 {
-        # Check if it's MongoMemory (has find_all method)
-        if hasattr(self.l3, 'find_all') and callable(self.l3.find_all) {
+        if hasattr(self.l3, 'find_all') and callable(self.l3.find_all) {  # MongoMemory
+
             for anchor in self.l3.find_all() {
                 if anchor.id not in seen_ids {
                     if filter is None or filter(anchor) {
@@ -489,6 +500,7 @@ impl TieredMemory.commit(anchor: (Anchor | None) = None) -> None {
                 }
             }
         } elif hasattr(self.l3, '__shelf__') and self.l3.__shelf__ {  # ShelfMemory
+
             for key in self.l3.__shelf__.keys() {
                 anchor_id = UUID(key);
                 if anchor_id not in seen_ids {
@@ -502,3 +514,4 @@ impl TieredMemory.commit(anchor: (Anchor | None) = None) -> None {
             }
         }
     }
+}
