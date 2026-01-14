@@ -67,7 +67,8 @@ impl __jacSpawn(left: str, right: str = "", fields: dict = {}) -> any {
         error_text = await response.json();
         raise Exception(f"Walker {walker} failed: {error_text}") ;
     }
-    return await response.json();
+    payload = await response.json();
+    return payload.get("data", {});
 }
 
 impl jacSpawn(left: str, right: str = "", fields: dict = {}) -> any {
@@ -87,12 +88,11 @@ impl __jacCallFunction(function_name: str, args: dict = {}) -> any {
             "body": JSON.stringify({"args": args})
         }
     );
-    if not response.ok {
-        error_text = await response.text();
-        raise Exception(f"Function {function_name} failed: {error_text}") ;
+    payload = await response.json();
+    if not payload.get("ok") {
+        raise Exception(f"Function {function_name} failed: {payload.get('error')}") ;
     }
-    data = JSON.parse(await response.text());
-    return data["result"];
+    return payload.get("data", {}).get("result");
 }
 
 impl jacSignup(username: str, password: str) -> dict {
@@ -106,7 +106,7 @@ impl jacSignup(username: str, password: str) -> dict {
     );
     if response.ok {
         data = JSON.parse(await response.text());
-        token = data["token"];
+        token = data.get("data", {}).get("token");
         if token {
             __setLocalStorage("jac_token", token);
             return {"success": True, "token": token, "username": username};
@@ -139,7 +139,7 @@ impl jacLogin(username: str, password: str) -> bool {
     );
     if response.ok {
         data = JSON.parse(await response.text());
-        token = data["token"];
+        token = data.get("data", {}).get("token");
         if token {
             __setLocalStorage("jac_token", token);
             return True;
