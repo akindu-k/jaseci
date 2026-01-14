@@ -1,5 +1,3 @@
-import from jaclang.project.config { get_config }
-
 """Serialize objects to JSON-compatible format."""
 impl JacSerializer.serialize(<>obj: object) -> JsonValue {
     import from jaclang.pycore.constructs { Archetype }
@@ -339,11 +337,7 @@ impl ModuleIntrospector._collect_functions -> dict[str, Callable[(..., Any)]] {
     functions: dict[(str, Callable[(..., Any)])] = {};
     export_names = <>set(self._client_manifest.get('exports', []));
     for (name, <>obj) in inspect.getmembers(self._module) {
-        if (
-            inspect.isfunction(<>obj)
-            and not name.startswith('_')
-            and (<>obj.__module__ == self._module.__name__)
-        ) {
+        if (inspect.isfunction(<>obj) and not name.startswith('_')) {
             functions[name] = <>obj;
             if (name in export_names) {
                 self._client_functions[name] = <>obj;
@@ -373,7 +367,6 @@ impl ModuleIntrospector._collect_walkers -> dict[str, type[WalkerArchetype]] {
             isinstance(<>obj, <>type)
             and issubclass(<>obj, WalkerArchetype)
             and (<>obj is not WalkerArchetype)
-            and (<>obj.__module__ == self._module.__name__)
         ) {
             walkers[name] = <>obj;
         }
@@ -381,10 +374,38 @@ impl ModuleIntrospector._collect_walkers -> dict[str, type[WalkerArchetype]] {
     return walkers;
 }
 
+"""Check if the module has been reloaded (e.g., by HMR) and refresh if needed."""
+impl ModuleIntrospector._check_module_freshness -> None {
+    if not self._module {
+        return;
+    }
+    # Check if any cached walker class is stale (different from what's in the module)
+    # This handles the case where importlib.reload() updates the module in place
+    needs_refresh = False;
+    for (name, cached_cls) in self._walkers.items() {
+        current_cls = getattr(self._module, name, None);
+        if current_cls is not cached_cls {
+            needs_refresh = True;
+            break;
+        }
+    }
+    if needs_refresh {
+        # Module was reloaded, refresh our caches
+        self._load_manifest();
+        self._extract_access_levels();
+        self._functions = self._collect_functions();
+        self._walkers = self._collect_walkers();
+        self._bundle = None;
+        self._bundle_error = None;
+    }
+}
+
 """Get all functions."""
 impl ModuleIntrospector.get_functions -> dict[str, Callable[(..., Any)]] {
     if not self._functions {
         self.load();
+    } else {
+        self._check_module_freshness();
     }
     return <>dict(self._functions);
 }
@@ -393,6 +414,8 @@ impl ModuleIntrospector.get_functions -> dict[str, Callable[(..., Any)]] {
 impl ModuleIntrospector.get_walkers -> dict[str, type[WalkerArchetype]] {
     if not self._walkers {
         self.load();
+    } else {
+        self._check_module_freshness();
     }
     return <>dict(self._walkers);
 }
@@ -632,93 +655,138 @@ impl ResponseBuilder._add_custom_headers(handler: BaseHTTPRequestHandler) -> Non
 }
 
 """Create new user."""
-impl AuthHandler.create_user(username: str, password: str) -> Response {
+impl AuthHandler.create_user(username: str, password: str) -> TransportResponse {
     if (not username or not password) {
-        return Response(status=400, body={'error': 'Username and password required'});
+        return TransportResponse.fail(
+            code='VALIDATION_ERROR',
+            message='Username and password required',
+            meta=Meta(extra={'http_status': 400})
+        );
     }
     result = self.user_manager.create_user(username, password);
     if ('error' in result) {
-        return Response(status=400, body=result);
+        return TransportResponse.fail(
+            code='USER_EXISTS',
+            message=result.get('error', 'User creation failed'),
+            meta=Meta(extra={'http_status': 400})
+        );
     }
-    return Response(status=201, body=result);
+    return TransportResponse.success(
+        data=result, meta=Meta(extra={'http_status': 201})
+    );
 }
 
 """Authenticate user."""
-impl AuthHandler.login(username: str, password: str) -> Response {
+impl AuthHandler.login(username: str, password: str) -> TransportResponse {
     if (not username or not password) {
-        return Response(status=400, body={'error': 'Username and password required'});
+        return TransportResponse.fail(
+            code='VALIDATION_ERROR',
+            message='Username and password required',
+            meta=Meta(extra={'http_status': 400})
+        );
     }
     result = self.user_manager.authenticate(username, password);
     if not result {
-        return Response(status=401, body={'error': 'Invalid credentials'});
+        return TransportResponse.fail(
+            code='UNAUTHORIZED',
+            message='Invalid credentials',
+            meta=Meta(extra={'http_status': 401})
+        );
     }
-    return Response(status=200, body=result);
+    return TransportResponse.success(
+        data=result, meta=Meta(extra={'http_status': 200})
+    );
 }
 
 """List all functions."""
-impl IntrospectionHandler.list_functions -> Response {
+impl IntrospectionHandler.list_functions -> TransportResponse {
     self.introspector.load();
-    return Response(
-        status=200,
-        body={'functions': <>list(self.introspector.get_functions().keys())}
+    return TransportResponse.success(
+        data={'functions': <>list(self.introspector.get_functions().keys())},
+        meta=Meta(extra={'http_status': 200})
     );
 }
 
 """List all walkers."""
-impl IntrospectionHandler.list_walkers -> Response {
+impl IntrospectionHandler.list_walkers -> TransportResponse {
     self.introspector.load();
-    return Response(
-        status=200, body={'walkers': <>list(self.introspector.get_walkers().keys())}
+    return TransportResponse.success(
+        data={'walkers': <>list(self.introspector.get_walkers().keys())},
+        meta=Meta(extra={'http_status': 200})
     );
 }
 
 """Get function signature."""
-impl IntrospectionHandler.get_function_info(name: str) -> Response {
+impl IntrospectionHandler.get_function_info(name: str) -> TransportResponse {
     self.introspector.load();
     functions = self.introspector.get_functions();
     if (name not in functions) {
-        return Response(status=404, body={'error': f"Function '{name}' not found"});
+        return TransportResponse.fail(
+            code='NOT_FOUND',
+            message=f"Function '{name}' not found",
+            meta=Meta(extra={'http_status': 404})
+        );
     }
     signature = self.introspector.introspect_callable(functions[name]);
-    return Response(status=200, body={'name': name, 'signature': signature});
+    return TransportResponse.success(
+        data={'name': name, 'signature': signature},
+        meta=Meta(extra={'http_status': 200})
+    );
 }
 
 """Get walker info."""
-impl IntrospectionHandler.get_walker_info(name: str) -> Response {
+impl IntrospectionHandler.get_walker_info(name: str) -> TransportResponse {
     self.introspector.load();
     walkers = self.introspector.get_walkers();
     if (name not in walkers) {
-        return Response(status=404, body={'error': f"Walker '{name}' not found"});
+        return TransportResponse.fail(
+            code='NOT_FOUND',
+            message=f"Walker '{name}' not found",
+            meta=Meta(extra={'http_status': 404})
+        );
     }
     info = self.introspector.introspect_walker(walkers[name]);
-    return Response(status=200, body={'name': name, 'info': info});
+    return TransportResponse.success(
+        data={'name': name, 'info': info}, meta=Meta(extra={'http_status': 200})
+    );
 }
 
 """Call a function."""
 impl ExecutionHandler.call_function(
     name: str, args: dict[(str, Any)], username: str
-) -> Response {
+) -> TransportResponse {
     self.introspector.load();
     functions = self.introspector.get_functions();
     if (name not in functions) {
-        return Response(status=404, body={'error': f"Function '{name}' not found"});
+        return TransportResponse.fail(
+            code='NOT_FOUND',
+            message=f"Function '{name}' not found",
+            meta=Meta(extra={'http_status': 404})
+        );
     }
     result = self.execution_manager.execute_function(functions[name], args, username);
-    return Response(status=200, body=result);
+    return TransportResponse.success(
+        data=result, meta=Meta(extra={'http_status': 200})
+    );
 }
 
 """Spawn a walker."""
 impl ExecutionHandler.spawn_walker(
     name: str, fields: dict[(str, Any)], username: str
-) -> Response {
-    print("ExecutionHandler.spawn_walker called");
+) -> TransportResponse {
     self.introspector.load();
     walkers = self.introspector.get_walkers();
     if (name not in walkers) {
-        return Response(status=404, body={'error': f"Walker '{name}' not found"});
+        return TransportResponse.fail(
+            code='NOT_FOUND',
+            message=f"Walker '{name}' not found",
+            meta=Meta(extra={'http_status': 404})
+        );
     }
     result = self.execution_manager.spawn_walker(walkers[name], fields, username);
-    return Response(status=200, body=result);
+    return TransportResponse.success(
+        data=result, meta=Meta(extra={'http_status': 200})
+    );
 }
 
 """Initialize the API server."""
@@ -774,9 +842,20 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
             return json.loads(body);
         }
 
-        """Send response to client."""
-        def _send_response(self: JacRequestHandler, response: Response) -> None {
-            Jac.send_json(self, response.status, response.body);
+        """Send response to client (supports both Response and TransportResponse).
+
+        Uses HTTPTransport to demonstrate transport abstraction layer.
+        """
+        def _send_response(
+            self: JacRequestHandler, response: (Response | TransportResponse)
+        ) -> None {
+            # Handle legacy Response objects for backward compatibility
+            if isinstance(response, Response) {
+                Jac.send_json(self, response.status, response.body);
+            } else {
+                transport = HTTPTransport(handler=self);
+                transport.send(response);
+            }
         }
 
         """Handle OPTIONS requests (CORS preflight)."""
@@ -1053,7 +1132,10 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                     return;
                 }
                 self._send_response(
-                    Response(status=200, body={'message': 'sucessful'})
+                    TransportResponse.success(
+                        data={'message': 'sucessful'},
+                        meta=Meta(extra={'http_status': 200})
+                    )
                 );
             } else {
                 Jac.send_json(self, 404, {'error': 'Not found'});
