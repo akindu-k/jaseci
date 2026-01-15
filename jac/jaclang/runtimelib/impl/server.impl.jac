@@ -801,6 +801,7 @@ impl JacAPIServer.postinit -> None {
         execution_manager=self.execution_manager,
         user_manager=self.user_manager
     );
+    self.server = Jac.create_server(self, '0.0.0.0', self.port);
     atexit.register(self._cleanup);
 }
 
