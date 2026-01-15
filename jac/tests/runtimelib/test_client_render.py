@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import glob
-import os
 import json
+import os
 import re
 from pathlib import Path
 
@@ -13,7 +13,6 @@ import pytest
 from jaclang import JacRuntime as Jac
 from jaclang.runtimelib.server import JacAPIServer
 from tests.runtimelib.conftest import fixture_abs_path
-
 
 SESSION_PATH = str(fixture_abs_path("client.session"))
 
