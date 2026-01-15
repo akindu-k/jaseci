@@ -228,12 +228,25 @@ impl ShelfMemory.has(id: UUID) -> bool {
 impl ShelfMemory.query(
     filter: (Callable[[Anchor], bool] | None) = None
 ) -> Generator[Anchor, None, None] {
+    yielded_ids: set[UUID] = set();
     for anchor in self.__mem__.values() {
         if filter is None or filter(anchor) {
             yield anchor;
         }
     }
+
+    if isinstance(self.__shelf__, shelve.Shelf) {
+        for (key, anchor) in self.__shelf__.items() {
+            if (anchor.id not in yielded_ids) {
+                if (filter is None or filter(anchor)) {
+                    self.__mem__[anchor.id] = anchor;
+                    yield anchor;
+                }
+            }
+        }
+    }
 }
+
 
 """Get all root anchors."""
 impl ShelfMemory.get_roots -> Generator[Root, None, None] {

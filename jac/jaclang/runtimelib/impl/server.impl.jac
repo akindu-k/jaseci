@@ -758,28 +758,7 @@ impl ExecutionHandler.spawn_walker(
 
 """Initialize the API server."""
 impl JacAPIServer.postinit -> None {
-    import atexit;
-    # Clean up any stale lock files
-    if self.session_path and os.path.exists(self.session_path) {
-        # Try to detect and clean stale locks
-        import fcntl;
-        try {
-            # Test if we can access the file
-            test_fd = os.open(self.session_path, os.O_RDONLY | os.O_CREAT);
-            fcntl.flock(test_fd, fcntl.LOCK_EX | fcntl.LOCK_NB);
-            fcntl.flock(test_fd, fcntl.LOCK_UN);
-            os.close(test_fd);
-        } except (OSError, IOError) {
-            print(f"Warning: Session file appears locked. Attempting cleanup...");
-            # Remove potentially stale lock files
-            for ext in ['', '.db', '.dir', '.dat', '.bak'] {
-                lock_file = f"{self.session_path}{ext}";
-                with suppress(OSError) {
-                    os.remove(lock_file);
-                }
-            }
-        }
-    }
+
     Jac.exec_ctx = Jac.create_j_context(session=self.session_path);
     self.user_manager = UserManager(session_path=self.session_path);
     self.introspector = ModuleIntrospector(self.module_name, self.base_path);
@@ -805,20 +784,6 @@ impl JacAPIServer.postinit -> None {
     atexit.register(self._cleanup);
 }
 
-impl JacAPIServer._cleanup -> None {
-    try {
-        if self?.user_manager and self.user_manager {
-            self.user_manager.close();
-        }
-        if Jac?.exec_ctx and Jac.exec_ctx {
-            if Jac.exec_ctx?.mem and Jac.exec_ctx.mem {
-                Jac.exec_ctx.mem.close();
-            }
-        }
-    } except Exception as e {
-        print(f"Warning during cleanup: {e}");
-    }
-}
 
 """Create HTTP request handler."""
 impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
