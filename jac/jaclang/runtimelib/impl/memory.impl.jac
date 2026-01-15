@@ -234,7 +234,6 @@ impl ShelfMemory.query(
             yield anchor;
         }
     }
-
     if isinstance(self.__shelf__, shelve.Shelf) {
         for (key, anchor) in self.__shelf__.items() {
             if (anchor.id not in yielded_ids) {
@@ -246,7 +245,6 @@ impl ShelfMemory.query(
         }
     }
 }
-
 
 """Get all root anchors."""
 impl ShelfMemory.get_roots -> Generator[Root, None, None] {
