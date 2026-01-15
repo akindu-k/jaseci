@@ -758,7 +758,6 @@ impl ExecutionHandler.spawn_walker(
 
 """Initialize the API server."""
 impl JacAPIServer.postinit -> None {
-
     Jac.exec_ctx = Jac.create_j_context(session=self.session_path);
     self.user_manager = UserManager(session_path=self.session_path);
     self.introspector = ModuleIntrospector(self.module_name, self.base_path);
@@ -782,7 +781,6 @@ impl JacAPIServer.postinit -> None {
     );
     self.server = Jac.create_server(self, '0.0.0.0', self.port);
 }
-
 
 """Create HTTP request handler."""
 impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
