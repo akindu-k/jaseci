@@ -206,16 +206,16 @@ class TestMemoryHierarchy:
 
         mongo_doc_initial_count = collection.count_documents({})
         assert (
-            mongo_doc_initial_count == 2
-        )  # the initial docs is two, because super root, guest_user
+            mongo_doc_initial_count == 3
+        )  # the initial docs is three: super root, guest_user's Root, guest_user's User anchor
 
         # Register a user
         token = self._register("reader", "pass123")
 
         mongo_doc_after_user_creation_count = collection.count_documents({})
         assert (
-            mongo_doc_after_user_creation_count == 3
-        )  # the initial docs is three, because super root, guest_user and the created user
+            mongo_doc_after_user_creation_count == 5
+        )  # 3 initial + new user's Root + new user's User anchor
 
         redis_size_before_task_creation = self.redis_client.dbsize()
 
@@ -233,9 +233,9 @@ class TestMemoryHierarchy:
         mongo_doc_count_after_task_creation = collection.count_documents({})
 
         assert (
-            mongo_doc_count_after_task_creation == 7
-        )  # the previous 3 and two anchors (1 node + 1 edge) for each task
-
+            mongo_doc_count_after_task_creation == 9
+        )  # the previous 5 and two anchors (1 node + 1 edge) for each task
+        
         assert redis_size_after_task_creation == redis_size_before_task_creation
 
         self._post("/walker/GetAllTasks", {}, token)
@@ -243,5 +243,5 @@ class TestMemoryHierarchy:
         redis_size_after_task_read = self.redis_client.dbsize()
 
         assert (
-            redis_size_after_task_read == 7
-        )  # super root, guest user, created user, two task nodes, and two edges
+            redis_size_after_task_read == 9
+        )  # super root, guest_user Root+User, created_user Root+User, two task nodes
