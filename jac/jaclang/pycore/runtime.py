@@ -2411,6 +2411,7 @@ class JacRuntime(JacRuntimeInterface):
             "jaclang.runtimelib.memory",
             "jaclang.runtimelib.context",
             "jaclang.runtimelib.test",
+            "jaclang.runtimelib.server",
             "jaclang.compiler.passes.tool.doc_ir",
             # Keep language server + type-system modules stable across resets.
             # These are imported at module scope in tests and rely on `isinstance`
