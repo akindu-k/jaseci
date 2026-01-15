@@ -67,6 +67,7 @@ obj UserManager {
         mem: (PersistentMemory | None) = None;
 
     def postinit -> None;
+    def create_user(username: str, password: str) -> dict[str, str];
     def authenticate(username: str, password: str) -> (dict[(str, str)] | None);
     def validate_token(token: str) -> (str | None);
     def get_root_id(username: str) -> (str | None);
@@ -195,7 +196,6 @@ obj JacAPIServer {
         base_path: (str | None) = None;
 
     def postinit -> None;
-    def _cleanup -> None;
     def create_handler -> type[BaseHTTPRequestHandler];
     def load_module(force_reload: bool = False) -> None;
     @property
