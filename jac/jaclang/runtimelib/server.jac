@@ -77,7 +77,7 @@ obj UserManager {
 
 """Manages execution contexts for user operations."""
 obj ExecutionManager {
-    has session_path: str,
+    has base_path: str,
         user_manager: UserManager;
 
     def execute_function(
@@ -191,9 +191,8 @@ obj ExecutionHandler {
 """REST API Server for Jac programs."""
 obj JacAPIServer {
     has module_name: str,
-        session_path: str,
         port: int = 8000,
-        base_path: (str | None) = None;
+        base_path: str = "";
 
     def postinit -> None;
     def create_handler -> type[BaseHTTPRequestHandler];
