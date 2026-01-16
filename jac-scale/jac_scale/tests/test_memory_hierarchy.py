@@ -235,7 +235,7 @@ class TestMemoryHierarchy:
         assert (
             mongo_doc_count_after_task_creation == 9
         )  # the previous 5 and two anchors (1 node + 1 edge) for each task
-        
+
         assert redis_size_after_task_creation == redis_size_before_task_creation
 
         self._post("/walker/GetAllTasks", {}, token)
