@@ -617,7 +617,7 @@ def test_data_persistence(littlex_server) -> None:
     littlex_server["start_server"]()
 
     # Login again
-    login_result = littlex_server["request"]("POST", "/user/login", {"username": "alice", "password": "pass123"})
+    login_result = littlex_server["request"]("POST", "/user/login", {"username": "Alice", "password": "pass123"})
     login_data = login_result.get("data", login_result)
 
     assert "token" in login_data
