@@ -278,20 +278,9 @@ impl SqliteMemory.has(id: UUID) -> bool {
 impl SqliteMemory.query(
     filter: (Callable[[Anchor], bool] | None) = None
 ) -> Generator[Anchor, None, None] {
-    yielded_ids: set[UUID] = set();
     for anchor in self.__mem__.values() {
         if filter is None or filter(anchor) {
             yield anchor;
-        }
-    }
-    if isinstance(self.__shelf__, shelve.Shelf) {
-        for (key, anchor) in self.__shelf__.items() {
-            if (anchor.id not in yielded_ids) {
-                if (filter is None or filter(anchor)) {
-                    self.__mem__[anchor.id] = anchor;
-                    yield anchor;
-                }
-            }
         }
     }
 }
@@ -587,19 +576,25 @@ impl TieredMemory.query(
                     }
                 }
             }
-        } elif self.l3?.__shelf__ and self.l3.__shelf__ {  # ShelfMemory
-
-            for key in self.l3.__shelf__.keys() {
-                anchor_id = UUID(key);
-                if anchor_id not in seen_ids {
-                    if (anchor := self.l3.get(anchor_id)) {
-                        if filter is None or filter(anchor) {
-                            seen_ids.add(anchor.id);
-                            yield anchor;
-                        }
-                    }
+        } 
+    } elif self.l3?.__conn__ and self.l3.__conn__ {  # SqliteMemory
+    import from _pickle { UnpicklingError }
+    
+    # Query the database for all anchors
+    cursor = self.l3.__conn__.execute("SELECT id, data FROM anchors");
+    for row in cursor.fetchall() {
+        anchor_id = UUID(row[0]);
+        if anchor_id not in seen_ids {
+            try {
+                anchor = loads(row[1]);
+                if filter is None or filter(anchor) {
+                    seen_ids.add(anchor.id);
+                    yield anchor;
                 }
+            } except (UnpicklingError, ModuleNotFoundError, AttributeError) {
+                continue;
             }
         }
     }
+}
 }
