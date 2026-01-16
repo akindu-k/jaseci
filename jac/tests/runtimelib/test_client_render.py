@@ -7,7 +7,6 @@ import json
 import os
 import re
 import socket
-from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -23,6 +22,7 @@ def get_free_port() -> int:
         s.listen(1)
         port = s.getsockname()[1]
     return port
+
 
 SESSION_PATH = str(fixture_abs_path("client.session"))
 
