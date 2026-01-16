@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import glob
 import json
-import os
 import re
 import socket
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -24,23 +23,13 @@ def get_free_port() -> int:
     return port
 
 
-SESSION_PATH = str(fixture_abs_path("client.session"))
-
-
-def _cleanup_session_files() -> None:
-    """Remove all session files (client.session.*)."""
-    for f in glob.glob(f"{SESSION_PATH}.*"):
-        os.remove(f)
-
-
 @pytest.fixture(autouse=True)
-def reset_machine():
-    """Reset Jac machine and clean up session files before and after each test."""
-    _cleanup_session_files()
-    Jac.reset_machine()
+def reset_machine(tmp_path: Path) -> Generator[None, None, None]:
+    """Reset Jac machine before and after each test."""
+    # Use tmp_path for session isolation in parallel tests
+    Jac.reset_machine(base_path=str(tmp_path))
     yield
-    Jac.reset_machine()
-    _cleanup_session_files()
+    Jac.reset_machine(base_path=str(tmp_path))
 
 
 def make_server() -> JacAPIServer:
