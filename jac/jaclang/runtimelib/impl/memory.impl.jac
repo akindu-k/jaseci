@@ -576,25 +576,25 @@ impl TieredMemory.query(
                     }
                 }
             }
-        } 
+        }
     } elif self.l3?.__conn__ and self.l3.__conn__ {  # SqliteMemory
-    import from _pickle { UnpicklingError }
-    
-    # Query the database for all anchors
-    cursor = self.l3.__conn__.execute("SELECT id, data FROM anchors");
-    for row in cursor.fetchall() {
-        anchor_id = UUID(row[0]);
-        if anchor_id not in seen_ids {
-            try {
-                anchor = loads(row[1]);
-                if filter is None or filter(anchor) {
-                    seen_ids.add(anchor.id);
-                    yield anchor;
+
+        import from _pickle { UnpicklingError }
+        # Query the database for all anchors
+        cursor = self.l3.__conn__.execute("SELECT id, data FROM anchors");
+        for row in cursor.fetchall() {
+            anchor_id = UUID(row[0]);
+            if anchor_id not in seen_ids {
+                try {
+                    anchor = loads(row[1]);
+                    if filter is None or filter(anchor) {
+                        seen_ids.add(anchor.id);
+                        yield anchor;
+                    }
+                } except (UnpicklingError, ModuleNotFoundError, AttributeError) {
+                    continue;
                 }
-            } except (UnpicklingError, ModuleNotFoundError, AttributeError) {
-                continue;
             }
         }
     }
-}
 }
