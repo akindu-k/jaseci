@@ -20,7 +20,7 @@ import from jaclang.runtimelib.transport {
     Meta
 }
 import from jaclang { JacRuntime as Jac }
-import from jaclang.runtimelib.memory { PersistentMemory, ShelfMemory }
+import from jaclang.runtimelib.memory { PersistentMemory }
 import from jaclang.project.config { get_config }
 
 with entry {
@@ -63,7 +63,7 @@ obj User {
 
 """Manage users and their persistent roots."""
 obj UserManager {
-    has session_path: str,
+    has base_path: str,
         mem: (PersistentMemory | None) = None;
 
     def postinit -> None;
