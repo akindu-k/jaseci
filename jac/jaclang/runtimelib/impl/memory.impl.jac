@@ -329,7 +329,11 @@ impl SqliteMemory.sync -> None {
     import from _pickle { PicklingError }
     # Check if there's anything to sync
     has_persistent = any(a.persistent for a in self.__mem__.values());
-    print(f"SqliteMemory.sync: has_persistent={has_persistent}, gc_count={len(self.__gc__)}");
+    print(
+        f"SqliteMemory.sync: has_persistent={has_persistent}, gc_count={len(
+            self.__gc__
+        )}"
+    );
     if not self.__gc__ and not has_persistent {
         print("SqliteMemory.sync: Nothing to sync, skipping DB creation");
         return;  # Nothing to sync, don't create DB
@@ -353,16 +357,20 @@ impl SqliteMemory.sync -> None {
         }
 
         key = str(id);
-        print(f"SqliteMemory.sync: Processing anchor {key}, type={type(anchor.archetype).__name__}");
+        print(
+            f"SqliteMemory.sync: Processing anchor {key}, type={type(anchor.archetype).__name__}"
+        );
         try {
             cursor = self.__conn__.execute(
                 "SELECT data FROM anchors WHERE id = ?", (key, )
             );
             row = cursor.fetchone();
             stored = loads(row[0]) if row else None;
-            
+
             if stored {
-                print(f"SqliteMemory.sync: Anchor {key} already exists in DB, updating");
+                print(
+                    f"SqliteMemory.sync: Anchor {key} already exists in DB, updating"
+                );
                 # Handle edge updates (CONNECT access)
                 if (
                     isinstance(stored, NodeAnchor)
@@ -372,7 +380,9 @@ impl SqliteMemory.sync -> None {
                 ) {
                     print(f"SqliteMemory.sync: Updating edges for {key}");
                     if not anchor.edges and not isinstance(anchor.archetype, Root) {
-                        print(f"SqliteMemory.sync: Deleting anchor {key} (no edges, not Root)");
+                        print(
+                            f"SqliteMemory.sync: Deleting anchor {key} (no edges, not Root)"
+                        );
                         self.__conn__.execute(
                             "DELETE FROM anchors WHERE id = ?", (key, )
                         );
@@ -407,20 +417,28 @@ impl SqliteMemory.sync -> None {
                 print(f"SqliteMemory.sync: New anchor {key}, checking write access");
                 # New anchor - check write access before persisting
                 if Jac.check_write_access(anchor) {
-                    print(f"SqliteMemory.sync: Write access granted for new anchor {key}");
+                    print(
+                        f"SqliteMemory.sync: Write access granted for new anchor {key}"
+                    );
                     self.__conn__.execute(
                         "INSERT OR REPLACE INTO anchors (id, data) VALUES (?, ?)",
                         (key, dumps(anchor))
                     );
                     print(f"SqliteMemory.sync: New anchor {key} stored in database");
                 } else {
-                    print(f"SqliteMemory.sync: Write access DENIED for new anchor {key}");
+                    print(
+                        f"SqliteMemory.sync: Write access DENIED for new anchor {key}"
+                    );
                 }
             } else {
-                print(f"SqliteMemory.sync: Skipping anchor {key} (NodeAnchor without edges, not Root)");
+                print(
+                    f"SqliteMemory.sync: Skipping anchor {key} (NodeAnchor without edges, not Root)"
+                );
             }
         } except (PicklingError, AttributeError, ModuleNotFoundError) as e {
-            print(f"SqliteMemory.sync: Error pickling anchor {key}: {type(e).__name__}");
+            print(
+                f"SqliteMemory.sync: Error pickling anchor {key}: {type(e).__name__}"
+            );
             # Skip anchors that can't be pickled (e.g., transient test classes)
             continue;
         }
@@ -593,6 +611,7 @@ impl TieredMemory.query(
     }
     if self.l3 {
         if self.l3?.find_all and callable(self.l3.find_all) {  # MongoMemory
+
             for anchor in self.l3.find_all() {
                 if anchor.id not in seen_ids {
                     if filter is None or filter(anchor) {
@@ -602,11 +621,11 @@ impl TieredMemory.query(
                 }
             }
         } else {  # SqliteMemory
+
             # Lazily connect if DB exists
             if not self.l3.__conn__ and os.path.exists(self.l3.path) {
                 self.l3._ensure_connection();
             }
-            
             if self.l3.__conn__ {
                 import from _pickle { UnpicklingError }
                 cursor = self.l3.__conn__.execute("SELECT id, data FROM anchors");
