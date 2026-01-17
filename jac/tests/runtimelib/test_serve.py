@@ -389,6 +389,7 @@ def test_start_with_nonexistent_file_error(tmp_path: Path) -> None:
     finally:
         os.chdir(original_cwd)
 
+
 def test_server_update_username(tmp_path: Path) -> None:
     """Test update username endpoint."""
     tmp_path.start_server()
