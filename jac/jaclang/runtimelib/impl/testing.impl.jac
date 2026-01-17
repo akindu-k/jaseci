@@ -97,6 +97,15 @@ impl JacTestClient.post(
     return self.request("POST", path, json=json, headers=headers);
 }
 
+"""Make a PUT request with JSON body."""
+impl JacTestClient.put(
+    path: str,
+    json: (dict[str, Any] | None) = None,
+    headers: (dict[str, str] | None) = None
+) -> TestResponse {
+    return self.request("PUT", path, json=json, headers=headers);
+}
+
 """Make a request with specified method."""
 impl JacTestClient.request(
     method: str,
