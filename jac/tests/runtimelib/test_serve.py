@@ -102,7 +102,8 @@ def test_user_manager_token_validation(tmp_path: Path) -> None:
     username = user_mgr.validate_token("invalid_token")
     assert username is None
     user_mgr.close()
-    
+
+
 def test_faux_flag_with_littlex_example(tmp_path: Path) -> None:
     """Test that --faux flag correctly identifies functions, walkers, and endpoints in littleX example."""
     import io
@@ -320,6 +321,7 @@ def test_start_with_nonexistent_file_error(tmp_path: Path) -> None:
     finally:
         os.chdir(original_cwd)
 
+
 def test_server_update_username(tmp_path: Path) -> None:
     """Test update username endpoint."""
     tmp_path.start_server()
@@ -496,4 +498,3 @@ def test_server_update_password_without_auth(tmp_path: Path) -> None:
     data = result.get("data", result)
     assert "error" in data
     assert "Authentication required" in data.get("error", "")
-
