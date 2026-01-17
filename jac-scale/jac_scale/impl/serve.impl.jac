@@ -879,7 +879,11 @@ impl JacAPIServer.update_username(
     import from jaclang.runtimelib.transport { TransportResponse, Meta }
     # Validate token and extract username
     token: (str | None) = None;
-    if (Authorization and isinstance(Authorization, str) and Authorization.startswith('Bearer ')) {
+    if (
+        Authorization
+        and isinstance(Authorization, str)
+        and Authorization.startswith('Bearer ')
+    ) {
         token = Authorization[7:];
     }
     print(f"Authorization token: {token}");
@@ -932,7 +936,11 @@ impl JacAPIServer.update_password(
     import from jaclang.runtimelib.transport { TransportResponse, Meta }
     # Validate token and extract username
     token: (str | None) = None;
-    if (Authorization and isinstance(Authorization, str) and Authorization.startswith('Bearer ')) {
+    if (
+        Authorization
+        and isinstance(Authorization, str)
+        and Authorization.startswith('Bearer ')
+    ) {
         token = Authorization[7:];
     }
     token_username = self.validate_jwt_token(token) if token else None;
@@ -958,7 +966,9 @@ impl JacAPIServer.update_password(
             meta=Meta(extra={'http_status': 400})
         );
     }
-    result = self.user_manager.update_password(username, current_password, new_password);
+    result = self.user_manager.update_password(
+        username, current_password, new_password
+    );
     if ('error' in result) {
         return TransportResponse.fail(
             code='UPDATE_FAILED',
@@ -974,9 +984,7 @@ impl JacAPIServer.update_password(
 impl JacAPIServer.register_update_username_endpoint(self: JacAPIServer) -> None {
     import from fastapi { Depends }
     import from fastapi.security { HTTPBearer, HTTPAuthorizationCredentials }
-    
     security = HTTPBearer();
-    
     # Create wrapper that FastAPI will handle directly
     def wrapper_callback(
         body: UpdateUsernameRequest,
@@ -985,9 +993,10 @@ impl JacAPIServer.register_update_username_endpoint(self: JacAPIServer) -> None 
         # Extract token from credentials
         token = credentials.credentials if credentials else None;
         authorization = f'Bearer {token}' if token else None;
-        return self.update_username(body.current_username, body.new_username, authorization);
+        return self.update_username(
+            body.current_username, body.new_username, authorization
+        );
     }
-    
     # Register directly with FastAPI (bypassing JEndPoint parameter processing)
     self.server.app.put(
         '/user/username',
@@ -995,15 +1004,15 @@ impl JacAPIServer.register_update_username_endpoint(self: JacAPIServer) -> None 
         tags=['User APIs'],
         summary='Update username',
         description='Endpoint for updating user\'s username. Requires authentication.'
-    )(wrapper_callback);
+    )(
+        wrapper_callback
+    );
 }
 
 impl JacAPIServer.register_update_password_endpoint(self: JacAPIServer) -> None {
     import from fastapi { Depends }
     import from fastapi.security { HTTPBearer, HTTPAuthorizationCredentials }
-    
     security = HTTPBearer();
-    
     # Create wrapper that FastAPI will handle directly
     def wrapper_callback(
         body: UpdatePasswordRequest,
@@ -1012,9 +1021,10 @@ impl JacAPIServer.register_update_password_endpoint(self: JacAPIServer) -> None 
         # Extract token from credentials
         token = credentials.credentials if credentials else None;
         authorization = f'Bearer {token}' if token else None;
-        return self.update_password(body.username, body.current_password, body.new_password, authorization);
+        return self.update_password(
+            body.username, body.current_password, body.new_password, authorization
+        );
     }
-    
     # Register directly with FastAPI (bypassing JEndPoint parameter processing)
     self.server.app.put(
         '/user/password',
@@ -1022,7 +1032,9 @@ impl JacAPIServer.register_update_password_endpoint(self: JacAPIServer) -> None 
         tags=['User APIs'],
         summary='Update password',
         description='Endpoint for updating user\'s password. Requires authentication.'
-    )(wrapper_callback);
+    )(
+        wrapper_callback
+    );
 }
 
 impl JacAPIServer.init(

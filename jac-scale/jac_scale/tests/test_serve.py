@@ -1395,7 +1395,9 @@ class TestJacScaleServe:
         assert "token" in login_result
         assert login_result["username"] == new_name
 
-    @pytest.mark.xfail(reason="OpenAPI endpoint may not be available during test", strict=False)
+    @pytest.mark.xfail(
+        reason="OpenAPI endpoint may not be available during test", strict=False
+    )
     def test_update_username_endpoint_in_openapi_docs(self) -> None:
         """Test that update username endpoint appears in OpenAPI documentation."""
         response = requests.get(f"{self.base_url}/openapi.json", timeout=5)
@@ -1669,7 +1671,9 @@ class TestJacScaleServe:
         )
         assert "error" in login_result
 
-    @pytest.mark.xfail(reason="OpenAPI endpoint may not be available during test", strict=False)
+    @pytest.mark.xfail(
+        reason="OpenAPI endpoint may not be available during test", strict=False
+    )
     def test_update_password_endpoint_in_openapi_docs(self) -> None:
         """Test that update password endpoint appears in OpenAPI documentation."""
         response = requests.get(f"{self.base_url}/openapi.json", timeout=5)
