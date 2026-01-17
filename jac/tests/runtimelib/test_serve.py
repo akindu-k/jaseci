@@ -149,6 +149,7 @@ def test_server_user_login(server_fixture: ServerFixture) -> None:
     assert "error" in login_fail
     user_mgr.close()
 
+
 def test_server_authentication_required(server_fixture: ServerFixture) -> None:
     """Test that protected endpoints require authentication."""
     server_fixture.start_server()
