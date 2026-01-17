@@ -101,8 +101,77 @@ def test_user_manager_token_validation(tmp_path: Path) -> None:
     # Invalid token
     username = user_mgr.validate_token("invalid_token")
     assert username is None
+
     user_mgr.close()
-    
+
+
+# =============================================================================
+# Faux Mode Tests (no real server started)
+# =============================================================================
+
+
+def test_faux_flag_prints_endpoint_docs(tmp_path: Path) -> None:
+    """Test that --faux flag prints endpoint documentation without starting server."""
+    import io
+    import socket
+    from contextlib import redirect_stdout
+
+    from jaclang.cli.commands import execution  # type: ignore[attr-defined]
+
+    # Get a free port (won't actually be used since faux=True)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+
+    # Set base_path for isolation
+    Jac.set_base_path(str(tmp_path))
+
+    # Capture stdout
+    captured_output = io.StringIO()
+
+    try:
+        with redirect_stdout(captured_output):
+            # Call start with faux=True
+            execution.start(
+                filename=fixture_abs_path("serve_api.jac"),
+                port=port,
+                main=True,
+                faux=True,
+            )
+    except SystemExit:
+        pass  # start() may call exit() in some error cases
+
+    output = captured_output.getvalue()
+
+    # Verify function endpoints are documented
+    assert "FUNCTIONS" in output
+    assert "/function/add_numbers" in output
+    assert "/function/greet" in output
+
+    # Verify walker endpoints are documented
+    assert "WALKERS" in output
+    assert "/walker/CreateTask" in output
+    assert "/walker/ListTasks" in output
+    assert "/walker/CompleteTask" in output
+
+    # Verify client page endpoints section is documented
+    assert "CLIENT PAGES" in output
+    assert "client_page" in output
+
+    # Verify summary is present
+    assert "TOTAL:" in output
+    # Note: With imported functions now exposed as endpoints, we have more than the 2 defined functions
+    assert "10 functions" in output
+    assert "4 walkers" in output
+    assert "34 endpoints" in output
+
+    # Verify parameter details are included
+    assert "required" in output
+    assert "optional" in output
+    assert "Bearer token" in output
+
+
 def test_faux_flag_with_littlex_example(tmp_path: Path) -> None:
     """Test that --faux flag correctly identifies functions, walkers, and endpoints in littleX example."""
     import io
@@ -496,4 +565,3 @@ def test_server_update_password_without_auth(tmp_path: Path) -> None:
     data = result.get("data", result)
     assert "error" in data
     assert "Authentication required" in data.get("error", "")
-
