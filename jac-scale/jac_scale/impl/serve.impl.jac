@@ -83,6 +83,8 @@ impl JacAPIServer.start(self: JacAPIServer, watch: bool = False) -> None {
     }
     self.register_create_user_endpoint();
     self.register_login_endpoint();
+    self.register_update_username_endpoint();
+    self.register_update_password_endpoint();
     self.register_page_endpoint();
     self.register_refresh_token_endpoint();
     self.register_sso_endpoints();
@@ -153,6 +155,13 @@ impl JacAPIServer._configure_openapi_security(self: JacAPIServer) -> None {
                                 path_item[method]['security'] = [{'BearerAuth': []}];
                             }
                         }
+                    }
+                }
+            } elif path in ['/user/username', '/user/password'] {
+                # Apply security to user update endpoints that require authentication
+                for method in path_item {
+                    if (method in ['put', 'patch']) {
+                        path_item[method]['security'] = [{'BearerAuth': []}];
                     }
                 }
             }
@@ -859,6 +868,163 @@ impl JacAPIServer.login(
     );
 }
 
+impl JacAPIServer.update_username(
+    self: JacAPIServer,
+    current_username: str,
+    new_username: str,
+    Authorization: (str | None) = None
+) -> TransportResponse {
+    print("Current username:", current_username);
+    print("Update username called new username:", new_username);
+    import from jaclang.runtimelib.transport { TransportResponse, Meta }
+    # Validate token and extract username
+    token: (str | None) = None;
+    if (Authorization and isinstance(Authorization, str) and Authorization.startswith('Bearer ')) {
+        token = Authorization[7:];
+    }
+    print(f"Authorization token: {token}");
+    token_username = self.validate_jwt_token(token) if token else None;
+    print(f"Token username: {token_username}");
+    if not token_username {
+        return TransportResponse.fail(
+            code='UNAUTHORIZED',
+            message='Invalid or expired token',
+            meta=Meta(extra={'http_status': 401})
+        );
+    }
+    # Ensure user is updating their own username
+    if (token_username != current_username) {
+        return TransportResponse.fail(
+            code='FORBIDDEN',
+            message='Cannot update another user\'s username',
+            meta=Meta(extra={'http_status': 403})
+        );
+    }
+    if (not new_username) {
+        return TransportResponse.fail(
+            code='VALIDATION_ERROR',
+            message='New username is required',
+            meta=Meta(extra={'http_status': 400})
+        );
+    }
+    result = self.user_manager.update_username(current_username, new_username);
+    if ('error' in result) {
+        return TransportResponse.fail(
+            code='UPDATE_FAILED',
+            message=result.get('error', 'Username update failed'),
+            meta=Meta(extra={'http_status': 400})
+        );
+    }
+    # Generate new JWT token with updated username
+    result['token'] = self.create_jwt_token(new_username);
+    return TransportResponse.success(
+        data=result, meta=Meta(extra={'http_status': 200})
+    );
+}
+
+impl JacAPIServer.update_password(
+    self: JacAPIServer,
+    username: str,
+    current_password: str,
+    new_password: str,
+    Authorization: (str | None) = None
+) -> TransportResponse {
+    import from jaclang.runtimelib.transport { TransportResponse, Meta }
+    # Validate token and extract username
+    token: (str | None) = None;
+    if (Authorization and isinstance(Authorization, str) and Authorization.startswith('Bearer ')) {
+        token = Authorization[7:];
+    }
+    token_username = self.validate_jwt_token(token) if token else None;
+    if not token_username {
+        return TransportResponse.fail(
+            code='UNAUTHORIZED',
+            message='Invalid or expired token',
+            meta=Meta(extra={'http_status': 401})
+        );
+    }
+    # Ensure user is updating their own password
+    if (token_username != username) {
+        return TransportResponse.fail(
+            code='FORBIDDEN',
+            message='Cannot update another user\'s password',
+            meta=Meta(extra={'http_status': 403})
+        );
+    }
+    if (not current_password or not new_password) {
+        return TransportResponse.fail(
+            code='VALIDATION_ERROR',
+            message='Current password and new password are required',
+            meta=Meta(extra={'http_status': 400})
+        );
+    }
+    result = self.user_manager.update_password(username, current_password, new_password);
+    if ('error' in result) {
+        return TransportResponse.fail(
+            code='UPDATE_FAILED',
+            message=result.get('error', 'Password update failed'),
+            meta=Meta(extra={'http_status': 400})
+        );
+    }
+    return TransportResponse.success(
+        data=result, meta=Meta(extra={'http_status': 200})
+    );
+}
+
+impl JacAPIServer.register_update_username_endpoint(self: JacAPIServer) -> None {
+    import from fastapi { Depends }
+    import from fastapi.security { HTTPBearer, HTTPAuthorizationCredentials }
+    
+    security = HTTPBearer();
+    
+    # Create wrapper that FastAPI will handle directly
+    def wrapper_callback(
+        body: UpdateUsernameRequest,
+        credentials: HTTPAuthorizationCredentials = Depends(security)
+    ) -> TransportResponse {
+        # Extract token from credentials
+        token = credentials.credentials if credentials else None;
+        authorization = f'Bearer {token}' if token else None;
+        return self.update_username(body.current_username, body.new_username, authorization);
+    }
+    
+    # Register directly with FastAPI (bypassing JEndPoint parameter processing)
+    self.server.app.put(
+        '/user/username',
+        response_model=None,
+        tags=['User APIs'],
+        summary='Update username',
+        description='Endpoint for updating user\'s username. Requires authentication.'
+    )(wrapper_callback);
+}
+
+impl JacAPIServer.register_update_password_endpoint(self: JacAPIServer) -> None {
+    import from fastapi { Depends }
+    import from fastapi.security { HTTPBearer, HTTPAuthorizationCredentials }
+    
+    security = HTTPBearer();
+    
+    # Create wrapper that FastAPI will handle directly
+    def wrapper_callback(
+        body: UpdatePasswordRequest,
+        credentials: HTTPAuthorizationCredentials = Depends(security)
+    ) -> TransportResponse {
+        # Extract token from credentials
+        token = credentials.credentials if credentials else None;
+        authorization = f'Bearer {token}' if token else None;
+        return self.update_password(body.username, body.current_password, body.new_password, authorization);
+    }
+    
+    # Register directly with FastAPI (bypassing JEndPoint parameter processing)
+    self.server.app.put(
+        '/user/password',
+        response_model=None,
+        tags=['User APIs'],
+        summary='Update password',
+        description='Endpoint for updating user\'s password. Requires authentication.'
+    )(wrapper_callback);
+}
+
 impl JacAPIServer.init(
     self: JacAPIServer, module_name: str, port: int = 8000, base_path: str = ""
 ) -> None {
@@ -939,6 +1105,7 @@ impl JacAPIServer.refresh_jwt_token(token: str) -> (str | None) {
 impl JacAPIServer.validate_jwt_token(token: str) -> (str | None) {
     try {
         decoded = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM]);
+        print(f"Decoded JWT token: {decoded}");
         return decoded['username'];
     } except Exception {
         return None;

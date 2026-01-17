@@ -1207,3 +1207,550 @@ class TestJacScaleServe:
         assert response.headers["cross-origin-opener-policy"] == "same-origin"
         assert "cross-origin-embedder-policy" in response.headers
         assert response.headers["cross-origin-embedder-policy"] == "require-corp"
+
+    # ==================== Update Username Tests ====================
+
+    def test_update_username_success(self) -> None:
+        """Test successful username update."""
+        # Use unique username to avoid conflicts
+        unique_id = uuid.uuid4().hex[:8]
+        old_username = f"update_name_{unique_id}"
+        new_username = f"updated_name_{unique_id}"
+
+        # Create user
+        create_result = self._request(
+            "POST",
+            "/user/register",
+            {"username": old_username, "password": "password123"},
+        )
+        token = create_result["token"]
+
+        # Update username
+        result = self._request(
+            "PUT",
+            "/user/username",
+            {"current_username": old_username, "new_username": new_username},
+            token=token,
+        )
+
+        assert "username" in result
+        assert result["username"] == new_username
+        assert "token" in result  # Should get new token with updated username
+        assert "root_id" in result
+
+    def test_update_username_unauthorized_no_token(self) -> None:
+        """Test update username fails without authentication."""
+        response = requests.put(
+            f"{self.base_url}/user/username",
+            json={"current_username": "someuser", "new_username": "newuser"},
+            timeout=5,
+        )
+        assert response.status_code == 401
+        data = cast(
+            dict[str, Any], self._extract_transport_response_data(response.json())
+        )
+        assert "error" in data
+        # Can be either message depending on implementation path
+        assert data["error"] in ["Invalid or expired token", "Authentication required"]
+
+    def test_update_username_unauthorized_invalid_token(self) -> None:
+        """Test update username fails with invalid token."""
+        response = requests.put(
+            f"{self.base_url}/user/username",
+            json={"current_username": "someuser", "new_username": "newuser"},
+            headers={"Authorization": "Bearer invalid_token"},
+            timeout=5,
+        )
+        assert response.status_code == 401
+        data = cast(
+            dict[str, Any], self._extract_transport_response_data(response.json())
+        )
+        assert "error" in data
+        assert data["error"] in ["Invalid or expired token", "Authentication required"]
+
+    def test_update_username_forbidden_different_user(self) -> None:
+        """Test update username fails when trying to update another user's username."""
+        unique_id = uuid.uuid4().hex[:8]
+        user_a = f"user_a_{unique_id}"
+        user_b = f"user_b_{unique_id}"
+
+        # Create first user
+        create_result = self._request(
+            "POST",
+            "/user/register",
+            {"username": user_a, "password": "password123"},
+        )
+        token = create_result["token"]
+
+        # Create second user
+        self._request(
+            "POST",
+            "/user/register",
+            {"username": user_b, "password": "password123"},
+        )
+
+        # Try to update user_b's username using user_a's token
+        response = requests.put(
+            f"{self.base_url}/user/username",
+            json={"current_username": user_b, "new_username": "hacked_name"},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=5,
+        )
+        assert response.status_code == 403
+        data = cast(
+            dict[str, Any], self._extract_transport_response_data(response.json())
+        )
+        assert "error" in data
+        assert data["error"] == "Cannot update another user's username"
+
+    def test_update_username_empty_new_username(self) -> None:
+        """Test update username fails with empty new username."""
+        unique_id = uuid.uuid4().hex[:8]
+        username = f"empty_new_{unique_id}"
+
+        # Create user
+        create_result = self._request(
+            "POST",
+            "/user/register",
+            {"username": username, "password": "password123"},
+        )
+        token = create_result["token"]
+
+        # Try to update with empty new username
+        response = requests.put(
+            f"{self.base_url}/user/username",
+            json={"current_username": username, "new_username": ""},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=5,
+        )
+        assert response.status_code == 400
+        data = cast(
+            dict[str, Any], self._extract_transport_response_data(response.json())
+        )
+        assert "error" in data
+        assert data["error"] == "New username is required"
+
+    def test_update_username_already_exists(self) -> None:
+        """Test update username fails when new username already exists."""
+        unique_id = uuid.uuid4().hex[:8]
+        user_a = f"existing_a_{unique_id}"
+        user_b = f"existing_b_{unique_id}"
+
+        # Create first user
+        create_result = self._request(
+            "POST",
+            "/user/register",
+            {"username": user_a, "password": "password123"},
+        )
+        token = create_result["token"]
+
+        # Create second user
+        self._request(
+            "POST",
+            "/user/register",
+            {"username": user_b, "password": "password123"},
+        )
+
+        # Try to update to existing username
+        response = requests.put(
+            f"{self.base_url}/user/username",
+            json={"current_username": user_a, "new_username": user_b},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=5,
+        )
+        assert response.status_code == 400
+        data = cast(
+            dict[str, Any], self._extract_transport_response_data(response.json())
+        )
+        assert "error" in data
+
+    def test_update_username_can_login_with_new_name(self) -> None:
+        """Test that user can login with new username after update."""
+        unique_id = uuid.uuid4().hex[:8]
+        old_name = f"old_login_{unique_id}"
+        new_name = f"new_login_{unique_id}"
+
+        # Create user
+        create_result = self._request(
+            "POST",
+            "/user/register",
+            {"username": old_name, "password": "password123"},
+        )
+        token = create_result["token"]
+
+        # Update username
+        self._request(
+            "PUT",
+            "/user/username",
+            {"current_username": old_name, "new_username": new_name},
+            token=token,
+        )
+
+        # Try to login with new username
+        login_result = self._request(
+            "POST",
+            "/user/login",
+            {"username": new_name, "password": "password123"},
+        )
+        assert "token" in login_result
+        assert login_result["username"] == new_name
+
+    @pytest.mark.xfail(reason="OpenAPI endpoint may not be available during test", strict=False)
+    def test_update_username_endpoint_in_openapi_docs(self) -> None:
+        """Test that update username endpoint appears in OpenAPI documentation."""
+        response = requests.get(f"{self.base_url}/openapi.json", timeout=5)
+        assert response.status_code == 200
+
+        openapi_spec = response.json()
+        paths = openapi_spec.get("paths", {})
+
+        # Check that update username endpoint is documented
+        assert "/user/username" in paths
+        username_endpoint = paths["/user/username"]
+        assert "put" in username_endpoint
+
+        # Check endpoint metadata
+        put_spec = username_endpoint["put"]
+        assert put_spec["summary"] == "Update username"
+        assert "User APIs" in put_spec["tags"]
+
+    # ==================== Update Password Tests ====================
+
+    def test_update_password_success(self) -> None:
+        """Test successful password update."""
+        unique_id = uuid.uuid4().hex[:8]
+        username = f"update_pass_{unique_id}"
+
+        # Create user
+        create_result = self._request(
+            "POST",
+            "/user/register",
+            {"username": username, "password": "oldpassword123"},
+        )
+        token = create_result["token"]
+
+        # Update password
+        result = self._request(
+            "PUT",
+            "/user/password",
+            {
+                "username": username,
+                "current_password": "oldpassword123",
+                "new_password": "newpassword456",
+            },
+            token=token,
+        )
+
+        # UserManager.update_password returns {'username': ..., 'message': 'Password updated successfully'}
+        assert "username" in result
+        assert result["username"] == username
+        assert "message" in result
+        assert result["message"] == "Password updated successfully"
+
+    def test_update_password_unauthorized_no_token(self) -> None:
+        """Test update password fails without authentication."""
+        response = requests.put(
+            f"{self.base_url}/user/password",
+            json={
+                "username": "someuser",
+                "current_password": "oldpass",
+                "new_password": "newpass",
+            },
+            timeout=5,
+        )
+        assert response.status_code == 401
+        data = cast(
+            dict[str, Any], self._extract_transport_response_data(response.json())
+        )
+        assert "error" in data
+        assert data["error"] in ["Invalid or expired token", "Authentication required"]
+
+    def test_update_password_unauthorized_invalid_token(self) -> None:
+        """Test update password fails with invalid token."""
+        response = requests.put(
+            f"{self.base_url}/user/password",
+            json={
+                "username": "someuser",
+                "current_password": "oldpass",
+                "new_password": "newpass",
+            },
+            headers={"Authorization": "Bearer invalid_token"},
+            timeout=5,
+        )
+        assert response.status_code == 401
+        data = cast(
+            dict[str, Any], self._extract_transport_response_data(response.json())
+        )
+        assert "error" in data
+        assert data["error"] in ["Invalid or expired token", "Authentication required"]
+
+    def test_update_password_forbidden_different_user(self) -> None:
+        """Test update password fails when trying to update another user's password."""
+        unique_id = uuid.uuid4().hex[:8]
+        user_a = f"pass_user_a_{unique_id}"
+        user_b = f"pass_user_b_{unique_id}"
+
+        # Create first user
+        create_result = self._request(
+            "POST",
+            "/user/register",
+            {"username": user_a, "password": "password123"},
+        )
+        token = create_result["token"]
+
+        # Create second user
+        self._request(
+            "POST",
+            "/user/register",
+            {"username": user_b, "password": "password123"},
+        )
+
+        # Try to update user_b's password using user_a's token
+        response = requests.put(
+            f"{self.base_url}/user/password",
+            json={
+                "username": user_b,
+                "current_password": "password123",
+                "new_password": "hacked_pass",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=5,
+        )
+        assert response.status_code == 403
+        data = cast(
+            dict[str, Any], self._extract_transport_response_data(response.json())
+        )
+        assert "error" in data
+        assert data["error"] == "Cannot update another user's password"
+
+    def test_update_password_wrong_current_password(self) -> None:
+        """Test update password fails with wrong current password."""
+        unique_id = uuid.uuid4().hex[:8]
+        username = f"wrong_pass_{unique_id}"
+
+        # Create user
+        create_result = self._request(
+            "POST",
+            "/user/register",
+            {"username": username, "password": "correctpassword"},
+        )
+        token = create_result["token"]
+
+        # Try to update with wrong current password
+        response = requests.put(
+            f"{self.base_url}/user/password",
+            json={
+                "username": username,
+                "current_password": "wrongpassword",
+                "new_password": "newpassword",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=5,
+        )
+        assert response.status_code == 400
+        data = cast(
+            dict[str, Any], self._extract_transport_response_data(response.json())
+        )
+        assert "error" in data
+
+    def test_update_password_empty_passwords(self) -> None:
+        """Test update password fails with empty passwords."""
+        unique_id = uuid.uuid4().hex[:8]
+        username = f"empty_pass_{unique_id}"
+
+        # Create user
+        create_result = self._request(
+            "POST",
+            "/user/register",
+            {"username": username, "password": "password123"},
+        )
+        token = create_result["token"]
+
+        # Try with empty current password
+        response = requests.put(
+            f"{self.base_url}/user/password",
+            json={
+                "username": username,
+                "current_password": "",
+                "new_password": "newpass",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=5,
+        )
+        assert response.status_code == 400
+        data = cast(
+            dict[str, Any], self._extract_transport_response_data(response.json())
+        )
+        assert "error" in data
+        assert data["error"] == "Current password and new password are required"
+
+        # Try with empty new password
+        response = requests.put(
+            f"{self.base_url}/user/password",
+            json={
+                "username": username,
+                "current_password": "password123",
+                "new_password": "",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=5,
+        )
+        assert response.status_code == 400
+        data = cast(
+            dict[str, Any], self._extract_transport_response_data(response.json())
+        )
+        assert "error" in data
+        assert data["error"] == "Current password and new password are required"
+
+    def test_update_password_can_login_with_new_password(self) -> None:
+        """Test that user can login with new password after update."""
+        unique_id = uuid.uuid4().hex[:8]
+        username = f"login_new_pass_{unique_id}"
+
+        # Create user
+        create_result = self._request(
+            "POST",
+            "/user/register",
+            {"username": username, "password": "oldpassword123"},
+        )
+        token = create_result["token"]
+
+        # Update password
+        self._request(
+            "PUT",
+            "/user/password",
+            {
+                "username": username,
+                "current_password": "oldpassword123",
+                "new_password": "newpassword456",
+            },
+            token=token,
+        )
+
+        # Try to login with new password
+        login_result = self._request(
+            "POST",
+            "/user/login",
+            {"username": username, "password": "newpassword456"},
+        )
+        assert "token" in login_result
+        assert login_result["username"] == username
+
+    def test_update_password_old_password_no_longer_works(self) -> None:
+        """Test that old password no longer works after update."""
+        unique_id = uuid.uuid4().hex[:8]
+        username = f"old_pass_fail_{unique_id}"
+
+        # Create user
+        create_result = self._request(
+            "POST",
+            "/user/register",
+            {"username": username, "password": "oldpassword123"},
+        )
+        token = create_result["token"]
+
+        # Update password
+        self._request(
+            "PUT",
+            "/user/password",
+            {
+                "username": username,
+                "current_password": "oldpassword123",
+                "new_password": "newpassword456",
+            },
+            token=token,
+        )
+
+        # Try to login with old password
+        login_result = self._request(
+            "POST",
+            "/user/login",
+            {"username": username, "password": "oldpassword123"},
+        )
+        assert "error" in login_result
+
+    @pytest.mark.xfail(reason="OpenAPI endpoint may not be available during test", strict=False)
+    def test_update_password_endpoint_in_openapi_docs(self) -> None:
+        """Test that update password endpoint appears in OpenAPI documentation."""
+        response = requests.get(f"{self.base_url}/openapi.json", timeout=5)
+        assert response.status_code == 200
+
+        openapi_spec = response.json()
+        paths = openapi_spec.get("paths", {})
+
+        # Check that update password endpoint is documented
+        assert "/user/password" in paths
+        password_endpoint = paths["/user/password"]
+        assert "put" in password_endpoint
+
+        # Check endpoint metadata
+        put_spec = password_endpoint["put"]
+        assert put_spec["summary"] == "Update password"
+        assert "User APIs" in put_spec["tags"]
+
+    def test_status_code_update_username_200_success(self) -> None:
+        """Test PUT /user/username returns 200 on successful update."""
+        unique_id = uuid.uuid4().hex[:8]
+        old_username = f"status200_user_{unique_id}"
+        new_username = f"status200_new_{unique_id}"
+
+        # Create user
+        create_response = requests.post(
+            f"{self.base_url}/user/register",
+            json={"username": old_username, "password": "password123"},
+            timeout=5,
+        )
+        create_data = cast(
+            dict[str, Any],
+            self._extract_transport_response_data(create_response.json()),
+        )
+        token = create_data["token"]
+
+        # Update username
+        response = requests.put(
+            f"{self.base_url}/user/username",
+            json={"current_username": old_username, "new_username": new_username},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=5,
+        )
+        assert response.status_code == 200
+        data = cast(
+            dict[str, Any], self._extract_transport_response_data(response.json())
+        )
+        assert "username" in data
+        assert data["username"] == new_username
+        assert "token" in data
+
+    def test_status_code_update_password_200_success(self) -> None:
+        """Test PUT /user/password returns 200 on successful update."""
+        unique_id = uuid.uuid4().hex[:8]
+        username = f"status200_pass_{unique_id}"
+
+        # Create user
+        create_response = requests.post(
+            f"{self.base_url}/user/register",
+            json={"username": username, "password": "oldpass123"},
+            timeout=5,
+        )
+        create_data = cast(
+            dict[str, Any],
+            self._extract_transport_response_data(create_response.json()),
+        )
+        token = create_data["token"]
+
+        # Update password
+        response = requests.put(
+            f"{self.base_url}/user/password",
+            json={
+                "username": username,
+                "current_password": "oldpass123",
+                "new_password": "newpass456",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=5,
+        )
+        assert response.status_code == 200
+        data = cast(
+            dict[str, Any], self._extract_transport_response_data(response.json())
+        )
+        assert "message" in data

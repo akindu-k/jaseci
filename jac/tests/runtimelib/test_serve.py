@@ -268,6 +268,77 @@ def test_user_manager_token_validation(server_fixture: ServerFixture) -> None:
     assert username is None
 
 
+def test_user_manager_update_username(server_fixture: ServerFixture) -> None:
+    """Test UserManager update_username."""
+    user_mgr = UserManager(server_fixture.session_file)
+
+    # Create user
+    result = user_mgr.create_user("oldname", "password123")
+    data = result.get("data", result)
+    original_token = data["token"]
+    original_root_id = data["root_id"]
+
+    # Update username successfully
+    update_result = user_mgr.update_username("oldname", "newname")
+    assert "error" not in update_result
+    assert update_result["username"] == "newname"
+    assert update_result["token"] == original_token
+    assert update_result["root_id"] == original_root_id
+
+    # Old username should no longer exist
+    old_user = user_mgr.get_user("oldname")
+    assert old_user is None
+
+    # New username should exist
+    new_user = user_mgr.get_user("newname")
+    assert new_user is not None
+
+    # Try to update to existing username
+    user_mgr.create_user("existinguser", "pass")
+    conflict_result = user_mgr.update_username("newname", "existinguser")
+    assert "error" in conflict_result
+    assert "already taken" in conflict_result["error"]
+
+    # Try to update non-existent user
+    notfound_result = user_mgr.update_username("nonexistent", "anothername")
+    assert "error" in notfound_result
+    assert "not found" in notfound_result["error"]
+
+
+def test_user_manager_update_password(server_fixture: ServerFixture) -> None:
+    """Test UserManager update_password."""
+    user_mgr = UserManager(server_fixture.session_file)
+
+    # Create user
+    result = user_mgr.create_user("passuser", "oldpass")
+    data = result.get("data", result)
+
+    # Update password successfully
+    update_result = user_mgr.update_password("passuser", "oldpass", "newpass")
+    assert "error" not in update_result
+    assert update_result["username"] == "passuser"
+    assert "message" in update_result
+
+    # Old password should no longer work
+    auth_fail = user_mgr.authenticate("passuser", "oldpass")
+    assert auth_fail is None
+
+    # New password should work
+    auth_success = user_mgr.authenticate("passuser", "newpass")
+    assert auth_success is not None
+    assert auth_success["username"] == "passuser"
+
+    # Try to update with wrong current password
+    wrong_pass_result = user_mgr.update_password("passuser", "wrongpass", "anotherpass")
+    assert "error" in wrong_pass_result
+    assert "incorrect" in wrong_pass_result["error"]
+
+    # Try to update non-existent user
+    notfound_result = user_mgr.update_password("nonexistent", "pass", "newpass")
+    assert "error" in notfound_result
+    assert "not found" in notfound_result["error"]
+
+
 def test_server_user_creation(server_fixture: ServerFixture) -> None:
     """Test user creation endpoint."""
     server_fixture.start_server()
@@ -312,6 +383,184 @@ def test_server_user_login(server_fixture: ServerFixture) -> None:
     )
 
     assert "error" in login_fail
+
+
+def test_server_update_username(server_fixture: ServerFixture) -> None:
+    """Test update username endpoint."""
+    server_fixture.start_server()
+
+    # Create user
+    create_result = server_fixture.request(
+        "POST", "/user/register", {"username": "olduser", "password": "pass123"}
+    )
+    create_data = create_result.get("data", create_result)
+    token = create_data["token"]
+    original_root_id = create_data["root_id"]
+
+    # Update username with authentication
+    update_result = server_fixture.request(
+        "PUT",
+        "/user/username",
+        {"current_username": "olduser", "new_username": "newuser"},
+        token=token,
+    )
+    update_data = update_result.get("data", update_result)
+    assert "error" not in update_data
+    assert update_data["username"] == "newuser"
+    assert update_data["root_id"] == original_root_id
+
+    # Login with new username should work
+    login_result = server_fixture.request(
+        "POST", "/user/login", {"username": "newuser", "password": "pass123"}
+    )
+    login_data = login_result.get("data", login_result)
+    assert "token" in login_data
+
+    # Login with old username should fail
+    login_fail = server_fixture.request(
+        "POST", "/user/login", {"username": "olduser", "password": "pass123"}
+    )
+    assert "error" in login_fail
+
+
+def test_server_update_username_without_auth(server_fixture: ServerFixture) -> None:
+    """Test that update username requires authentication."""
+    server_fixture.start_server()
+
+    # Create user
+    server_fixture.request(
+        "POST", "/user/register", {"username": "authtest", "password": "pass123"}
+    )
+
+    # Try to update without token
+    result = server_fixture.request(
+        "PUT",
+        "/user/username",
+        {"current_username": "authtest", "new_username": "newname"},
+    )
+    data = result.get("data", result)
+    assert "error" in data
+    assert "Authentication required" in data.get("error", "")
+
+
+def test_server_update_username_other_user(server_fixture: ServerFixture) -> None:
+    """Test that users cannot update other users' usernames."""
+    server_fixture.start_server()
+
+    # Create two users
+    user1_result = server_fixture.request(
+        "POST", "/user/register", {"username": "user1", "password": "pass1"}
+    )
+    user1_data = user1_result.get("data", user1_result)
+    token1 = user1_data["token"]
+
+    server_fixture.request(
+        "POST", "/user/register", {"username": "user2", "password": "pass2"}
+    )
+
+    # User1 tries to update user2's username
+    result = server_fixture.request(
+        "PUT",
+        "/user/username",
+        {"current_username": "user2", "new_username": "hacked"},
+        token=token1,
+    )
+    # Handle TransportResponse error format
+    error = result.get("error", {})
+    assert error is not None
+    assert "another user" in error.get("message", "").lower()
+
+
+def test_server_update_password(server_fixture: ServerFixture) -> None:
+    """Test update password endpoint."""
+    server_fixture.start_server()
+
+    # Create user
+    create_result = server_fixture.request(
+        "POST", "/user/register", {"username": "passuser", "password": "oldpass"}
+    )
+    create_data = create_result.get("data", create_result)
+    token = create_data["token"]
+
+    # Update password with authentication
+    update_result = server_fixture.request(
+        "PUT",
+        "/user/password",
+        {
+            "username": "passuser",
+            "current_password": "oldpass",
+            "new_password": "newpass",
+        },
+        token=token,
+    )
+    update_data = update_result.get("data", update_result)
+    assert "error" not in update_data
+    assert update_data["username"] == "passuser"
+
+    # Login with new password should work
+    login_result = server_fixture.request(
+        "POST", "/user/login", {"username": "passuser", "password": "newpass"}
+    )
+    login_data = login_result.get("data", login_result)
+    assert "token" in login_data
+
+    # Login with old password should fail
+    login_fail = server_fixture.request(
+        "POST", "/user/login", {"username": "passuser", "password": "oldpass"}
+    )
+    assert "error" in login_fail
+
+
+def test_server_update_password_wrong_current(server_fixture: ServerFixture) -> None:
+    """Test that update password fails with wrong current password."""
+    server_fixture.start_server()
+
+    # Create user
+    create_result = server_fixture.request(
+        "POST", "/user/register", {"username": "wrongpassuser", "password": "correct"}
+    )
+    create_data = create_result.get("data", create_result)
+    token = create_data["token"]
+
+    # Try to update with wrong current password
+    result = server_fixture.request(
+        "PUT",
+        "/user/password",
+        {
+            "username": "wrongpassuser",
+            "current_password": "wrongpass",
+            "new_password": "newpass",
+        },
+        token=token,
+    )
+    # Handle TransportResponse error format
+    error = result.get("error", {})
+    assert error is not None
+    assert "incorrect" in error.get("message", "").lower()
+
+
+def test_server_update_password_without_auth(server_fixture: ServerFixture) -> None:
+    """Test that update password requires authentication."""
+    server_fixture.start_server()
+
+    # Create user
+    server_fixture.request(
+        "POST", "/user/register", {"username": "noauthpass", "password": "pass123"}
+    )
+
+    # Try to update without token
+    result = server_fixture.request(
+        "PUT",
+        "/user/password",
+        {
+            "username": "noauthpass",
+            "current_password": "pass123",
+            "new_password": "newpass",
+        },
+    )
+    data = result.get("data", result)
+    assert "error" in data
+    assert "Authentication required" in data.get("error", "")
 
 
 def test_server_authentication_required(server_fixture: ServerFixture) -> None:

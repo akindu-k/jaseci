@@ -2,6 +2,7 @@ import mimetypes;
 import from collections.abc { Callable }
 import from datetime { UTC, datetime, timedelta }
 import from pathlib { Path }
+import from pydantic { BaseModel, Field }
 import from typing { Any }
 import jwt;
 import from os { getenv }
@@ -62,8 +63,25 @@ class JacAPIServer(JServer) {
         self: JacAPIServer, token: (str | None) = None
     ) -> TransportResponse;
 
+    def update_username(
+        self: JacAPIServer,
+        current_username: str,
+        new_username: str,
+        Authorization: (str | None) = None
+    ) -> TransportResponse;
+
+    def update_password(
+        self: JacAPIServer,
+        username: str,
+        current_password: str,
+        new_password: str,
+        Authorization: (str | None) = None
+    ) -> TransportResponse;
+
     def register_create_user_endpoint(self: JacAPIServer) -> None;
     def register_refresh_token_endpoint(self: JacAPIServer) -> None;
+    def register_update_username_endpoint(self: JacAPIServer) -> None;
+    def register_update_password_endpoint(self: JacAPIServer) -> None;
     def get_sso(
         self: JacAPIServer, platform: str, operation: str
     ) -> (GoogleSSO | None);
@@ -114,4 +132,20 @@ class JacAPIServer(JServer) {
     def register_dynamic_walker_endpoint(self: JacAPIServer) -> None;
     def register_dynamic_function_endpoint(self: JacAPIServer) -> None;
     def register_dynamic_introspection_endpoints(self: JacAPIServer) -> None;
+}
+
+class UpdateUsernameRequest(BaseModel) {
+    with entry{
+
+    current_username: str = Field(..., description='Current username');
+    new_username: str = Field(..., description='New username');
+    }
+}
+
+class UpdatePasswordRequest(BaseModel) {
+    with entry{
+    username: str = Field(..., description='Username');
+    current_password: str = Field(..., description='Current password');
+    new_password: str = Field(..., description='New password');
+    }
 }

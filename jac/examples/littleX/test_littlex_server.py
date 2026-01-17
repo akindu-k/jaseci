@@ -241,12 +241,16 @@ def test_profile_creation_and_update(littlex_server) -> None:
 
     # Update Alice's profile
     update_result = littlex_server["request"](
-        "POST",
-        "/walker/update_profile",
-        {"new_username": "Alice_Wonderland"},
+        "PUT",
+        "/user/username",
+        {"current_username": "alice", "new_username": "Alice_Wonderland"},
         token=alice_token,
     )
-    assert "result" in update_result or "reports" in update_result.get("data", {})
+    # Check TransportResponse format: should have 'ok' and 'data' fields
+    assert update_result.get("ok") is True or "data" in update_result
+    if "data" in update_result:
+        assert "username" in update_result["data"]
+        assert update_result["data"]["username"] == "Alice_Wonderland"
 
     # Get Alice's profile
     profile_result = littlex_server["request"]("POST", "/walker/get_profile", {}, token=alice_token)
@@ -254,12 +258,16 @@ def test_profile_creation_and_update(littlex_server) -> None:
 
     # Update Bob's profile
     update_result2 = littlex_server["request"](
-        "POST",
-        "/walker/update_profile",
-        {"new_username": "Bob_Builder"},
+        "PUT",
+        "/user/username",
+        {"current_username": "bob", "new_username": "Bob_Builder"},
         token=bob_token,
     )
-    assert "result" in update_result2 or "reports" in update_result2.get("data", {})
+    # Check TransportResponse format
+    assert update_result2.get("ok") is True or "data" in update_result2
+    if "data" in update_result2:
+        assert "username" in update_result2["data"]
+        assert update_result2["data"]["username"] == "Bob_Builder"
 
     print("✓ Profile creation and update test passed")
 
