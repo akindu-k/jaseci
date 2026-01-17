@@ -88,9 +88,9 @@ class TestProfileManagement:
 
         # Update Alice's profile
         client.set_auth_token(alice_token)
-        update_result = client.post(
-            "/walker/update_profile",
-            json={"new_username": "Alice_Wonderland"},
+        update_result = client.put(
+            "/user/username",
+            json={"current_username": "alice", "new_username": "Alice_Wonderland"},
         )
         assert update_result.ok
         assert "result" in update_result.data or "reports" in update_result.data
@@ -102,9 +102,9 @@ class TestProfileManagement:
 
         # Update Bob's profile
         client.set_auth_token(bob_token)
-        update_result2 = client.post(
-            "/walker/update_profile",
-            json={"new_username": "Bob_Builder"},
+        update_result2 = client.put(
+            "/user/username",
+            json={"current_username": "bob", "new_username": "Bob_Builder"},
         )
         assert update_result2.ok
         assert "result" in update_result2.data or "reports" in update_result2.data
@@ -129,15 +129,15 @@ class TestSocialFeatures:
 
         # Update usernames
         client.set_auth_token(alice_token)
-        client.post(
-            "/walker/update_profile",
-            json={"new_username": "Alice"},
+        client.put(
+            "/user/username",
+            json={"current_username": "alice", "new_username": "Alice"},
         )
 
         client.set_auth_token(bob_token)
-        client.post(
-            "/walker/update_profile",
-            json={"new_username": "Bob"},
+        client.put(
+            "/user/username",
+            json={"current_username": "bob", "new_username": "Bob"},
         )
 
         # Get Bob's profile
@@ -148,12 +148,6 @@ class TestSocialFeatures:
         """Test creating tweets."""
         # Create user
         create_user(client, "alice", "pass123")
-
-        # Update profile first
-        client.post(
-            "/walker/update_profile",
-            json={"new_username": "Alice"},
-        )
 
         # Create multiple tweets
         tweet1 = client.post(
