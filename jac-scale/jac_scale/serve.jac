@@ -137,12 +137,10 @@ class JacAPIServer(JServer) {
 class UpdateUsernameRequest(BaseModel) {
     has current_username: str = Field(..., description='Current username'),
         new_username: str = Field(..., description='New username');
-    
 }
 
 class UpdatePasswordRequest(BaseModel) {
     has username: str = Field(..., description='Username'),
         current_password: str = Field(..., description='Current password'),
         new_password: str = Field(..., description='New password');
-    
 }
