@@ -152,7 +152,9 @@ impl UserManager.get_user(username: str) -> (dict[(str, str)] | None) {
 }
 
 """Update user's username."""
-impl UserManager.update_username(current_username: str, new_username: str) -> dict[str, str] {
+impl UserManager.update_username(
+    current_username: str, new_username: str
+) -> dict[str, str] {
     # Check if new username already exists
     for anc in self.mem.query(
         filter=lambda a: Anchor :
@@ -163,7 +165,10 @@ impl UserManager.update_username(current_username: str, new_username: str) -> di
     # Find and update the user
     for anc in self.mem.query(
         filter=lambda a: Anchor :
-            (isinstance(a.archetype, User) and a.archetype.username == current_username)
+            (
+                isinstance(a.archetype, User)
+                and a.archetype.username == current_username
+            )
     ) {
         user = anc.archetype;
         user.username = new_username;
@@ -181,7 +186,9 @@ impl UserManager.update_username(current_username: str, new_username: str) -> di
 }
 
 """Update user's password."""
-impl UserManager.update_password(username: str, current_password: str, new_password: str) -> dict[str, str] {
+impl UserManager.update_password(
+    username: str, current_password: str, new_password: str
+) -> dict[str, str] {
     current_password_hash = hashlib.sha256(current_password.encode()).hexdigest();
     new_password_hash = hashlib.sha256(new_password.encode()).hexdigest();
     # Find user and verify current password
@@ -198,10 +205,7 @@ impl UserManager.update_password(username: str, current_password: str, new_passw
         anc.persistent = True;
         Jac.commit(anc);  # Commit the anchor, not just the archetype
         self.mem.commit();  # Sync changes to database
-        return {
-            'username': user.username,
-            'message': 'Password updated successfully'
-        };
+        return {'username': user.username, 'message': 'Password updated successfully'};
     }
     return {'error': 'User not found'};
 }
@@ -720,7 +724,9 @@ impl AuthHandler.login(username: str, password: str) -> TransportResponse {
 }
 
 """Update user's username."""
-impl AuthHandler.update_username(current_username: str, new_username: str, token: str) -> TransportResponse {
+impl AuthHandler.update_username(
+    current_username: str, new_username: str, token: str
+) -> TransportResponse {
     # Validate token and ensure user is updating their own username
     token_username = self.user_manager.validate_token(token);
     if not token_username {
@@ -758,7 +764,9 @@ impl AuthHandler.update_username(current_username: str, new_username: str, token
 }
 
 """Update user's password."""
-impl AuthHandler.update_password(username: str, current_password: str, new_password: str, token: str) -> TransportResponse {
+impl AuthHandler.update_password(
+    username: str, current_password: str, new_password: str, token: str
+) -> TransportResponse {
     # Validate token and ensure user is updating their own password
     token_username = self.user_manager.validate_token(token);
     if not token_username {
@@ -782,7 +790,9 @@ impl AuthHandler.update_password(username: str, current_password: str, new_passw
             meta=Meta(extra={'http_status': 400})
         );
     }
-    result = self.user_manager.update_password(username, current_password, new_password);
+    result = self.user_manager.update_password(
+        username, current_password, new_password
+    );
     if ('error' in result) {
         return TransportResponse.fail(
             code='UPDATE_FAILED',
