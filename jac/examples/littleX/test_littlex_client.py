@@ -93,7 +93,7 @@ class TestProfileManagement:
             json={"current_username": "alice", "new_username": "Alice_Wonderland"},
         )
         assert update_result.ok
-        assert "result" in update_result.data or "reports" in update_result.data
+        assert update_result.data["username"] == "Alice_Wonderland"
 
         # Get Alice's profile
         profile_result = client.post("/walker/get_profile", json={})
@@ -107,7 +107,7 @@ class TestProfileManagement:
             json={"current_username": "bob", "new_username": "Bob_Builder"},
         )
         assert update_result2.ok
-        assert "result" in update_result2.data or "reports" in update_result2.data
+        assert update_result2.data["username"] == "Bob_Builder"
 
 
 class TestSocialFeatures:
