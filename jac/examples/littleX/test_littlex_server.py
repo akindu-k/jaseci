@@ -593,12 +593,12 @@ def test_data_persistence(littlex_server) -> None:
 
     # Update profile
     littlex_server["request"](
-        "POST",
-        "/walker/update_profile",
-        {"new_username": "Alice"},
+        "PUT",
+        "/user/username",
+        {"current_username": "alice", "new_username": "Alice"},
         token=alice_token,
     )
-
+    
     # Create tweets
     littlex_server["request"](
         "POST",
