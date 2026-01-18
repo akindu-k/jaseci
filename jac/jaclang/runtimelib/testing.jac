@@ -91,8 +91,8 @@ obj JacTestClient {
     """Make a PUT request with JSON body."""
     def put(
         path: str,
-        json:  (dict[str, Any] | None) = None,
-        headers:  (dict[str, str] | None) = None
+        json: (dict[str, Any] | None) = None,
+        headers: (dict[str, str] | None) = None
     ) -> TestResponse;
 
     """Make a request with specified method."""

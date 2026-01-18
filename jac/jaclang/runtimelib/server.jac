@@ -71,6 +71,7 @@ obj UserManager {
     def update_password(
         username: str, current_password: str, new_password: str
     ) -> dict[str, str];
+
     def close -> None;
 }
 
@@ -161,6 +162,7 @@ obj AuthHandler {
     def update_username(
         current_username: str, new_username: str, token: str
     ) -> TransportResponse;
+
     def update_password(
         username: str, current_password: str, new_password: str, token: str
     ) -> TransportResponse;
