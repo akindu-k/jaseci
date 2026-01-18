@@ -386,6 +386,7 @@ def test_start_with_nonexistent_file_error(tmp_path: Path) -> None:
     finally:
         os.chdir(original_cwd)
 
+
 def test_server_update_username(tmp_path: Path) -> None:
     """Test update username endpoint."""
     tmp_path.start_server()
@@ -405,7 +406,7 @@ def test_server_update_username(tmp_path: Path) -> None:
         {"current_username": "olduser", "new_username": "newuser"},
         token=token,
     )
-    update_data = update_result. get("data", update_result)
+    update_data = update_result.get("data", update_result)
     assert "error" not in update_data
     assert update_data["username"] == "newuser"
     assert update_data["root_id"] == original_root_id
@@ -420,7 +421,7 @@ def test_server_update_username(tmp_path: Path) -> None:
 
 def test_server_update_password(tmp_path: Path) -> None:
     """Test update password endpoint."""
-    tmp_path. start_server()
+    tmp_path.start_server()
 
     # Create user
     create_result = tmp_path.request(
@@ -446,7 +447,7 @@ def test_server_update_password(tmp_path: Path) -> None:
 
     # Login with new password should work
     login_result = tmp_path.request(
-        "POST", "/user/login", {"username":  "passuser", "password": "newpass"}
+        "POST", "/user/login", {"username": "passuser", "password": "newpass"}
     )
-    login_data = login_result. get("data", login_result)
+    login_data = login_result.get("data", login_result)
     assert "token" in login_data

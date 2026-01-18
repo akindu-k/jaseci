@@ -235,7 +235,7 @@ impl JacTestClient._execute_request(
     } elif method == "POST" {
         handler.do_POST();
     } elif method == "PUT" {
-        handler. do_PUT();
+        handler.do_PUT();
     } elif method == "OPTIONS" {
         handler.do_OPTIONS();
     } else {

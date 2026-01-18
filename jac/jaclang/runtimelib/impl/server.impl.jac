@@ -165,42 +165,33 @@ impl UserManager.user_exists(username: str) -> bool {
 }
 
 """Update user's username."""
-impl UserManager. update_username(
+impl UserManager.update_username(
     current_username: str, new_username: str
 ) -> dict[str, str] {
     import hashlib;
     self._ensure_connection();
-    
     # Check if new username already exists
     cursor = self._conn.execute(
-        "SELECT 1 FROM users WHERE username = ? ", (new_username,)
+        "SELECT 1 FROM users WHERE username = ? ", (new_username, )
     );
     if cursor.fetchone() {
         return {'error': 'Username already taken'};
     }
-    
     # Update username
     cursor = self._conn.execute(
         "UPDATE users SET username = ? WHERE username = ?",
         (new_username, current_username)
     );
     self._conn.commit();
-    
     if cursor.rowcount == 0 {
         return {'error': 'User not found'};
     }
-    
     # Get updated user data
     cursor = self._conn.execute(
-        "SELECT token, root_id FROM users WHERE username = ?", (new_username,)
+        "SELECT token, root_id FROM users WHERE username = ?", (new_username, )
     );
     row = cursor.fetchone();
-    
-    return {
-        'username': new_username,
-        'token': row[0],
-        'root_id': row[1]
-    };
+    return {'username': new_username, 'token': row[0], 'root_id': row[1]};
 }
 
 """Update user's password."""
@@ -209,30 +200,23 @@ impl UserManager.update_password(
 ) -> dict[str, str] {
     import hashlib;
     self._ensure_connection();
-    
     # Verify current password
     current_password_hash = hashlib.sha256(current_password.encode()).hexdigest();
     cursor = self._conn.execute(
         "SELECT 1 FROM users WHERE username = ?  AND password_hash = ?",
         (username, current_password_hash)
     );
-    
     if not cursor.fetchone() {
         return {'error': 'Current password is incorrect'};
     }
-    
     # Update password
-    new_password_hash = hashlib. sha256(new_password.encode()).hexdigest();
+    new_password_hash = hashlib.sha256(new_password.encode()).hexdigest();
     cursor = self._conn.execute(
         "UPDATE users SET password_hash = ? WHERE username = ?",
         (new_password_hash, username)
     );
     self._conn.commit();
-    
-    return {
-        'username': username,
-        'message': 'Password updated successfully'
-    };
+    return {'username': username, 'message': 'Password updated successfully'};
 }
 
 """Close SQLite connection."""
@@ -772,55 +756,6 @@ impl AuthHandler.update_username(
     current_username: str, new_username: str, token: str
 ) -> TransportResponse {
     import from jaclang.runtimelib.transport { TransportResponse, Meta }
-    
-    # Validate token
-    token_username = self. user_manager.validate_token(token);
-    if not token_username {
-        return TransportResponse. fail(
-            code='UNAUTHORIZED',
-            message='Invalid or expired token',
-            meta=Meta(extra={'http_status':  401})
-        );
-    }
-    
-    # Ensure user is updating their own username
-    if (token_username != current_username) {
-        return TransportResponse.fail(
-            code='FORBIDDEN',
-            message='Cannot update another user\'s username',
-            meta=Meta(extra={'http_status': 403})
-        );
-    }
-    
-    if (not new_username) {
-        return TransportResponse. fail(
-            code='VALIDATION_ERROR',
-            message='New username is required',
-            meta=Meta(extra={'http_status': 400})
-        );
-    }
-    
-    result = self.user_manager.update_username(current_username, new_username);
-    
-    if ('error' in result) {
-        return TransportResponse.fail(
-            code='UPDATE_FAILED',
-            message=result. get('error', 'Username update failed'),
-            meta=Meta(extra={'http_status': 400})
-        );
-    }
-    
-    return TransportResponse. success(
-        data=result, meta=Meta(extra={'http_status': 200})
-    );
-}
-
-"""Update user's password."""
-impl AuthHandler.update_password(
-    username: str, current_password: str, new_password: str, token: str
-) -> TransportResponse {
-    import from jaclang.runtimelib.transport { TransportResponse, Meta }
-    
     # Validate token
     token_username = self.user_manager.validate_token(token);
     if not token_username {
@@ -830,16 +765,56 @@ impl AuthHandler.update_password(
             meta=Meta(extra={'http_status': 401})
         );
     }
-    
+    # Ensure user is updating their own username
+    if (token_username != current_username) {
+        return TransportResponse.fail(
+            code='FORBIDDEN',
+            message='Cannot update another user\'s username',
+            meta=Meta(extra={'http_status': 403})
+        );
+    }
+    if (not new_username) {
+        return TransportResponse.fail(
+            code='VALIDATION_ERROR',
+            message='New username is required',
+            meta=Meta(extra={'http_status': 400})
+        );
+    }
+    result = self.user_manager.update_username(current_username, new_username);
+    if ('error' in result) {
+        return TransportResponse.fail(
+            code='UPDATE_FAILED',
+            message=result.get('error', 'Username update failed'),
+            meta=Meta(extra={'http_status': 400})
+        );
+    }
+    return TransportResponse.success(
+        data=result, meta=Meta(extra={'http_status': 200})
+    );
+}
+
+"""Update user's password."""
+impl AuthHandler.update_password(
+    username: str, current_password: str, new_password: str, token: str
+) -> TransportResponse {
+    import from jaclang.runtimelib.transport { TransportResponse, Meta }
+    # Validate token
+    token_username = self.user_manager.validate_token(token);
+    if not token_username {
+        return TransportResponse.fail(
+            code='UNAUTHORIZED',
+            message='Invalid or expired token',
+            meta=Meta(extra={'http_status': 401})
+        );
+    }
     # Ensure user is updating their own password
     if (token_username != username) {
-        return TransportResponse. fail(
+        return TransportResponse.fail(
             code='FORBIDDEN',
             message='Cannot update another user\'s password',
             meta=Meta(extra={'http_status': 403})
         );
     }
-    
     if (not current_password or not new_password) {
         return TransportResponse.fail(
             code='VALIDATION_ERROR',
@@ -847,19 +822,16 @@ impl AuthHandler.update_password(
             meta=Meta(extra={'http_status': 400})
         );
     }
-    
     result = self.user_manager.update_password(
         username, current_password, new_password
     );
-    
     if ('error' in result) {
-        return TransportResponse. fail(
+        return TransportResponse.fail(
             code='UPDATE_FAILED',
             message=result.get('error', 'Password update failed'),
             meta=Meta(extra={'http_status': 400})
         );
     }
-    
     return TransportResponse.success(
         data=result, meta=Meta(extra={'http_status': 200})
     );
@@ -1373,24 +1345,24 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
         }
 
         """Handle PUT requests for user updates."""
-        def do_PUT(self:  JacRequestHandler) -> None {
+        def do_PUT(self: JacRequestHandler) -> None {
             parsed_path = urlparse(self.path);
             path = parsed_path.path;
-            
+
             try {
                 data = self._read_json();
             } except json.JSONDecodeError {
                 Jac.send_json(self, 400, {'error': 'Invalid JSON'});
                 return;
             }
-            
+
             # Require authentication for all PUT requests
             token = self._get_auth_token();
             if not token {
                 Jac.send_json(self, 401, {'error': 'Authentication required'});
                 return;
             }
-            
+
             if (path == '/user/username') {
                 response = server.auth_handler.update_username(
                     data.get('current_username', ''),
@@ -1400,7 +1372,7 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                 self._send_response(response);
                 return;
             }
-            
+
             if (path == '/user/password') {
                 response = server.auth_handler.update_password(
                     data.get('username', ''),
@@ -1411,7 +1383,7 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                 self._send_response(response);
                 return;
             }
-            
+
             Jac.send_json(self, 404, {'error': 'Not found'});
         }
 
@@ -1508,8 +1480,8 @@ impl JacAPIServer.start(watch: bool = False) -> None {
         print('\nAvailable endpoints:');
         print('  POST /user/register - Create a new user');
         print('  POST /user/login - Login and get auth token');
-        print('  PUT  /user/username - Update username (auth required)');  
-        print('  PUT  /user/password - Update password (auth required)'); 
+        print('  PUT  /user/username - Update username (auth required)');
+        print('  PUT  /user/password - Update password (auth required)');
         print('  GET /functions - List all functions');
         print('  GET /walkers - List all walkers');
         print('  GET /function/<name> - Get function signature');
