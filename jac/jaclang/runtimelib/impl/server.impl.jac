@@ -838,7 +838,7 @@ impl AuthHandler.update_password(
 }
 
 """Get authenticated user's information."""
-impl AuthHandler.get_user_info(token:  str) -> TransportResponse {
+impl AuthHandler.get_user_info(token: str) -> TransportResponse {
     import from jaclang.runtimelib.transport { TransportResponse, Meta }
     # Validate token
     username = self.user_manager.validate_token(token);
@@ -859,7 +859,7 @@ impl AuthHandler.get_user_info(token:  str) -> TransportResponse {
         );
     }
     # Return user info (note: get_user returns 'email' as key, but it's actually username)
-    return TransportResponse. success(
+    return TransportResponse.success(
         data={
             'username': username,
             'root_id': user_data['root_id'],
