@@ -1144,7 +1144,7 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
             } elif (path == '/user/info') {
                 # Get auth token from header
                 token = self._get_auth_token();
-                response = server.auth_handler.get_user_info(token if token else '');
+                response = server.auth_handler.get_user_info(token or '');
                 self._send_response(response);
                 return;
             } elif (path == '/protected') {

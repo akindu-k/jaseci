@@ -89,7 +89,10 @@ class TestServerClientMigrated:
         if response.data:
             assert "error" in response.data or "message" in response.data
         else:
-            assert "error" in response.text.lower() or "unauthorized" in response.text.lower()
+            assert (
+                "error" in response.text.lower()
+                or "unauthorized" in response.text.lower()
+            )
 
     def test_get_user_info_invalid_token(self, client: JacTestClient) -> None:
         """Test that user info endpoint rejects invalid token."""
@@ -103,7 +106,10 @@ class TestServerClientMigrated:
         if response.data:
             assert "error" in response.data or "message" in response.data
         else:
-            assert "error" in response.text.lower() or "unauthorized" in response.text.lower()
+            assert (
+                "error" in response.text.lower()
+                or "unauthorized" in response.text.lower()
+            )
 
     def test_authentication_required(self, client: JacTestClient) -> None:
         """Test that protected endpoints require authentication (migrated)."""
