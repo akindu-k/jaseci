@@ -76,6 +76,141 @@ class TestServerClientMigrated:
         )
 
         assert not fail_response.ok or "error" in fail_response.json()
+        
+    def test_get_user_info_success(self, client: JacTestClient) -> None:
+        """Test successfully getting user info after registration."""
+        # Register a new user
+        register_response = client. register_user("testuser", "testpass123")
+        
+        assert register_response.ok
+        assert register_response.status_code == 201
+        register_data = register_response.data
+        assert "username" in register_data
+        assert "token" in register_data
+        assert "root_id" in register_data
+        assert register_data["username"] == "testuser"
+        
+        # Store the expected values
+        expected_username = register_data["username"]
+        expected_token = register_data["token"]
+        expected_root_id = register_data["root_id"]
+        
+        # Get user info (token should be auto-set by register_user)
+        info_response = client.get("/user/info")
+        
+        assert info_response.ok
+        assert info_response.status_code == 200
+        info_data = info_response.data
+        
+        # Verify all fields match
+        assert "username" in info_data
+        assert "token" in info_data
+        assert "root_id" in info_data
+        assert info_data["username"] == expected_username
+        assert info_data["token"] == expected_token
+        assert info_data["root_id"] == expected_root_id
+
+
+    def test_get_user_info_after_login(self, client: JacTestClient) -> None:
+        """Test getting user info after login (not just registration)."""
+        # Register a user using helper method
+        register_response = client.register_user("loginuser", "loginpass456")
+        
+        assert register_response.ok
+        register_data = register_response.data
+        expected_username = register_data["username"]
+        expected_root_id = register_data["root_id"]
+        
+        # Clear auth and login again using helper method
+        client.clear_auth()
+        login_response = client.login("loginuser", "loginpass456")
+        
+        assert login_response.ok
+        login_data = login_response. data
+        
+        # Get user info with the login token
+        info_response = client.get("/user/info")
+        
+        assert info_response.ok
+        assert info_response.status_code == 200
+        info_data = info_response.data
+        
+        # Verify the info matches both registration and login data
+        assert info_data["username"] == expected_username
+        assert info_data["username"] == login_data["username"]
+        assert info_data["root_id"] == expected_root_id
+        assert info_data["root_id"] == login_data["root_id"]
+        assert info_data["token"] == login_data["token"]
+
+
+    def test_get_user_info_requires_auth(self, client: JacTestClient) -> None:
+        """Test that user info endpoint requires authentication."""
+        # Try to get user info without authentication
+        client.clear_auth()
+        response = client.get("/user/info")
+
+        assert not response.ok
+        assert response.status_code == 401
+        # Check response data if available, otherwise check text
+        if response.data:
+            assert "error" in response.data or "message" in response.data
+        else:
+            assert (
+                "error" in response.text. lower()
+                or "unauthorized" in response.text.lower()
+            )
+
+
+    def test_get_user_info_invalid_token(self, client: JacTestClient) -> None:
+        """Test that user info endpoint rejects invalid token."""
+        # Set invalid token
+        client.set_auth_token("invalid_token_12345")
+        response = client.get("/user/info")
+
+        assert not response.ok
+        assert response. status_code == 401
+        # Check response data if available, otherwise check text
+        if response.data:
+            assert "error" in response.data or "message" in response.data
+        else:
+            assert (
+                "error" in response.text.lower()
+                or "unauthorized" in response. text.lower()
+            )
+
+
+    def test_get_user_info_different_users(self, client: JacTestClient) -> None:
+        """Test that different users get their own info correctly."""
+        # Register first user using helper method
+        client.register_user("user1", "pass1")
+        user1_info_response = client.get("/user/info")
+        assert user1_info_response.ok
+        user1_info = user1_info_response.data
+        user1_token = user1_info["token"]
+        
+        # Register second user (this clears first user's auth)
+        client.clear_auth()
+        client.register_user("user2", "pass2")
+        user2_info_response = client.get("/user/info")
+        assert user2_info_response.ok
+        user2_info = user2_info_response.data
+        
+        # Verify they are different users
+        assert user1_info["username"] == "user1"
+        assert user2_info["username"] == "user2"
+        assert user1_info["root_id"] != user2_info["root_id"]
+        assert user1_info["token"] != user2_info["token"]
+        
+        # Switch back to user1's token
+        client.set_auth_token(user1_token)
+        user1_info_again_response = client.get("/user/info")
+        assert user1_info_again_response.ok
+        user1_info_again = user1_info_again_response.data
+        
+        # Verify we get user1's info again
+        assert user1_info_again["username"] == "user1"
+        assert user1_info_again["root_id"] == user1_info["root_id"]
+        assert user1_info_again["token"] == user1_info["token"]
 
     def test_authentication_required(self, client: JacTestClient) -> None:
         """Test that protected endpoints require authentication (migrated)."""
@@ -300,6 +435,8 @@ class TestServerClientMigrated:
         assert "message" in data
         assert "endpoints" in data
         assert "POST /user/register" in data["endpoints"]
+        assert "POST /user/login" in data["endpoints"]
+        assert "GET /user/info" in data["endpoints"]
         assert "GET /functions" in data["endpoints"]
         assert "GET /walkers" in data["endpoints"]
 

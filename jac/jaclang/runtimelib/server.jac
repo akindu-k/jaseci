@@ -166,6 +166,7 @@ obj AuthHandler {
     def update_password(
         username: str, current_password: str, new_password: str, token: str
     ) -> TransportResponse;
+    def get_user_info(token: str) -> TransportResponse;
 }
 
 """Handle introspection routes."""

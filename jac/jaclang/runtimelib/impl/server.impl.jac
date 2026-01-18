@@ -837,6 +837,38 @@ impl AuthHandler.update_password(
     );
 }
 
+"""Get authenticated user's information."""
+impl AuthHandler.get_user_info(token:  str) -> TransportResponse {
+    import from jaclang.runtimelib.transport { TransportResponse, Meta }
+    # Validate token
+    username = self.user_manager.validate_token(token);
+    if not username {
+        return TransportResponse.fail(
+            code='UNAUTHORIZED',
+            message='Invalid or expired token',
+            meta=Meta(extra={'http_status': 401})
+        );
+    }
+    # Get user information
+    user_data = self.user_manager.get_user(username);
+    if not user_data {
+        return TransportResponse.fail(
+            code='NOT_FOUND',
+            message='User not found',
+            meta=Meta(extra={'http_status': 404})
+        );
+    }
+    # Return user info (note: get_user returns 'email' as key, but it's actually username)
+    return TransportResponse. success(
+        data={
+            'username': username,
+            'root_id': user_data['root_id'],
+            'token': user_data['token']
+        },
+        meta=Meta(extra={'http_status': 200})
+    );
+}
+
 """List all functions."""
 impl IntrospectionHandler.list_functions -> TransportResponse {
     self.introspector.load();
@@ -1176,6 +1208,7 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                         'endpoints': {
                             'POST /user/register': 'Create a new user',
                             'POST /user/login': 'Authenticate and get token',
+                            'GET /user/info': 'Get user information (auth required)',
                             'GET /functions': 'List all available functions',
                             'GET /walkers': 'List all available walkers',
                             'GET /function/<name>': 'Get function signature',
@@ -1246,6 +1279,22 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                     }
                 }
                 self._send_response(server.introspection_handler.get_walker_info(name));
+                return;
+            } elif (path == '/user/info') {
+                username = self._authenticate();
+                if not username {
+                    self._send_response(
+                        TransportResponse.fail(
+                            code='UNAUTHORIZED',
+                            message='Unauthorized - Authentication required',
+                            meta=Meta(extra={'http_status': 401})
+                        )
+                    );
+                    return;
+                }
+                token = self._get_auth_token();
+                response = server.auth_handler.get_user_info(token);
+                self._send_response(response);
                 return;
             } elif (path == '/protected') {
                 username = self._authenticate();
@@ -1480,6 +1529,7 @@ impl JacAPIServer.start(watch: bool = False) -> None {
         print('\nAvailable endpoints:');
         print('  POST /user/register - Create a new user');
         print('  POST /user/login - Login and get auth token');
+        print('  GET  /user/info - Get current user information (auth required)');
         print('  PUT  /user/username - Update username (auth required)');
         print('  PUT  /user/password - Update password (auth required)');
         print('  GET /functions - List all functions');
@@ -1542,6 +1592,12 @@ impl print_endpoint_docs(server: JacAPIServer) -> None {
         '/user/login',
         'Authenticate and get token',
         'Body: { "username": str, "password": str }'
+    );
+    endpoint(
+        'GET',
+        '/user/info',
+        'Get authenticated user information',
+        'Requires:  Authorization header with Bearer token'
     );
     section('INTROSPECTION', 'Authenticated');
     endpoint('GET', '/functions', 'List all functions → string[]');
