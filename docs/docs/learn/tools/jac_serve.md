@@ -257,8 +257,6 @@ curl -X PUT http://localhost:8000/user/password \
 
 ## User Management Endpoints
 
-
-
 | Endpoint | Method | Auth Required | Description |
 |----------|--------|---------------|-------------|
 | `/user/register` | POST | No | Create new user account |
