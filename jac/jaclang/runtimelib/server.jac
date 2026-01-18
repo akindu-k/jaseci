@@ -154,6 +154,7 @@ obj AuthHandler {
 
     def create_user(username: str, password: str) -> TransportResponse;
     def login(username: str, password: str) -> TransportResponse;
+    def get_user_info(token: str) -> TransportResponse;
 }
 
 """Handle introspection routes."""

@@ -77,6 +77,34 @@ class TestServerClientMigrated:
 
         assert not fail_response.ok or "error" in fail_response.json()
 
+    def test_get_user_info_requires_auth(self, client: JacTestClient) -> None:
+        """Test that user info endpoint requires authentication."""
+        # Try to get user info without authentication
+        client.clear_auth()
+        response = client.get("/user/info")
+
+        assert not response.ok
+        assert response.status_code == 401
+        # Check response data if available, otherwise check text
+        if response.data:
+            assert "error" in response.data or "message" in response.data
+        else:
+            assert "error" in response.text.lower() or "unauthorized" in response.text.lower()
+
+    def test_get_user_info_invalid_token(self, client: JacTestClient) -> None:
+        """Test that user info endpoint rejects invalid token."""
+        # Set invalid token
+        client.set_auth_token("invalid_token_12345")
+        response = client.get("/user/info")
+
+        assert not response.ok
+        assert response.status_code == 401
+        # Check response data if available, otherwise check text
+        if response.data:
+            assert "error" in response.data or "message" in response.data
+        else:
+            assert "error" in response.text.lower() or "unauthorized" in response.text.lower()
+
     def test_authentication_required(self, client: JacTestClient) -> None:
         """Test that protected endpoints require authentication (migrated)."""
         response = client.get("/protected")
@@ -300,6 +328,8 @@ class TestServerClientMigrated:
         assert "message" in data
         assert "endpoints" in data
         assert "POST /user/register" in data["endpoints"]
+        assert "POST /user/login" in data["endpoints"]
+        assert "GET /user/info" in data["endpoints"]
         assert "GET /functions" in data["endpoints"]
         assert "GET /walkers" in data["endpoints"]
 
