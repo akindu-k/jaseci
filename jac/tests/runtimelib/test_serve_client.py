@@ -302,6 +302,216 @@ class TestServerClientMigrated:
         assert "POST /user/register" in data["endpoints"]
         assert "GET /functions" in data["endpoints"]
         assert "GET /walkers" in data["endpoints"]
+        
+    def test_update_username(self, client: JacTestClient) -> None:
+        """Test update username endpoint."""
+        # Create user
+        create_response = client.post(
+            "/user/register",
+            json={"username": "olduser", "password": "pass123"},
+        )
+        assert create_response.ok
+        token = create_response.data["token"]
+        original_root_id = create_response.data["root_id"]
+
+        # Update username
+        client.set_auth_token(token)
+        update_response = client.put(
+            "/user/username",
+            json={"current_username": "olduser", "new_username": "newuser"},
+        )
+        assert update_response.ok
+        assert update_response.data["username"] == "newuser"
+        assert update_response.data["root_id"] == original_root_id
+        assert "token" in update_response.data
+
+        # Login with new username should work
+        client.clear_auth()
+        login_response = client.login("newuser", "pass123")
+        assert login_response.ok
+        assert login_response.data["username"] == "newuser"
+
+        # Login with old username should fail
+        client.clear_auth()
+        old_login_response = client.login("olduser", "pass123")
+        assert not old_login_response.ok
+
+    def test_update_username_requires_auth(self, client: JacTestClient) -> None:
+        """Test that update username requires authentication."""
+        # Create user
+        client.post(
+            "/user/register",
+            json={"username": "authtest", "password": "pass123"},
+        )
+
+        # Clear auth and try to update without token
+        client.clear_auth()
+        response = client.put(
+            "/user/username",
+            json={"current_username": "authtest", "new_username": "newname"},
+        )
+        assert not response.ok
+        assert response.status_code == 401
+
+    def test_update_username_cannot_update_other_users(
+        self, client: JacTestClient
+    ) -> None:
+        """Test that users cannot update other users' usernames."""
+        # Create two users
+        user1_response = client.post(
+            "/user/register",
+            json={"username": "user1", "password": "pass1"},
+        )
+        user1_token = user1_response. data["token"]
+
+        client.clear_auth()
+        client.post(
+            "/user/register",
+            json={"username": "user2", "password": "pass2"},
+        )
+
+        # User1 tries to update user2's username
+        client.set_auth_token(user1_token)
+        response = client.put(
+            "/user/username",
+            json={"current_username": "user2", "new_username": "hacked"},
+        )
+        assert not response.ok
+        assert response. status_code == 403
+
+    def test_update_username_already_exists(self, client: JacTestClient) -> None:
+        """Test that updating to an existing username fails."""
+        # Create first user and save token
+        response1 = client.post(
+            "/user/register",
+            json={"username": "user_a", "password": "pass1"},
+        )
+        token = response1.data["token"]
+        
+        # Create second user
+        client.clear_auth()
+        client.post(
+            "/user/register",
+            json={"username": "user_b", "password": "pass2"},
+        )
+        
+        # Try to update user_a to user_b (already exists) - MUST set token explicitly
+        client.set_auth_token(token)
+        response = client.put(
+            "/user/username",
+            json={"current_username": "user_a", "new_username":  "user_b"},
+        )
+        
+        # Should fail because user_b already exists
+        assert not response.ok
+        assert response.status_code == 400
+
+    def test_update_password(self, client: JacTestClient) -> None:
+        """Test update password endpoint."""
+        # Create user
+        create_response = client.post(
+            "/user/register",
+            json={"username": "passuser", "password": "oldpass"},
+        )
+        assert create_response.ok
+        token = create_response.data["token"]
+
+        # Update password
+        client. set_auth_token(token)
+        update_response = client. put(
+            "/user/password",
+            json={
+                "username": "passuser",
+                "current_password": "oldpass",
+                "new_password": "newpass",
+            },
+        )
+        assert update_response.ok
+        assert update_response.data["username"] == "passuser"
+        assert "message" in update_response.data
+
+        # Login with new password should work
+        client.clear_auth()
+        login_response = client. login("passuser", "newpass")
+        assert login_response. ok
+
+        # Login with old password should fail
+        client.clear_auth()
+        old_login_response = client.login("passuser", "oldpass")
+        assert not old_login_response.ok
+
+    def test_update_password_requires_auth(self, client: JacTestClient) -> None:
+        """Test that update password requires authentication."""
+        # Create user
+        client.post(
+            "/user/register",
+            json={"username": "noauthpass", "password": "pass123"},
+        )
+
+        # Try to update without token
+        client.clear_auth()
+        response = client.put(
+            "/user/password",
+            json={
+                "username": "noauthpass",
+                "current_password": "pass123",
+                "new_password": "newpass",
+            },
+        )
+        assert not response.ok
+        assert response.status_code == 401
+
+    def test_update_password_wrong_current(self, client: JacTestClient) -> None:
+        """Test that update password fails with wrong current password."""
+        # Create user
+        create_response = client.post(
+            "/user/register",
+            json={"username": "wrongpass", "password": "correctpass"},
+        )
+        token = create_response.data["token"]
+
+        # Try to update with wrong current password
+        client.set_auth_token(token)
+        response = client. put(
+            "/user/password",
+            json={
+                "username": "wrongpass",
+                "current_password": "wrongpassword",
+                "new_password": "newpass",
+            },
+        )
+        assert not response.ok
+        assert response.status_code == 400
+
+    def test_update_password_cannot_update_other_users(
+        self, client: JacTestClient
+    ) -> None:
+        """Test that users cannot update other users' passwords."""
+        # Create two users
+        user1_response = client.post(
+            "/user/register",
+            json={"username": "pass_user1", "password": "pass1"},
+        )
+        user1_token = user1_response.data["token"]
+
+        client.clear_auth()
+        client.post(
+            "/user/register",
+            json={"username": "pass_user2", "password": "pass2"},
+        )
+
+        # User1 tries to update user2's password
+        client.set_auth_token(user1_token)
+        response = client.put(
+            "/user/password",
+            json={
+                "username": "pass_user2",
+                "current_password": "pass2",
+                "new_password":  "hacked",
+            },
+        )
+        assert not response.ok
+        assert response.status_code == 403
 
 
 @pytest.fixture
