@@ -302,7 +302,7 @@ class TestServerClientMigrated:
         assert "POST /user/register" in data["endpoints"]
         assert "GET /functions" in data["endpoints"]
         assert "GET /walkers" in data["endpoints"]
-        
+
     def test_update_username(self, client: JacTestClient) -> None:
         """Test update username endpoint."""
         # Create user
@@ -362,7 +362,7 @@ class TestServerClientMigrated:
             "/user/register",
             json={"username": "user1", "password": "pass1"},
         )
-        user1_token = user1_response. data["token"]
+        user1_token = user1_response.data["token"]
 
         client.clear_auth()
         client.post(
@@ -377,7 +377,7 @@ class TestServerClientMigrated:
             json={"current_username": "user2", "new_username": "hacked"},
         )
         assert not response.ok
-        assert response. status_code == 403
+        assert response.status_code == 403
 
     def test_update_username_already_exists(self, client: JacTestClient) -> None:
         """Test that updating to an existing username fails."""
@@ -387,21 +387,21 @@ class TestServerClientMigrated:
             json={"username": "user_a", "password": "pass1"},
         )
         token = response1.data["token"]
-        
+
         # Create second user
         client.clear_auth()
         client.post(
             "/user/register",
             json={"username": "user_b", "password": "pass2"},
         )
-        
+
         # Try to update user_a to user_b (already exists) - MUST set token explicitly
         client.set_auth_token(token)
         response = client.put(
             "/user/username",
-            json={"current_username": "user_a", "new_username":  "user_b"},
+            json={"current_username": "user_a", "new_username": "user_b"},
         )
-        
+
         # Should fail because user_b already exists
         assert not response.ok
         assert response.status_code == 400
@@ -417,8 +417,8 @@ class TestServerClientMigrated:
         token = create_response.data["token"]
 
         # Update password
-        client. set_auth_token(token)
-        update_response = client. put(
+        client.set_auth_token(token)
+        update_response = client.put(
             "/user/password",
             json={
                 "username": "passuser",
@@ -432,8 +432,8 @@ class TestServerClientMigrated:
 
         # Login with new password should work
         client.clear_auth()
-        login_response = client. login("passuser", "newpass")
-        assert login_response. ok
+        login_response = client.login("passuser", "newpass")
+        assert login_response.ok
 
         # Login with old password should fail
         client.clear_auth()
@@ -472,7 +472,7 @@ class TestServerClientMigrated:
 
         # Try to update with wrong current password
         client.set_auth_token(token)
-        response = client. put(
+        response = client.put(
             "/user/password",
             json={
                 "username": "wrongpass",
@@ -507,7 +507,7 @@ class TestServerClientMigrated:
             json={
                 "username": "pass_user2",
                 "current_password": "pass2",
-                "new_password":  "hacked",
+                "new_password": "hacked",
             },
         )
         assert not response.ok
