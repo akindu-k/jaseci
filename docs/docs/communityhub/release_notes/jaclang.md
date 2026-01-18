@@ -4,6 +4,12 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.9.9 (Unreleased)
 
+- **User Management Endpoints**:  Added new user management endpoints to the `jac start` API server:
+  - `GET /user/info` - Retrieve authenticated user's information (username, token, root_id)
+  - `PUT /user/username` - Update the authenticated user's username
+  - `PUT /user/password` - Update the authenticated user's password
+  All endpoints require authentication via Bearer token and include proper validation to prevent unauthorized access.
+
 - **Unified User and Application Database**: The `jac start` basic user authentication system now stores users in the same SQLite database (`main.db`) as application data, instead of a separate `users.json` file. This provides ACID transactions for user data, better concurrency with WAL mode, and simplified backup/restore with a single database file as a reference (overridden for production jac-scale).
 
 - **Improved JSX Formatter**: The JSX formatter now uses soft line breaks with automatic line-length detection instead of forcing multiline formatting. Attributes stay on the same line when they fit within the line width limit (88 characters), producing more compact and readable output. For example, `<button id="submit" disabled />` now stays on one line instead of breaking each attribute onto separate lines.
