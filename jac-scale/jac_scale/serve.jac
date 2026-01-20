@@ -63,6 +63,7 @@ class JacAPIServer(JServer) {
         new_username: str,
         Authorization: (str | None) = None
     ) -> TransportResponse;
+
     def update_password(
         self: JacAPIServer,
         username: str,
@@ -70,6 +71,7 @@ class JacAPIServer(JServer) {
         new_password: str,
         Authorization: (str | None) = None
     ) -> TransportResponse;
+
     def register_update_username_endpoint(self: JacAPIServer) -> None;
     def register_update_password_endpoint(self: JacAPIServer) -> None;
     def create_user(

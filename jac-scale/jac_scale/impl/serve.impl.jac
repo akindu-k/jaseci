@@ -165,7 +165,7 @@ impl JacAPIServer._configure_openapi_security(self: JacAPIServer) -> None {
                 }
             } elif path in ['/user/username', '/user/password'] {
                 for method in path_item {
-                    if (method in ['put','patch']) {
+                    if (method in ['put', 'patch']) {
                         path_item[method]['security'] = [{'BearerAuth': []}];
                     }
                 }
@@ -820,7 +820,7 @@ impl JacAPIServer.create_user(
 
 impl JacAPIServer.update_username(
     self: JacAPIServer,
-    current_username: str,
+    curremt_username: str,
     new_username: str,
     Authorization: (str | None) = None
 ) -> TransportResponse {
