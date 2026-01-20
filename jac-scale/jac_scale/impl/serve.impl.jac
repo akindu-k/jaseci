@@ -972,22 +972,23 @@ impl JacAPIServer.register_update_username_endpoint(self: JacAPIServer) -> None 
     );
 }
 
-impl JacAPIServer.register_update_password_endpoint(self: JacAPIServer) -> None {
-    self.server.add_endpoint(
-        import from fastapi { Request }
+ impl JacAPIServer.register_update_password_endpoint(self: JacAPIServer) -> None {
+    import from fastapi { Request }
 
-        async def update_password_handler(
-            request: Request,
-            username: str,
-            current_password: str,
-            new_password: str
-        ) -> TransportResponse{
-            authorization = request.headers.get('Authorization');
-            return self.update_password(
-                username, current_password, new_password, authorization
-            );
-        }
-        JEndPoint(
+    async def update_password_handler(
+        request: Request,
+        username: str,
+        current_password: str,
+        new_password: str
+    ) -> TransportResponse {
+        authorization = request.headers.get('Authorization');
+        return self.update_password(
+            username, current_password, new_password, authorization
+        );
+    }
+
+     self.server.add_endpoint(
+         JEndPoint(
             method=HTTPMethod.PUT,
             path='/user/password',
             callback=update_password_handler,
