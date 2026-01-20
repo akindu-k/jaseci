@@ -820,7 +820,7 @@ impl JacAPIServer.create_user(
 
 impl JacAPIServer.update_username(
     self: JacAPIServer,
-    current_username: str,
+    curremt_username: str,
     new_username: str,
     Authorization: (str | None) = None
 ) -> TransportResponse {
