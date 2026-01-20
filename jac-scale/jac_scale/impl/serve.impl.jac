@@ -842,6 +842,7 @@ impl JacAPIServer.update_username(
             meta=Meta(extra={'http_status': 401})
         );
     }
+
     # Ensure user is updating their own username
     if (token_username != current_username) {
         return TransportResponse.fail(
@@ -928,11 +929,23 @@ impl JacAPIServer.update_password(
 }
 
 impl JacAPIServer.register_update_username_endpoint(self: JacAPIServer) -> None {
+    import from fastapi { Request }
+
+    async def update_username_handler(
+        request: Request,
+        current_username: str,
+        new_username: str
+    ) -> TransportResponse{
+        authorization = request.headers.get('Authorization');
+        return self.update_username(
+            current_username, new_username, authorization
+        );
+    }
     self.server.add_endpoint(
         JEndPoint(
             method=HTTPMethod.PUT,
             path='/user/username',
-            callback=self.update_username,
+            callback=update_username_handler,
             parameters=[
                 APIParameter(
                     name='current_username',
@@ -949,14 +962,6 @@ impl JacAPIServer.register_update_username_endpoint(self: JacAPIServer) -> None 
                     default=None,
                     description='New username',
                     type=ParameterType.BODY
-                ),
-                APIParameter(
-                    name='Authorization',
-                    data_type='string',
-                    required=False,
-                    default=None,
-                    description='Bearer token for authentication',
-                    type=ParameterType.HEADER
                 )
             ],
             response_model=None,
@@ -969,10 +974,23 @@ impl JacAPIServer.register_update_username_endpoint(self: JacAPIServer) -> None 
 
 impl JacAPIServer.register_update_password_endpoint(self: JacAPIServer) -> None {
     self.server.add_endpoint(
+        import from fastapi { Request }
+
+        async def update_password_handler(
+            request: Request,
+            username: str,
+            current_password: str,
+            new_password: str
+        ) -> TransportResponse{
+            authorization = request.headers.get('Authorization');
+            return self.update_password(
+                username, current_password, new_password, authorization
+            );
+        }
         JEndPoint(
             method=HTTPMethod.PUT,
             path='/user/password',
-            callback=self.update_password,
+            callback=update_password_handler,
             parameters=[
                 APIParameter(
                     name='username',
@@ -997,14 +1015,6 @@ impl JacAPIServer.register_update_password_endpoint(self: JacAPIServer) -> None 
                     default=None,
                     description='New password',
                     type=ParameterType.BODY
-                ),
-                APIParameter(
-                    name='Authorization',
-                    data_type='string',
-                    required=False,
-                    default=None,
-                    description='Bearer token for authentication',
-                    type=ParameterType.HEADER
                 )
             ],
             response_model=None,
