@@ -46,17 +46,6 @@ def _get_http_status(transport_response: TransportResponse) -> int {
     return 200 if transport_response.ok else 500;
 }
 
-"""Helper function to convert TransportResponse directly to JSONResponse."""
-def _transport_response_to_json_response(
-    transport_response: TransportResponse
-) -> JSONResponse {
-    import from fastapi.responses { JSONResponse }
-    return JSONResponse(
-        status_code=_get_http_status(transport_response),
-        content=_transport_response_to_dict(transport_response)
-    );
-}
-
 impl JacAPIServer.start(self: JacAPIServer, watch: bool = False) -> None {
     self.introspector.load();
     # Eagerly build client bundle if there are client exports (skip in watch mode)
@@ -928,76 +917,91 @@ impl JacAPIServer.update_password(
 }
 
 impl JacAPIServer.register_update_username_endpoint(self: JacAPIServer) -> None {
-    import from fastapi { Depends, HTTPException, status }
-    import from fastapi.security { HTTPBearer, HTTPAuthorizationCredentials }
-    import from fastapi.responses { JSONResponse }
-    
-    # Set auto_error=False to handle missing tokens manually
-    security = HTTPBearer(auto_error=False);
-    def wrapper_callback(
-        body: UpdateUsernameRequest,
-        credentials: HTTPAuthorizationCredentials | None = Depends(security)
-    ) -> JSONResponse {
-        # Return 401 if no credentials provided
-        if not credentials {
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
-            ) ;
-        }
-
-        token = credentials.credentials if credentials else None;
-        authorization = f'Bearer {token}' if token else None;
-        transport_response = self.update_username(
-            body.current_username, body.new_username, authorization
-        );
-        # Convert TransportResponse to JSONResponse with proper HTTP status code
-        return _transport_response_to_json_response(transport_response);
-    }
-    self.server.app.put(
-        '/user/username',
-        response_model=None,
-        tags=['User APIs'],
-        summary='Update username',
-        description='Endpoint for updating user\'s username.  Requires authentication.'
-    )(
-        wrapper_callback
+    self.server.add_endpoint(
+        JEndPoint(
+            method=HTTPMethod.PUT,
+            path='/user/username',
+            callback=self.update_username,
+            parameters=[
+                APIParameter(
+                    name='current_username',
+                    data_type='string',
+                    required=True,
+                    default=None,
+                    description='Current username',
+                    type=ParameterType.BODY
+                ),
+                APIParameter(
+                    name='new_username',
+                    data_type='string',
+                    required=True,
+                    default=None,
+                    description='New username',
+                    type=ParameterType.BODY
+                ),
+                APIParameter(
+                    name='Authorization',
+                    data_type='string',
+                    required=False,
+                    default=None,
+                    description='Bearer token for authentication',
+                    type=ParameterType.HEADER
+                )
+            ],
+            response_model=None,
+            tags=['User APIs'],
+            summary='Update username',
+            description='Endpoint for updating user\'s username. Requires authentication.'
+        )
     );
 }
 
 impl JacAPIServer.register_update_password_endpoint(self: JacAPIServer) -> None {
-    import from fastapi { Depends, HTTPException, status }
-    import from fastapi.security { HTTPBearer, HTTPAuthorizationCredentials }
-    import from fastapi.responses { JSONResponse }
-    
-    # Set auto_error=False to handle missing tokens manually
-    security = HTTPBearer(auto_error=False);
-    def wrapper_callback(
-        body: UpdatePasswordRequest,
-        credentials: HTTPAuthorizationCredentials | None = Depends(security)
-    ) -> JSONResponse {
-        # Return 401 if no credentials provided
-        if not credentials {
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
-            ) ;
-        }
-
-        token = credentials.credentials if credentials else None;
-        authorization = f'Bearer {token}' if token else None;
-        transport_response = self.update_password(
-            body.username, body.current_password, body.new_password, authorization
-        );
-        # Convert TransportResponse to JSONResponse with proper HTTP status code
-        return _transport_response_to_json_response(transport_response);
-    }
-    
-    self.server.app.put(
-        '/user/password',
-        response_model=None,
-        tags=['User APIs'],
-        summary='Update password',
-        description='Endpoint for updating user\'s password. Requires authentication.'
-    )(wrapper_callback);
+    self.server.add_endpoint(
+        JEndPoint(
+            method=HTTPMethod.PUT,
+            path='/user/password',
+            callback=self.update_password,
+            parameters=[
+                APIParameter(
+                    name='username',
+                    data_type='string',
+                    required=True,
+                    default=None,
+                    description='Username',
+                    type=ParameterType.BODY
+                ),
+                APIParameter(
+                    name='current_password',
+                    data_type='string',
+                    required=True,
+                    default=None,
+                    description='Current password',
+                    type=ParameterType.BODY
+                ),
+                APIParameter(
+                    name='new_password',
+                    data_type='string',
+                    required=True,
+                    default=None,
+                    description='New password',
+                    type=ParameterType.BODY
+                ),
+                APIParameter(
+                    name='Authorization',
+                    data_type='string',
+                    required=False,
+                    default=None,
+                    description='Bearer token for authentication',
+                    type=ParameterType.HEADER
+                )
+            ],
+            response_model=None,
+            tags=['User APIs'],
+            summary='Update password',
+            description='Endpoint for updating user\'s password. Requires authentication.'
+        )
+    );
 }
 
 impl JacAPIServer.register_login_endpoint(self: JacAPIServer) -> None {
