@@ -1207,7 +1207,7 @@ class TestJacScaleServe:
         assert response.headers["cross-origin-opener-policy"] == "same-origin"
         assert "cross-origin-embedder-policy" in response.headers
         assert response.headers["cross-origin-embedder-policy"] == "require-corp"
-    
+
     def test_update_username_success(self) -> None:
         """Test successfully updating username and logging in with new username."""
         # Create user
@@ -1215,7 +1215,7 @@ class TestJacScaleServe:
         create_result = self._request(
             "POST",
             "/user/register",
-            {"username":  username, "password": "password123"},
+            {"username": username, "password": "password123"},
         )
         original_token = create_result["token"]
         original_root_id = create_result["root_id"]
@@ -1233,7 +1233,9 @@ class TestJacScaleServe:
         assert update_result["username"] == new_username
         assert "token" in update_result  # New token with updated username
         assert "root_id" in update_result
-        assert update_result["root_id"] == original_root_id  # Root ID should remain same
+        assert (
+            update_result["root_id"] == original_root_id
+        )  # Root ID should remain same
 
         # Login with new username should work
         login_result = self._request(
@@ -1247,7 +1249,7 @@ class TestJacScaleServe:
         # Old username should fail to login
         login_response = requests.post(
             f"{self.base_url}/user/login",
-            json={"username":  username, "password": "password123"},
+            json={"username": username, "password": "password123"},
             timeout=5,
         )
         assert login_response.status_code == 401
@@ -1273,7 +1275,7 @@ class TestJacScaleServe:
     def test_update_username_cannot_update_other_users(self) -> None:
         """Test that users cannot update other users' usernames."""
         # Create user1
-        user1_name = f"user1_{uuid. uuid4().hex[:8]}"
+        user1_name = f"user1_{uuid.uuid4().hex[:8]}"
         user1_result = self._request(
             "POST",
             "/user/register",
@@ -1318,9 +1320,9 @@ class TestJacScaleServe:
         )
 
         # Try to update user1 to user2 (already exists)
-        response = requests. put(
-            f"{self. base_url}/user/username",
-            json={"current_username": user1_name, "new_username":  user2_name},
+        response = requests.put(
+            f"{self.base_url}/user/username",
+            json={"current_username": user1_name, "new_username": user2_name},
             headers={"Authorization": f"Bearer {user1_token}"},
             timeout=5,
         )
@@ -1333,7 +1335,7 @@ class TestJacScaleServe:
         user_result = self._request(
             "POST",
             "/user/register",
-            {"username":  username, "password": "password123"},
+            {"username": username, "password": "password123"},
         )
         token = user_result["token"]
 
@@ -1389,7 +1391,7 @@ class TestJacScaleServe:
             json={"username": username, "password": "oldpass123"},
             timeout=5,
         )
-        assert login_response. status_code == 401
+        assert login_response.status_code == 401
 
     def test_update_password_requires_auth(self) -> None:
         """Test that password update requires authentication."""
@@ -1420,7 +1422,7 @@ class TestJacScaleServe:
         user_result = self._request(
             "POST",
             "/user/register",
-            {"username":  username, "password": "correctpass"},
+            {"username": username, "password": "correctpass"},
         )
         token = user_result["token"]
 
@@ -1462,7 +1464,7 @@ class TestJacScaleServe:
             json={
                 "username": user2_name,
                 "current_password": "pass2",
-                "new_password":  "hacked",
+                "new_password": "hacked",
             },
             headers={"Authorization": f"Bearer {user1_token}"},
             timeout=5,
@@ -1484,7 +1486,7 @@ class TestJacScaleServe:
         response = requests.put(
             f"{self.base_url}/user/password",
             json={
-                "username":  username,
+                "username": username,
                 "current_password": "oldpass",
                 "new_password": "",
             },
@@ -1502,7 +1504,7 @@ class TestJacScaleServe:
         create_result = self._request(
             "POST",
             "/user/register",
-            {"username":  username, "password": "oldpass"},
+            {"username": username, "password": "oldpass"},
         )
         token = create_result["token"]
         root_id = create_result["root_id"]
