@@ -46,6 +46,17 @@ def _get_http_status(transport_response: TransportResponse) -> int {
     return 200 if transport_response.ok else 500;
 }
 
+"""Helper function to convert TransportResponse directly to JSONResponse."""
+def _transport_response_to_json_response(
+    transport_response: TransportResponse
+) -> JSONResponse {
+    import from fastapi.responses { JSONResponse }
+    return JSONResponse(
+        status_code=_get_http_status(transport_response),
+        content=_transport_response_to_dict(transport_response)
+    );
+}
+
 impl JacAPIServer.start(self: JacAPIServer, watch: bool = False) -> None {
     self.introspector.load();
     # Eagerly build client bundle if there are client exports (skip in watch mode)
