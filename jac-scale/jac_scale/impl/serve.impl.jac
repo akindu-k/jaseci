@@ -931,7 +931,6 @@ impl JacAPIServer.register_update_username_endpoint(self: JacAPIServer) -> None 
     import from fastapi { Depends, HTTPException, status }
     import from fastapi.security { HTTPBearer, HTTPAuthorizationCredentials }
     import from fastapi.responses { JSONResponse }
-    
     # Set auto_error=False to handle missing tokens manually
     security = HTTPBearer(auto_error=False);
     def wrapper_callback(
@@ -968,7 +967,6 @@ impl JacAPIServer.register_update_password_endpoint(self: JacAPIServer) -> None 
     import from fastapi { Depends, HTTPException, status }
     import from fastapi.security { HTTPBearer, HTTPAuthorizationCredentials }
     import from fastapi.responses { JSONResponse }
-    
     # Set auto_error=False to handle missing tokens manually
     security = HTTPBearer(auto_error=False);
     def wrapper_callback(
@@ -990,14 +988,15 @@ impl JacAPIServer.register_update_password_endpoint(self: JacAPIServer) -> None 
         # Convert TransportResponse to JSONResponse with proper HTTP status code
         return _transport_response_to_json_response(transport_response);
     }
-    
     self.server.app.put(
         '/user/password',
         response_model=None,
         tags=['User APIs'],
         summary='Update password',
         description='Endpoint for updating user\'s password. Requires authentication.'
-    )(wrapper_callback);
+    )(
+        wrapper_callback
+    );
 }
 
 impl JacAPIServer.register_login_endpoint(self: JacAPIServer) -> None {
