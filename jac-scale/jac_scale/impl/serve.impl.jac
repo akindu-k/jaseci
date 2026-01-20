@@ -820,12 +820,10 @@ impl JacAPIServer.create_user(
 
 impl JacAPIServer.update_username(
     self: JacAPIServer,
-    curremt_username: str,
+    current_username: str,
     new_username: str,
     Authorization: (str | None) = None
 ) -> TransportResponse {
-    print("Current username:", current_username);
-    print("Update username called new username:", new_username);
     import from jaclang.runtimelib.transport { TransportResponse, Meta }
     # Validate token and extract username
     token: (str | None) = None;
@@ -836,9 +834,7 @@ impl JacAPIServer.update_username(
     ) {
         token = Authorization[7:];
     }
-    print(f"Authorization token: {token}");
     token_username = self.validate_jwt_token(token) if token else None;
-    print(f"Token username: {token_username}");
     if not token_username {
         return TransportResponse.fail(
             code='UNAUTHORIZED',
