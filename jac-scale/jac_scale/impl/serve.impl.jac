@@ -927,32 +927,74 @@ impl JacAPIServer.update_password(
     );
 }
 
-impl JacAPIServer.register_update_username_endpoint(self: JacAPIServer) -> None {
-    import from fastapi { Depends }
+impl JacAPIServer. register_update_username_endpoint(self:  JacAPIServer) -> None {
+    import from fastapi { Depends, HTTPException, status }
     import from fastapi.security { HTTPBearer, HTTPAuthorizationCredentials }
-    security = HTTPBearer();
-    # Create wrapper that FastAPI will handle directly
+    
+    # Set auto_error=False to handle missing tokens manually
+    security = HTTPBearer(auto_error=False);
+    
     def wrapper_callback(
         body: UpdateUsernameRequest,
-        credentials: HTTPAuthorizationCredentials = Depends(security)
+        credentials: HTTPAuthorizationCredentials | None = Depends(security)
     ) -> TransportResponse {
-        # Extract token from credentials
+        # Return 401 if no credentials provided
+        if not credentials {
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Not authenticated"
+            );
+        }
+        
         token = credentials.credentials if credentials else None;
         authorization = f'Bearer {token}' if token else None;
         return self.update_username(
             body.current_username, body.new_username, authorization
         );
     }
-    # Register directly with FastAPI (bypassing JEndPoint parameter processing)
+    
     self.server.app.put(
         '/user/username',
         response_model=None,
         tags=['User APIs'],
         summary='Update username',
-        description='Endpoint for updating user\'s username. Requires authentication.'
-    )(
-        wrapper_callback
-    );
+        description='Endpoint for updating user\'s username.  Requires authentication.'
+    )(wrapper_callback);
+}
+
+impl JacAPIServer.register_update_password_endpoint(self:  JacAPIServer) -> None {
+    import from fastapi { Depends, HTTPException, status }
+    import from fastapi.security { HTTPBearer, HTTPAuthorizationCredentials }
+    
+    # Set auto_error=False to handle missing tokens manually
+    security = HTTPBearer(auto_error=False);
+    
+    def wrapper_callback(
+        body: UpdatePasswordRequest,
+        credentials: HTTPAuthorizationCredentials | None = Depends(security)
+    ) -> TransportResponse {
+        # Return 401 if no credentials provided
+        if not credentials {
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Not authenticated"
+            );
+        }
+        
+        token = credentials.credentials if credentials else None;
+        authorization = f'Bearer {token}' if token else None;
+        return self.update_password(
+            body.username, body.current_password, body.new_password, authorization
+        );
+    }
+    
+    self.server.app.put(
+        '/user/password',
+        response_model=None,
+        tags=['User APIs'],
+        summary='Update password',
+        description='Endpoint for updating user\'s password. Requires authentication.'
+    )(wrapper_callback);
 }
 
 impl JacAPIServer.register_update_password_endpoint(self: JacAPIServer) -> None {

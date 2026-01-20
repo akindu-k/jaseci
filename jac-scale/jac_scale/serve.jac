@@ -59,7 +59,7 @@ class JacAPIServer(JServer) {
     def register_login_endpoint(self: JacAPIServer) -> None;
     def update_username(
         self: JacAPIServer,
-        curremt_username: str,
+        current_username: str,
         new_username: str,
         Authorization: (str | None) = None
     ) -> TransportResponse;
