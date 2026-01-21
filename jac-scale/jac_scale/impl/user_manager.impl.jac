@@ -1,5 +1,27 @@
 impl JacScaleUserManager.postinit -> None {
     super.postinit();
+    
+    # Create SSO accounts table for tracking linked external identities
+    self._ensure_connection();
+    self._conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sso_accounts (
+            user_id TEXT NOT NULL,
+            platform TEXT NOT NULL,
+            external_id TEXT NOT NULL,
+            email TEXT,
+            linked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (platform, external_id),
+            FOREIGN KEY (user_id) REFERENCES users(username) ON DELETE CASCADE
+        )
+        """
+    );
+    # Create index for faster lookups by user_id
+    self._conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sso_accounts_user_id ON sso_accounts(user_id)"
+    );
+    self._conn.commit();
+    
     # Load SSO config
     sso_config = get_scale_config().get_sso_config();
     for platform in Platforms {
@@ -60,9 +82,7 @@ impl JacScaleUserManager.validate_token(token: str) -> (str | None) {
     return self.validate_jwt_token(token);
 }
 
-impl JacScaleUserManager.get_sso(
-    platform: str, operation: str
-) -> (SSOProvider | None) {
+impl JacScaleUserManager.get_sso(platform: str, operation: str) -> (SSOProvider | None) {
     if (platform not in self.SUPPORTED_PLATFORMS) {
         return None;
     }
@@ -117,7 +137,6 @@ impl JacScaleUserManager.sso_initiate(
     }
     return await sso.initiate_auth(operation);
 }
-
 
 impl JacScaleUserManager.sso_callback(
     request: Request, platform: str, operation: str
@@ -221,4 +240,130 @@ impl JacScaleUserManager.sso_callback(
         message='An unknown error occurred',
         meta=Meta(extra={'http_status': 500})
     );
+}
+
+# SSO Account Linking Methods
+
+impl JacScaleUserManager.link_sso_account(
+    user_id: str, platform: str, external_id: str, email: str
+) -> dict[str, str] {
+    """Link an SSO account to a user.
+    
+    This allows users to have multiple SSO providers linked to their account.
+    """
+    self._ensure_connection();
+    
+    # Check if this SSO account is already linked to another user
+    cursor = self._conn.execute(
+        "SELECT user_id FROM sso_accounts WHERE platform = ? AND external_id = ?",
+        (platform, external_id)
+    );
+    existing = cursor.fetchone();
+    
+    if existing {
+        if existing[0] == user_id {
+            return {'message': 'SSO account already linked to this user'};
+        }
+        return {'error': 'This SSO account is already linked to another user'};
+    }
+    
+    # Link the SSO account
+    self._conn.execute(
+        """
+        INSERT INTO sso_accounts (user_id, platform, external_id, email)
+        VALUES (?, ?, ?, ?)
+        """,
+        (user_id, platform, external_id, email)
+    );
+    self._conn.commit();
+    
+    return {
+        'message': 'SSO account linked successfully',
+        'user_id': user_id,
+        'platform': platform
+    };
+}
+
+impl JacScaleUserManager.unlink_sso_account(
+    user_id: str, platform: str
+) -> dict[str, str] {
+    """Unlink an SSO account from a user."""
+    self._ensure_connection();
+    
+    cursor = self._conn.execute(
+        "DELETE FROM sso_accounts WHERE user_id = ? AND platform = ?",
+        (user_id, platform)
+    );
+    self._conn.commit();
+    
+    if cursor.rowcount == 0 {
+        return {'error': 'SSO account not found'};
+    }
+    
+    return {
+        'message': 'SSO account unlinked successfully',
+        'user_id': user_id,
+        'platform': platform
+    };
+}
+
+impl JacScaleUserManager.get_sso_accounts(
+    user_id: str
+) -> list[dict[str, str]] {
+    """Get all SSO accounts linked to a user."""
+    self._ensure_connection();
+    
+    cursor = self._conn.execute(
+        """
+        SELECT platform, external_id, email, linked_at
+        FROM sso_accounts
+        WHERE user_id = ?
+        ORDER BY linked_at DESC
+        """,
+        (user_id,)
+    );
+    
+    accounts = [];
+    for row in cursor.fetchall() {
+        accounts.append({
+            'platform': row[0],
+            'external_id': row[1],
+            'email': row[2],
+            'linked_at': row[3]
+        });
+    }
+    
+    return accounts;
+}
+
+impl JacScaleUserManager.get_user_by_sso(
+    platform: str, external_id: str
+) -> (dict[str, str] | None) {
+    """Find a user by their SSO account credentials.
+    
+    This is used during SSO login to find the user associated with
+    an external SSO identity.
+    """
+    self._ensure_connection();
+    
+    cursor = self._conn.execute(
+        """
+        SELECT sa.user_id, u.token, u.root_id
+        FROM sso_accounts sa
+        JOIN users u ON sa.user_id = u.username
+        WHERE sa.platform = ? AND sa.external_id = ?
+        """,
+        (platform, external_id)
+    );
+    
+    row = cursor.fetchone();
+    if not row {
+        return None;
+    }
+    
+    return {
+        'email': row[0],
+        'token': row[1],
+        'root_id': row[2]
+    };
 }
