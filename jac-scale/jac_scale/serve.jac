@@ -48,9 +48,7 @@ class JacAPIServer(JServer) {
     has _hmr_pending: bool = False,
         _hot_reloader: Any | None = None;
 
-    static def create_jwt_token(username: str) -> str;
-    static def validate_jwt_token(token: str) -> (str | None);
-    static def refresh_jwt_token(token: str) -> (str | None);
+
     def init(
         self: JacAPIServer, module_name: str, port: int = 8000, base_path: str = ""
     ) -> None;
@@ -84,17 +82,7 @@ class JacAPIServer(JServer) {
 
     def register_create_user_endpoint(self: JacAPIServer) -> None;
     def register_refresh_token_endpoint(self: JacAPIServer) -> None;
-    def get_sso(
-        self: JacAPIServer, platform: str, operation: str
-    ) -> (GoogleSSO | None);
 
-    async def sso_initiate(
-        self: JacAPIServer, platform: str, operation: str
-    ) -> (Response | TransportResponse);
-
-    async def sso_callback(
-        self: JacAPIServer, request: Request, platform: str, operation: str
-    ) -> TransportResponse;
 
     def register_sso_endpoints(self: JacAPIServer) -> None;
     def create_walker_callback(
