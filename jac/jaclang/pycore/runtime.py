@@ -2279,6 +2279,23 @@ class JacRuntimeInterface(
 ):
     """Jac Feature."""
 
+    @staticmethod
+    def get_user_manager(base_path: str) -> UserManager:
+        """Get UserManager instance (hookable for plugins).
+
+        Plugins can override this to provide custom UserManager implementations.
+        Default returns core UserManager.
+
+        Args:
+            base_path: Base path for user data storage
+
+        Returns:
+            UserManager instance
+        """
+        from jaclang.runtimelib.server import UserManager
+
+        return UserManager(base_path=base_path)
+
 
 def generate_plugin_helpers(
     plugin_class: type[Any],

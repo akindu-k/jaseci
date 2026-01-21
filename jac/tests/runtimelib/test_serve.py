@@ -29,7 +29,7 @@ def setup_fresh_jac(fresh_jac_context: Path) -> Generator[None, None, None]:
 def test_user_manager_creation(tmp_path: Path) -> None:
     """Test UserManager creates users with unique roots."""
     session_file = str(tmp_path / "test.session")
-    user_mgr = UserManager(session_file)
+    user_mgr = Jac.get_user_manager(session_file)
 
     # Create first user
     result1 = user_mgr.create_user("user1", "pass1")
@@ -55,7 +55,7 @@ def test_user_manager_creation(tmp_path: Path) -> None:
 def test_user_manager_authentication(tmp_path: Path) -> None:
     """Test UserManager authentication."""
     session_file = str(tmp_path / "test.session")
-    user_mgr = UserManager(session_file)
+    user_mgr = Jac.get_user_manager(session_file)
 
     # Create user
     create_result = user_mgr.create_user("testuser", "testpass")
@@ -83,7 +83,7 @@ def test_user_manager_authentication(tmp_path: Path) -> None:
 def test_user_manager_token_validation(tmp_path: Path) -> None:
     """Test UserManager token validation."""
     session_file = str(tmp_path / "test.session")
-    user_mgr = UserManager(session_file)
+    user_mgr = Jac.get_user_manager(session_file)
 
     # Create user
     result = user_mgr.create_user("validuser", "validpass")
