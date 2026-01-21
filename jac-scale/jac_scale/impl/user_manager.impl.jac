@@ -60,9 +60,7 @@ impl JacScaleUserManager.validate_token(token: str) -> (str | None) {
     return self.validate_jwt_token(token);
 }
 
-impl JacScaleUserManager.get_sso(
-    platform: str, operation: str
-) -> (SSOProvider | None) {
+impl JacScaleUserManager.get_sso(platform: str, operation: str) -> (SSOProvider | None) {
     if (platform not in self.SUPPORTED_PLATFORMS) {
         return None;
     }
@@ -117,7 +115,6 @@ impl JacScaleUserManager.sso_initiate(
     }
     return await sso.initiate_auth(operation);
 }
-
 
 impl JacScaleUserManager.sso_callback(
     request: Request, platform: str, operation: str
