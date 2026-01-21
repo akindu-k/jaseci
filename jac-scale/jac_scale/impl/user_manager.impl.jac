@@ -1,4 +1,3 @@
-
 impl JacScaleUserManager.postinit -> None {
     super.postinit();
     # Load SSO config
@@ -61,9 +60,7 @@ impl JacScaleUserManager.validate_token(token: str) -> (str | None) {
     return self.validate_jwt_token(token);
 }
 
-impl JacScaleUserManager.get_sso(
-    platform: str, operation: str
-) -> (GoogleSSO | None) {
+impl JacScaleUserManager.get_sso(platform: str, operation: str) -> (GoogleSSO | None) {
     if (platform not in self.SUPPORTED_PLATFORMS) {
         return None;
     }
@@ -84,7 +81,6 @@ impl JacScaleUserManager.sso_initiate(
     platform: str, operation: str
 ) -> (Response | TransportResponse) {
     import from jaclang.runtimelib.server { JsonValue }
-    
     if (platform not in [p.value for p in Platforms]) {
         return TransportResponse.fail(
             code='INVALID_PLATFORM',
@@ -125,7 +121,6 @@ impl JacScaleUserManager.sso_callback(
     request: Request, platform: str, operation: str
 ) -> TransportResponse {
     import from jaclang.runtimelib.server { JsonValue }
-    
     if (platform not in [p.value for p in Platforms]) {
         return TransportResponse.fail(
             code='INVALID_PLATFORM',

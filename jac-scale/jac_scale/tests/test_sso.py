@@ -1,10 +1,9 @@
 """Test for SSO (Single Sign-On) implementation in jac-scale."""
 
-import contextlib
 import json
 from dataclasses import dataclass
 from types import TracebackType
-from unittest.mock import AsyncMock, Mock, patch, MagicMock
+from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
 import pytest
@@ -108,7 +107,7 @@ class MockScaleConfig:
 
     def get_sso_config(self) -> dict:
         return self._sso_config
-    
+
     def get_jwt_config(self) -> dict:
         return {
             "secret": "test_secret",
@@ -124,16 +123,17 @@ class TestJacScaleUserManagerSSO:
         """Setup for each test method."""
         # Reset config singleton to ensure fresh config
         reset_scale_config()
-        
+
         mock_config = MockScaleConfig(mock_sso_config_with_credentials())
         with patch("jac_scale.user_manager.get_scale_config", return_value=mock_config):
-             with patch("jac_scale.user_manager.get_scale_config", return_value=mock_config):
+            with patch(
+                "jac_scale.user_manager.get_scale_config", return_value=mock_config
+            ):
                 self.user_manager = JacScaleUserManager(base_path="")
-                
+
         # Mock create_user and get_user which rely on storage
         self.user_manager.create_user = Mock()
         self.user_manager.get_user = Mock()
-
 
     @staticmethod
     def _get_response_body(result: JSONResponse | TransportResponse) -> str:
@@ -173,8 +173,12 @@ class TestJacScaleUserManagerSSO:
     def test_get_sso_with_google_platform(self) -> None:
         """Test get_sso returns GoogleSSO instance for Google platform."""
         # Patch GoogleSSO with side_effect to create MockGoogleSSO instances
-        with patch("jac_scale.user_manager.GoogleSSO", side_effect=MockGoogleSSO) as mock_sso:
-            sso = self.user_manager.get_sso(Platforms.GOOGLE.value, Operations.LOGIN.value)
+        with patch(
+            "jac_scale.user_manager.GoogleSSO", side_effect=MockGoogleSSO
+        ) as mock_sso:
+            sso = self.user_manager.get_sso(
+                Platforms.GOOGLE.value, Operations.LOGIN.value
+            )
 
             assert sso is not None
             # Verify attributes
@@ -194,22 +198,28 @@ class TestJacScaleUserManagerSSO:
         mock_config = MockScaleConfig(mock_sso_config_without_credentials())
         # Patch the correct location where get_scale_config is imported
         with patch("jac_scale.user_manager.get_scale_config", return_value=mock_config):
-             # Re-init user manager to reload config
-             user_manager = JacScaleUserManager(base_path="")
-             sso = user_manager.get_sso(Platforms.GOOGLE.value, Operations.LOGIN.value)
-             assert sso is None
+            # Re-init user manager to reload config
+            user_manager = JacScaleUserManager(base_path="")
+            sso = user_manager.get_sso(Platforms.GOOGLE.value, Operations.LOGIN.value)
+            assert sso is None
 
     def test_get_sso_redirect_uri_format(self) -> None:
         """Test get_sso creates correct redirect URI based on jac.toml SSO host."""
-        with patch("jac_scale.user_manager.GoogleSSO", side_effect=MockGoogleSSO) as mock_sso:
-            sso = self.user_manager.get_sso(Platforms.GOOGLE.value, Operations.LOGIN.value)
+        with patch(
+            "jac_scale.user_manager.GoogleSSO", side_effect=MockGoogleSSO
+        ) as mock_sso:
+            sso = self.user_manager.get_sso(
+                Platforms.GOOGLE.value, Operations.LOGIN.value
+            )
             assert sso.redirect_uri == "http://localhost:8000/sso/google/login/callback"
 
     @pytest.mark.asyncio
     async def test_sso_initiate_success(self) -> None:
         """Test successful SSO initiation."""
         with patch.object(
-            self.user_manager, "get_sso", return_value=MockGoogleSSO("id", "secret", "uri")
+            self.user_manager,
+            "get_sso",
+            return_value=MockGoogleSSO("id", "secret", "uri"),
         ):
             result = await self.user_manager.sso_initiate(
                 Platforms.GOOGLE.value, Operations.LOGIN.value
@@ -463,10 +473,15 @@ class TestJacScaleUserManagerSSO:
         )
         # Patch both places where config is loaded
         with patch("jac_scale.user_manager.get_scale_config", return_value=mock_config):
-             with patch("jac_scale.user_manager.get_scale_config", return_value=mock_config):
+            with patch(
+                "jac_scale.user_manager.get_scale_config", return_value=mock_config
+            ):
                 user_manager = JacScaleUserManager(base_path="")
                 assert "google" in user_manager.SUPPORTED_PLATFORMS
-                assert user_manager.SUPPORTED_PLATFORMS["google"]["client_id"] == "toml_test_id"
+                assert (
+                    user_manager.SUPPORTED_PLATFORMS["google"]["client_id"]
+                    == "toml_test_id"
+                )
 
     def test_supported_platforms_initialization_without_jac_toml_credentials(
         self,
@@ -475,25 +490,30 @@ class TestJacScaleUserManagerSSO:
         reset_scale_config()
         mock_config = MockScaleConfig(mock_sso_config_without_credentials())
         with patch("jac_scale.user_manager.get_scale_config", return_value=mock_config):
-             with patch("jac_scale.user_manager.get_scale_config", return_value=mock_config):
+            with patch(
+                "jac_scale.user_manager.get_scale_config", return_value=mock_config
+            ):
                 user_manager = JacScaleUserManager(base_path="")
                 assert "google" not in user_manager.SUPPORTED_PLATFORMS
 
 
 class TestJacAPIServerEndpoints:
     """Test SSO endpoints registration in JacAPIServer."""
-    
+
     def setup_method(self) -> None:
         self.mock_server_impl = Mock()
         self.mock_user_manager = Mock()
         self.mock_config = MockScaleConfig(mock_sso_config_with_credentials())
-        
+
         with patch("jac_scale.serve.get_scale_config", return_value=self.mock_config):
-             # We need to mock JacAPIServer user manager creation or it will create a real one.
-             # The real one is fine if we mock its methods, or we can mock Jac.get_user_manager
-             with patch("jaclang.pycore.runtime.JacRuntimeInterface.get_user_manager", return_value=self.mock_user_manager):
+            # We need to mock JacAPIServer user manager creation or it will create a real one.
+            # The real one is fine if we mock its methods, or we can mock Jac.get_user_manager
+            with patch(
+                "jaclang.pycore.runtime.JacRuntimeInterface.get_user_manager",
+                return_value=self.mock_user_manager,
+            ):
                 self.server = JacAPIServer(module_name="test_module", port=8000)
-        
+
         self.server.server = self.mock_server_impl
         # self.server.user_manager is already mocked via hook
 
@@ -506,8 +526,7 @@ class TestJacAPIServerEndpoints:
         first_endpoint = calls[0][0][0]
         assert "/sso/{platform}/{operation}" in first_endpoint.path
         assert first_endpoint.method.name == "GET"
-        
+
         # Verify callback is linked to user_manager
         # Note: In register_sso_endpoints implementation, it uses self.user_manager.sso_initiate
         assert first_endpoint.callback == self.mock_user_manager.sso_initiate
-

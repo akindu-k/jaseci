@@ -21,17 +21,16 @@ obj JacScaleUserManager(UserManager) {
     has SUPPORTED_PLATFORMS: dict = {};
 
     def postinit -> None;
-
     # JWT methods
     def create_jwt_token(username: str) -> str;
     def validate_jwt_token(token: str) -> (str | None);
     def refresh_jwt_token(token: str) -> (str | None);
-
     # SSO methods
     def get_sso(platform: str, operation: str) -> (GoogleSSO | None);
     async def sso_initiate(
         platform: str, operation: str
     ) -> (Response | TransportResponse);
+
     async def sso_callback(
         request: Request, platform: str, operation: str
     ) -> TransportResponse;
