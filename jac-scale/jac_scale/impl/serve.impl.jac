@@ -1111,7 +1111,7 @@ impl JacAPIServer.init(
         }
         self.server.app.add_middleware(CustomHeadersMiddleware);
     }
-    }
+    
 }
 
 
