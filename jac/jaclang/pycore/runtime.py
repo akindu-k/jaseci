@@ -66,6 +66,7 @@ if TYPE_CHECKING:
     from jaclang.runtimelib.context import ExecutionContext
     from jaclang.runtimelib.server import JacAPIServer as JacServer
     from jaclang.runtimelib.server import ModuleIntrospector
+    from jaclang.runtimelib.server import UserManager
 
 plugin_manager = pluggy.PluginManager("jac")
 hookspec = pluggy.HookspecMarker("jac")
@@ -2292,8 +2293,6 @@ class JacRuntimeInterface(
         Returns:
             UserManager instance
         """
-        from jaclang.runtimelib.server import UserManager
-
         return UserManager(base_path=base_path)
 
 
