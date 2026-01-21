@@ -63,14 +63,15 @@ impl JacScaleUserManager.validate_token(token: str) -> (str | None) {
 
 impl JacScaleUserManager.get_sso(
     platform: str, operation: str
-) -> (GoogleSSO | None) {
+) -> (SSOProvider | None) {
     if (platform not in self.SUPPORTED_PLATFORMS) {
         return None;
     }
     credentials = self.SUPPORTED_PLATFORMS[platform];
     redirect_uri = f"{SSO_HOST}/{platform}/{operation}/callback";
     if (platform == Platforms.GOOGLE.value) {
-        return GoogleSSO(
+        import from jac_scale.google_sso_provider { GoogleSSOProvider }
+        return GoogleSSOProvider(
             client_id=credentials['client_id'],
             client_secret=credentials['client_secret'],
             redirect_uri=redirect_uri,
@@ -116,9 +117,8 @@ impl JacScaleUserManager.sso_initiate(
             meta=Meta(extra={'http_status': 500})
         );
     }
-    with sso {
-        return await sso.get_login_redirect();
-    }
+    return await sso.initiate_auth(operation);
+}
 }
 
 impl JacScaleUserManager.sso_callback(
@@ -158,61 +158,59 @@ impl JacScaleUserManager.sso_callback(
         );
     }
     try {
-        with sso {
-            user_info = await sso.verify_and_process(request);
-            email = user_info.email;
-            if not email {
+        user_info = await sso.handle_callback(request);
+        email = user_info.email;
+        if not email {
+            return TransportResponse.fail(
+                code='EMAIL_MISSING',
+                message=f"Email not provided by {platform}",
+                meta=Meta(extra={'http_status': 400})
+            );
+        }
+        if (operation == Operations.LOGIN.value) {
+            user = self.get_user(email);
+            if not user {
                 return TransportResponse.fail(
-                    code='EMAIL_MISSING',
-                    message=f"Email not provided by {platform}",
+                    code='USER_NOT_FOUND',
+                    message='User not found. Please register first.',
+                    meta=Meta(extra={'http_status': 404})
+                );
+            }
+            token = self.create_jwt_token(email);
+            return TransportResponse.success(
+                data={
+                    'message': 'Login successful',
+                    'email': email,
+                    'token': token,
+                    'platform': platform,
+                    'user': dict[(str, JsonValue)](user)
+                },
+                meta=Meta(extra={'http_status': 200})
+            );
+        } elif (operation == Operations.REGISTER.value) {
+            existing_user = self.get_user(email);
+            if existing_user {
+                return TransportResponse.fail(
+                    code='USER_EXISTS',
+                    message='User already exists. Please login instead.',
                     meta=Meta(extra={'http_status': 400})
                 );
             }
-            if (operation == Operations.LOGIN.value) {
-                user = self.get_user(email);
-                if not user {
-                    return TransportResponse.fail(
-                        code='USER_NOT_FOUND',
-                        message='User not found. Please register first.',
-                        meta=Meta(extra={'http_status': 404})
-                    );
-                }
-                token = self.create_jwt_token(email);
-                return TransportResponse.success(
-                    data={
-                        'message': 'Login successful',
-                        'email': email,
-                        'token': token,
-                        'platform': platform,
-                        'user': dict[(str, JsonValue)](user)
-                    },
-                    meta=Meta(extra={'http_status': 200})
-                );
-            } elif (operation == Operations.REGISTER.value) {
-                existing_user = self.get_user(email);
-                if existing_user {
-                    return TransportResponse.fail(
-                        code='USER_EXISTS',
-                        message='User already exists. Please login instead.',
-                        meta=Meta(extra={'http_status': 400})
-                    );
-                }
-                random_password = generate_random_password();
-                result = self.create_user(email, random_password);
-                if ('error' in result) {
-                    return TransportResponse.fail(
-                        code='USER_CREATION_FAILED',
-                        message=result.get('error', 'User creation failed'),
-                        meta=Meta(extra={'http_status': 400})
-                    );
-                }
-                token = self.create_jwt_token(email);
-                result['token'] = token;
-                result['platform'] = platform;
-                return TransportResponse.success(
-                    data=result, meta=Meta(extra={'http_status': 201})
+            random_password = generate_random_password();
+            result = self.create_user(email, random_password);
+            if ('error' in result) {
+                return TransportResponse.fail(
+                    code='USER_CREATION_FAILED',
+                    message=result.get('error', 'User creation failed'),
+                    meta=Meta(extra={'http_status': 400})
                 );
             }
+            token = self.create_jwt_token(email);
+            result['token'] = token;
+            result['platform'] = platform;
+            return TransportResponse.success(
+                data=result, meta=Meta(extra={'http_status': 201})
+            );
         }
     } except Exception as e {
         return TransportResponse.fail(

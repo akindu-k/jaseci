@@ -63,7 +63,7 @@ class MockUserInfo:
 
 
 class MockGoogleSSO:
-    """Mock GoogleSSO for testing."""
+    """Mock GoogleSSO for testing - implements SSOProvider interface."""
 
     def __init__(
         self,
@@ -79,6 +79,8 @@ class MockGoogleSSO:
         # Set default callables that can be overridden
         self.get_login_redirect = self._default_get_login_redirect
         self.verify_and_process = self._default_verify_and_process
+        self.initiate_auth = self._default_initiate_auth
+        self.handle_callback = self._default_handle_callback
 
     async def _default_get_login_redirect(self) -> RedirectResponse:
         """Mock get_login_redirect method."""
@@ -87,6 +89,19 @@ class MockGoogleSSO:
     async def _default_verify_and_process(self, _request: Request) -> MockUserInfo:
         """Mock verify_and_process method."""
         return MockUserInfo(email="test@example.com")
+
+    async def _default_initiate_auth(self, operation: str) -> RedirectResponse:
+        """Mock initiate_auth method (SSOProvider interface)."""
+        return RedirectResponse(url="https://accounts.google.com/oauth/authorize")
+
+    async def _default_handle_callback(self, request: Request) -> MockUserInfo:
+        """Mock handle_callback method (SSOProvider interface) - returns MockUserInfo which acts like SSOUserInfo."""
+        # Call verify_and_process to maintain compatibility
+        return await self.verify_and_process(request)
+
+    def get_platform_name(self) -> str:
+        """Mock get_platform_name method (SSOProvider interface)."""
+        return "google"
 
     def __enter__(self) -> "MockGoogleSSO":
         return self
@@ -172,15 +187,15 @@ class TestJacScaleUserManagerSSO:
 
     def test_get_sso_with_google_platform(self) -> None:
         """Test get_sso returns GoogleSSO instance for Google platform."""
-        # Patch GoogleSSO with side_effect to create MockGoogleSSO instances
-        with patch("jac_scale.user_manager.GoogleSSO", side_effect=MockGoogleSSO) as mock_sso:
+        # Patch GoogleSSOProvider with side_effect to create MockGoogleSSO instances
+        with patch("jac_scale.google_sso_provider.GoogleSSOProvider", side_effect=MockGoogleSSO) as mock_sso:
             sso = self.user_manager.get_sso(Platforms.GOOGLE.value, Operations.LOGIN.value)
 
             assert sso is not None
             # Verify attributes
             assert sso.client_id == "test_client_id"
             assert sso.client_secret == "test_client_secret"
-            # Verify GoogleSSO was called with correct parameters
+            # Verify GoogleSSOProvider was called with correct parameters
             mock_sso.assert_called_once()
 
     def test_get_sso_with_invalid_platform(self) -> None:
@@ -201,7 +216,7 @@ class TestJacScaleUserManagerSSO:
 
     def test_get_sso_redirect_uri_format(self) -> None:
         """Test get_sso creates correct redirect URI based on jac.toml SSO host."""
-        with patch("jac_scale.user_manager.GoogleSSO", side_effect=MockGoogleSSO) as mock_sso:
+        with patch("jac_scale.google_sso_provider.GoogleSSOProvider", side_effect=MockGoogleSSO) as mock_sso:
             sso = self.user_manager.get_sso(Platforms.GOOGLE.value, Operations.LOGIN.value)
             assert sso.redirect_uri == "http://localhost:8000/sso/google/login/callback"
 

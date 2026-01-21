@@ -2,12 +2,13 @@ import jwt;
 import from datetime { UTC, datetime, timedelta }
 import from typing { Any }
 import from fastapi { Request, Response }
-import from fastapi_sso.sso.google { GoogleSSO }
 import from jaclang.runtimelib.server { UserManager }
 import from jaclang.runtimelib.transport { TransportResponse, Meta }
 import from jac_scale.serve { Platforms, Operations }
 import from jac_scale.utils { generate_random_password }
 import from jac_scale.config_loader { get_scale_config }
+import from jac_scale.sso_provider { SSOProvider, SSOUserInfo }
+import from jac_scale.google_sso_provider { GoogleSSOProvider }
 
 # Load configuration
 glob _jwt_config = get_scale_config().get_jwt_config(),
@@ -28,7 +29,7 @@ obj JacScaleUserManager(UserManager) {
     def refresh_jwt_token(token: str) -> (str | None);
 
     # SSO methods
-    def get_sso(platform: str, operation: str) -> (GoogleSSO | None);
+    def get_sso(platform: str, operation: str) -> (SSOProvider | None);
     async def sso_initiate(
         platform: str, operation: str
     ) -> (Response | TransportResponse);
