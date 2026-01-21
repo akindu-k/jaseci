@@ -11,7 +11,6 @@ from pathlib import Path
 import pytest
 
 from jaclang import JacRuntime as Jac
-from jaclang.runtimelib.server import UserManager
 from tests.runtimelib.conftest import fixture_abs_path
 
 
