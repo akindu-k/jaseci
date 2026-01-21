@@ -1,4 +1,3 @@
-
 impl JacScaleUserManager.postinit -> None {
     super.postinit();
     # Load SSO config
@@ -85,7 +84,6 @@ impl JacScaleUserManager.sso_initiate(
     platform: str, operation: str
 ) -> (Response | TransportResponse) {
     import from jaclang.runtimelib.server { JsonValue }
-    
     if (platform not in [p.value for p in Platforms]) {
         return TransportResponse.fail(
             code='INVALID_PLATFORM',
@@ -125,7 +123,6 @@ impl JacScaleUserManager.sso_callback(
     request: Request, platform: str, operation: str
 ) -> TransportResponse {
     import from jaclang.runtimelib.server { JsonValue }
-    
     if (platform not in [p.value for p in Platforms]) {
         return TransportResponse.fail(
             code='INVALID_PLATFORM',
