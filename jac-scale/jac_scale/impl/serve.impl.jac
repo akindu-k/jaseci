@@ -1111,10 +1111,7 @@ impl JacAPIServer.init(
         }
         self.server.app.add_middleware(CustomHeadersMiddleware);
     }
-    
 }
-
-
 
 impl JacAPIServer.register_sso_endpoints(self: JacAPIServer) -> None {
     self.server.add_endpoint(
