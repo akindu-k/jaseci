@@ -117,7 +117,7 @@ impl JacScaleUserManager.sso_initiate(
     }
     return await sso.initiate_auth(operation);
 }
-}
+
 
 impl JacScaleUserManager.sso_callback(
     request: Request, platform: str, operation: str
