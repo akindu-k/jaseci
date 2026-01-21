@@ -65,8 +65,7 @@ if TYPE_CHECKING:
     from jaclang.runtimelib.client_bundle import ClientBundle, ClientBundleBuilder
     from jaclang.runtimelib.context import ExecutionContext
     from jaclang.runtimelib.server import JacAPIServer as JacServer
-    from jaclang.runtimelib.server import ModuleIntrospector
-    from jaclang.runtimelib.server import UserManager
+    from jaclang.runtimelib.server import ModuleIntrospector, UserManager
 
 plugin_manager = pluggy.PluginManager("jac")
 hookspec = pluggy.HookspecMarker("jac")
