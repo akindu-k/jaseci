@@ -188,8 +188,12 @@ class TestJacScaleUserManagerSSO:
     def test_get_sso_with_google_platform(self) -> None:
         """Test get_sso returns GoogleSSO instance for Google platform."""
         # Patch GoogleSSOProvider with side_effect to create MockGoogleSSO instances
-        with patch("jac_scale.google_sso_provider.GoogleSSOProvider", side_effect=MockGoogleSSO) as mock_sso:
-            sso = self.user_manager.get_sso(Platforms.GOOGLE.value, Operations.LOGIN.value)
+        with patch(
+            "jac_scale.google_sso_provider.GoogleSSOProvider", side_effect=MockGoogleSSO
+        ) as mock_sso:
+            sso = self.user_manager.get_sso(
+                Platforms.GOOGLE.value, Operations.LOGIN.value
+            )
 
             assert sso is not None
             # Verify attributes
@@ -216,8 +220,12 @@ class TestJacScaleUserManagerSSO:
 
     def test_get_sso_redirect_uri_format(self) -> None:
         """Test get_sso creates correct redirect URI based on jac.toml SSO host."""
-        with patch("jac_scale.google_sso_provider.GoogleSSOProvider", side_effect=MockGoogleSSO) as mock_sso:
-            sso = self.user_manager.get_sso(Platforms.GOOGLE.value, Operations.LOGIN.value)
+        with patch(
+            "jac_scale.google_sso_provider.GoogleSSOProvider", side_effect=MockGoogleSSO
+        ) as mock_sso:
+            sso = self.user_manager.get_sso(
+                Platforms.GOOGLE.value, Operations.LOGIN.value
+            )
             assert sso.redirect_uri == "http://localhost:8000/sso/google/login/callback"
 
     @pytest.mark.asyncio

@@ -20,7 +20,7 @@ obj GoogleSSOProvider(SSOProvider) {
         _google_sso: (GoogleSSO | None) = None;
 
     """Initialize the Google SSO provider."""
-    def postinit() -> None {
+    def postinit -> None {
         self._google_sso = GoogleSSO(
             client_id=self.client_id,
             client_secret=self.client_secret,
@@ -30,57 +30,56 @@ obj GoogleSSOProvider(SSOProvider) {
     }
 
     """Initiate Google OAuth authentication flow.
-    
+
     Args:
         operation: The operation type ('login' or 'register')
-    
+
     Returns:
         RedirectResponse to Google's OAuth authorization page
     """
     async def initiate_auth(operation: str) -> Response {
         if not self._google_sso {
-            raise RuntimeError("GoogleSSO not initialized");
+            raise RuntimeError("GoogleSSO not initialized") ;
         }
-        
+
         with self._google_sso {
             return await self._google_sso.get_login_redirect();
         }
     }
 
     """Handle the OAuth callback from Google.
-    
+
     Args:
         request: The FastAPI request object containing OAuth callback data
-    
+
     Returns:
         SSOUserInfo: Standardized user information from Google
-    
+
     Raises:
         Exception: If authentication fails or user info cannot be retrieved
     """
     async def handle_callback(request: Request) -> SSOUserInfo {
         if not self._google_sso {
-            raise RuntimeError("GoogleSSO not initialized");
+            raise RuntimeError("GoogleSSO not initialized") ;
         }
-        
+
         with self._google_sso {
             user_info = await self._google_sso.verify_and_process(request);
-            
             return SSOUserInfo(
                 email=user_info.email,
                 external_id=user_info.id,
                 platform=self.get_platform_name(),
-                display_name=user_info.display_name if hasattr(user_info, 'display_name') else None
+                display_name=user_info?.display_name
             );
         }
     }
 
     """Get the platform identifier.
-    
+
     Returns:
         str: 'google'
     """
-    def get_platform_name() -> str {
+    def get_platform_name -> str {
         return "google";
     }
 }

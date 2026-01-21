@@ -48,7 +48,6 @@ class JacAPIServer(JServer) {
     has _hmr_pending: bool = False,
         _hot_reloader: Any | None = None;
 
-
     def init(
         self: JacAPIServer, module_name: str, port: int = 8000, base_path: str = ""
     ) -> None;
@@ -82,8 +81,6 @@ class JacAPIServer(JServer) {
 
     def register_create_user_endpoint(self: JacAPIServer) -> None;
     def register_refresh_token_endpoint(self: JacAPIServer) -> None;
-
-
     def register_sso_endpoints(self: JacAPIServer) -> None;
     def create_walker_callback(
         self: JacAPIServer, walker_name: str, has_node_param: bool = False
