@@ -2293,6 +2293,7 @@ class JacRuntimeInterface(
         Returns:
             UserManager instance
         """
+        from jaclang.runtimelib.server import UserManager
         return UserManager(base_path=base_path)
 
 
