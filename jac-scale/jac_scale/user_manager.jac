@@ -40,10 +40,10 @@ obj JacScaleUserManager(UserManager) {
     def link_sso_account(
         user_id: str, platform: str, external_id: str, email: str
     ) -> dict[str, str];
+
     def unlink_sso_account(user_id: str, platform: str) -> dict[str, str];
     def get_sso_accounts(user_id: str) -> list[dict[str, str]];
     def get_user_by_sso(platform: str, external_id: str) -> (dict[str, str] | None);
-
     # Override validate_token to use JWT
     def validate_token(token: str) -> (str | None);
 }
