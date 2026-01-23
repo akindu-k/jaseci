@@ -60,9 +60,7 @@ obj JacAPIServer(JServer) {
     def register_update_username_endpoint -> None;
     def register_update_password_endpoint -> None;
     def create_user(username: str, password: str) -> TransportResponse;
-
     def refresh_token(token: (str | None) = None) -> TransportResponse;
-
     def register_create_user_endpoint -> None;
     def register_refresh_token_endpoint -> None;
     def register_sso_endpoints -> None;
