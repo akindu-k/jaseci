@@ -1,22 +1,22 @@
 """Test for SSO (Single Sign-On) implementation in jac-scale."""
 
-import os
 import json
+import os
+import shutil
+import tempfile
 from dataclasses import dataclass
 from types import TracebackType
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
 import pytest
-import shutil
-import tempfile
 from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from jac_scale.config_loader import reset_scale_config
+from jac_scale.google_sso_provider import GoogleSSOProvider
 from jac_scale.serve import JacAPIServer, Operations, Platforms
 from jac_scale.user_manager import JacScaleUserManager
-from jac_scale.google_sso_provider import GoogleSSOProvider
 from jaclang.runtimelib.transport import TransportResponse
 
 
@@ -142,7 +142,7 @@ class TestJacScaleUserManagerSSO:
         """Setup for each test method."""
         # Create temp directory for independent DB per test
         self.test_dir = tempfile.mkdtemp()
-        
+
         # Reset config singleton to ensure fresh config
         reset_scale_config()
 
@@ -158,7 +158,7 @@ class TestJacScaleUserManagerSSO:
 
     def teardown_method(self) -> None:
         """Clean up temp directory."""
-        if hasattr(self, 'test_dir') and os.path.exists(self.test_dir):
+        if hasattr(self, "test_dir") and os.path.exists(self.test_dir):
             shutil.rmtree(self.test_dir)
 
     @staticmethod
@@ -655,6 +655,7 @@ class TestJacAPIServerEndpoints:
         # Verify callback is linked to user_manager
         # Note: In register_sso_endpoints implementation, it uses self.user_manager.sso_initiate
 
+
 class TestGoogleSSOProvider:
     """Test GoogleSSOProvider wrapper implementation."""
 
@@ -664,7 +665,7 @@ class TestGoogleSSOProvider:
             self.mock_inner_sso = Mock()
             mock_cls.return_value = self.mock_inner_sso
             self.provider = GoogleSSOProvider("id", "secret", "uri")
-            
+
             # Since postinit is called in __init__ (Jac feature), we check if inner sso is set
             assert self.provider._google_sso == self.mock_inner_sso
 
@@ -672,14 +673,16 @@ class TestGoogleSSOProvider:
     async def test_initiate_auth(self) -> None:
         """Test initiate_auth delegates to inner SSO."""
         expected_response = Mock()
-        self.mock_inner_sso.get_login_redirect = AsyncMock(return_value=expected_response)
-        
+        self.mock_inner_sso.get_login_redirect = AsyncMock(
+            return_value=expected_response
+        )
+
         # We need to mock __enter__/__exit__ for the 'with self._google_sso' block in Jac
         self.mock_inner_sso.__enter__ = Mock(return_value=self.mock_inner_sso)
         self.mock_inner_sso.__exit__ = Mock(return_value=None)
-        
+
         response = await self.provider.initiate_auth("login")
-        
+
         self.mock_inner_sso.get_login_redirect.assert_called_once()
         assert response == expected_response
 
@@ -691,13 +694,13 @@ class TestGoogleSSOProvider:
         mock_user.email = "test@example.com"
         mock_user.id = "12345"
         mock_user.display_name = "Test User"
-        
+
         self.mock_inner_sso.verify_and_process = AsyncMock(return_value=mock_user)
         self.mock_inner_sso.__enter__ = Mock(return_value=self.mock_inner_sso)
         self.mock_inner_sso.__exit__ = Mock(return_value=None)
-        
+
         result = await self.provider.handle_callback(mock_request)
-        
+
         self.mock_inner_sso.verify_and_process.assert_called_once_with(mock_request)
         assert result.email == "test@example.com"
         assert result.external_id == "12345"
@@ -707,4 +710,3 @@ class TestGoogleSSOProvider:
     def test_get_platform_name(self) -> None:
         """Test get_platform_name returns google."""
         assert self.provider.get_platform_name() == "google"
-
