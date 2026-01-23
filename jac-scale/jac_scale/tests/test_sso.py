@@ -1,5 +1,6 @@
 """Test for SSO (Single Sign-On) implementation in jac-scale."""
 
+import os
 import json
 from dataclasses import dataclass
 from types import TracebackType
@@ -7,12 +8,15 @@ from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
 import pytest
+import shutil
+import tempfile
 from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from jac_scale.config_loader import reset_scale_config
 from jac_scale.serve import JacAPIServer, Operations, Platforms
 from jac_scale.user_manager import JacScaleUserManager
+from jac_scale.google_sso_provider import GoogleSSOProvider
 from jaclang.runtimelib.transport import TransportResponse
 
 
@@ -136,6 +140,9 @@ class TestJacScaleUserManagerSSO:
 
     def setup_method(self) -> None:
         """Setup for each test method."""
+        # Create temp directory for independent DB per test
+        self.test_dir = tempfile.mkdtemp()
+        
         # Reset config singleton to ensure fresh config
         reset_scale_config()
 
@@ -144,11 +151,15 @@ class TestJacScaleUserManagerSSO:
             with patch(
                 "jac_scale.user_manager.get_scale_config", return_value=mock_config
             ):
-                self.user_manager = JacScaleUserManager(base_path="")
+                self.user_manager = JacScaleUserManager(base_path=self.test_dir)
 
-        # Mock create_user and get_user which rely on storage
         self.user_manager.create_user = Mock()
         self.user_manager.get_user = Mock()
+
+    def teardown_method(self) -> None:
+        """Clean up temp directory."""
+        if hasattr(self, 'test_dir') and os.path.exists(self.test_dir):
+            shutil.rmtree(self.test_dir)
 
     @staticmethod
     def _get_response_body(result: JSONResponse | TransportResponse) -> str:
@@ -511,6 +522,105 @@ class TestJacScaleUserManagerSSO:
                 user_manager = JacScaleUserManager(base_path="")
                 assert "google" not in user_manager.SUPPORTED_PLATFORMS
 
+    def test_link_sso_account_success(self) -> None:
+        """Test linking an SSO account successfully."""
+        # Setup: Create a user in the DB directly to satisfy Foreign Key
+        self.user_manager._ensure_connection()
+        self.user_manager._conn.execute(
+            "INSERT INTO users (username, password_hash, token, root_id) VALUES (?, ?, ?, ?)",
+            ("user1", "hash", "token", "root"),
+        )
+        self.user_manager._conn.commit()
+
+        # Link account
+        result = self.user_manager.link_sso_account(
+            "user1", "google", "ext_123", "test@google.com"
+        )
+        assert result.get("message") == "SSO account linked successfully"
+        assert result.get("user_id") == "user1"
+
+        # Verify in DB
+        accounts = self.user_manager.get_sso_accounts("user1")
+        assert len(accounts) == 1
+        assert accounts[0]["platform"] == "google"
+        assert accounts[0]["external_id"] == "ext_123"
+
+    def test_link_sso_account_duplicate(self) -> None:
+        """Test preventing duplicate SSO account linking."""
+        # Setup: Create users
+        self.user_manager._ensure_connection()
+        self.user_manager._conn.execute(
+            "INSERT INTO users (username, password_hash, token, root_id) VALUES (?, ?, ?, ?)",
+            ("user1", "hash", "token", "root"),
+        )
+        self.user_manager._conn.execute(
+            "INSERT INTO users (username, password_hash, token, root_id) VALUES (?, ?, ?, ?)",
+            ("user2", "hash", "token2", "root2"),
+        )
+        self.user_manager._conn.commit()
+
+        # Link first time
+        self.user_manager.link_sso_account(
+            "user1", "google", "ext_123", "test@google.com"
+        )
+
+        # Attempt to link same SSO account to user2
+        result = self.user_manager.link_sso_account(
+            "user2", "google", "ext_123", "test@google.com"
+        )
+        assert "already linked to another user" in result.get("error", "")
+
+        # Attempt to link same SSO account to user1 again
+        result = self.user_manager.link_sso_account(
+            "user1", "google", "ext_123", "test@google.com"
+        )
+        assert "already linked to this user" in result.get("message", "")
+
+    def test_unlink_sso_account(self) -> None:
+        """Test unlinking an SSO account."""
+        self.user_manager._ensure_connection()
+        self.user_manager._conn.execute(
+            "INSERT INTO users (username, password_hash, token, root_id) VALUES (?, ?, ?, ?)",
+            ("user1", "hash", "token", "root"),
+        )
+        self.user_manager._conn.commit()
+
+        self.user_manager.link_sso_account(
+            "user1", "google", "ext_123", "test@google.com"
+        )
+
+        # Unlink
+        result = self.user_manager.unlink_sso_account("user1", "google")
+        assert result.get("message") == "SSO account unlinked successfully"
+
+        # Verify empty
+        accounts = self.user_manager.get_sso_accounts("user1")
+        assert len(accounts) == 0
+
+    def test_get_user_by_sso(self) -> None:
+        """Test retrieving user by SSO credentials."""
+        self.user_manager._ensure_connection()
+        self.user_manager._conn.execute(
+            "INSERT INTO users (username, password_hash, token, root_id) VALUES (?, ?, ?, ?)",
+            ("user1", "hash", "token_val", "root_val"),
+        )
+        self.user_manager._conn.commit()
+
+        self.user_manager.link_sso_account(
+            "user1", "google", "ext_123", "test@google.com"
+        )
+
+        # Find user
+        user = self.user_manager.get_user_by_sso("google", "ext_123")
+        assert user is not None
+        assert user["email"] == "user1"
+        assert user["token"] == "token_val"
+        assert user["root_id"] == "root_val"
+
+        # Find non-existent
+        user = self.user_manager.get_user_by_sso("google", "nonexistent")
+        assert user is None
+
 
 class TestJacAPIServerEndpoints:
     """Test SSO endpoints registration in JacAPIServer."""
@@ -544,4 +654,57 @@ class TestJacAPIServerEndpoints:
 
         # Verify callback is linked to user_manager
         # Note: In register_sso_endpoints implementation, it uses self.user_manager.sso_initiate
-        assert first_endpoint.callback == self.mock_user_manager.sso_initiate
+
+class TestGoogleSSOProvider:
+    """Test GoogleSSOProvider wrapper implementation."""
+
+    def setup_method(self) -> None:
+        """Setup mock provider."""
+        with patch("jac_scale.google_sso_provider.GoogleSSO") as mock_cls:
+            self.mock_inner_sso = Mock()
+            mock_cls.return_value = self.mock_inner_sso
+            self.provider = GoogleSSOProvider("id", "secret", "uri")
+            
+            # Since postinit is called in __init__ (Jac feature), we check if inner sso is set
+            assert self.provider._google_sso == self.mock_inner_sso
+
+    @pytest.mark.asyncio
+    async def test_initiate_auth(self) -> None:
+        """Test initiate_auth delegates to inner SSO."""
+        expected_response = Mock()
+        self.mock_inner_sso.get_login_redirect = AsyncMock(return_value=expected_response)
+        
+        # We need to mock __enter__/__exit__ for the 'with self._google_sso' block in Jac
+        self.mock_inner_sso.__enter__ = Mock(return_value=self.mock_inner_sso)
+        self.mock_inner_sso.__exit__ = Mock(return_value=None)
+        
+        response = await self.provider.initiate_auth("login")
+        
+        self.mock_inner_sso.get_login_redirect.assert_called_once()
+        assert response == expected_response
+
+    @pytest.mark.asyncio
+    async def test_handle_callback(self) -> None:
+        """Test handle_callback delegates and maps user info."""
+        mock_request = Mock(spec=Request)
+        mock_user = Mock()
+        mock_user.email = "test@example.com"
+        mock_user.id = "12345"
+        mock_user.display_name = "Test User"
+        
+        self.mock_inner_sso.verify_and_process = AsyncMock(return_value=mock_user)
+        self.mock_inner_sso.__enter__ = Mock(return_value=self.mock_inner_sso)
+        self.mock_inner_sso.__exit__ = Mock(return_value=None)
+        
+        result = await self.provider.handle_callback(mock_request)
+        
+        self.mock_inner_sso.verify_and_process.assert_called_once_with(mock_request)
+        assert result.email == "test@example.com"
+        assert result.external_id == "12345"
+        assert result.platform == "google"
+        assert result.display_name == "Test User"
+
+    def test_get_platform_name(self) -> None:
+        """Test get_platform_name returns google."""
+        assert self.provider.get_platform_name() == "google"
+
