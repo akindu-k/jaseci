@@ -73,10 +73,8 @@ impl JacScaleConfig.get_sso_config(self: JacScaleConfig) -> dict[str, Any] {
     return {
         'host': sso_config.get('host', 'http://localhost:8000/sso'),
         'google': {
-            'client_id': os.environ.get('GOOGLE_CLIENT_ID')
-            or google_config.get('client_id', ''),
-            'client_secret': os.environ.get('GOOGLE_CLIENT_SECRET')
-            or google_config.get('client_secret', '')
+            'client_id': google_config.get('client_id', ''),
+            'client_secret': google_config.get('client_secret', '')
         }
     };
 }
