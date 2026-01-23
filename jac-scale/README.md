@@ -30,7 +30,6 @@
 - **Secure Authentication**: Integrated with JWT for secure session management
 - **User Management**: Automatic account creation and linking
 
-
 ## Prerequisites
 
 - kubenetes(K8s) installed
