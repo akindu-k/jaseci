@@ -23,7 +23,11 @@
 - **Database Auto-Provisioning**: Automatically spawns and configures Redis and MongoDB instances
 - **Production-Ready**: Built-in health checks, persistent storage, and service discovery
 
-### 4. SSO support for login/register
+### 4. SSO and Authentication Support
+- **Google SSO**: Built-in support for Google Sign-In
+- **Extensible Providers**: Easily add Microsoft, GitHub, or custom OAuth providers
+- **JWT Authentication**: Secure API access with JWT tokens
+- See [SSO Guide](sso-guide.md) for configuration and usage
 
 ### 5. Support for public private endpoints with JWT authentication
 
