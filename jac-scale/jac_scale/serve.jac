@@ -43,12 +43,9 @@ obj JacAPIServer(JServer) {
     has _hmr_pending: bool = False,
         _hot_reloader: Any | None = None;
 
-    def init(
-        self: JacAPIServer, module_name: str, port: int = 8000, base_path: str = ""
-    ) -> None;
-
-    def login(self: JacAPIServer, username: str, password: str) -> TransportResponse;
-    def register_login_endpoint(self: JacAPIServer) -> None;
+    def postinit -> None;
+    def login(username: str, password: str) -> TransportResponse;
+    def register_login_endpoint -> None;
     def update_username(
         current_username: str, new_username: str, Authorization: (str | None) = None
     ) -> TransportResponse;
@@ -60,19 +57,15 @@ obj JacAPIServer(JServer) {
         Authorization: (str | None) = None
     ) -> TransportResponse;
 
-    def register_update_username_endpoint(self: JacAPIServer) -> None;
-    def register_update_password_endpoint(self: JacAPIServer) -> None;
-    def create_user(
-        self: JacAPIServer, username: str, password: str
-    ) -> TransportResponse;
+    def register_update_username_endpoint -> None;
+    def register_update_password_endpoint -> None;
+    def create_user(username: str, password: str) -> TransportResponse;
 
-    def refresh_token(
-        self: JacAPIServer, token: (str | None) = None
-    ) -> TransportResponse;
+    def refresh_token(token: (str | None) = None) -> TransportResponse;
 
-    def register_create_user_endpoint(self: JacAPIServer) -> None;
-    def register_refresh_token_endpoint(self: JacAPIServer) -> None;
-    def register_sso_endpoints(self: JacAPIServer) -> None;
+    def register_create_user_endpoint -> None;
+    def register_refresh_token_endpoint -> None;
+    def register_sso_endpoints -> None;
     def create_walker_callback(
         walker_name: str, has_node_param: bool = False
     ) -> Callable[..., TransportResponse];

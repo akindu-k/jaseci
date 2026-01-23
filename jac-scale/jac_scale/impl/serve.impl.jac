@@ -715,7 +715,7 @@ impl JacAPIServer.create_walker_callback(
     return callback;
 }
 
-impl JacAPIServer.register_refresh_token_endpoint(self: JacAPIServer) -> None {
+impl JacAPIServer.register_refresh_token_endpoint -> None {
     self.server.add_endpoint(
         JEndPoint(
             method=HTTPMethod.POST,
@@ -739,7 +739,7 @@ impl JacAPIServer.register_refresh_token_endpoint(self: JacAPIServer) -> None {
     );
 }
 
-impl JacAPIServer.register_create_user_endpoint(self: JacAPIServer) -> None {
+impl JacAPIServer.register_create_user_endpoint -> None {
     self.server.add_endpoint(
         JEndPoint(
             method=HTTPMethod.POST,
@@ -771,9 +771,7 @@ impl JacAPIServer.register_create_user_endpoint(self: JacAPIServer) -> None {
     );
 }
 
-impl JacAPIServer.refresh_token(
-    self: JacAPIServer, token: (str | None) = None
-) -> TransportResponse {
+impl JacAPIServer.refresh_token(token: (str | None) = None) -> TransportResponse {
     import from jaclang.runtimelib.transport { TransportResponse, Meta }
     if (not token) {
         return TransportResponse.fail(
@@ -799,9 +797,7 @@ impl JacAPIServer.refresh_token(
     );
 }
 
-impl JacAPIServer.create_user(
-    self: JacAPIServer, username: str, password: str
-) -> TransportResponse {
+impl JacAPIServer.create_user(username: str, password: str) -> TransportResponse {
     import traceback;
     import from jaclang.runtimelib.transport { TransportResponse, Meta }
     try {
@@ -933,7 +929,7 @@ impl JacAPIServer.update_password(
     );
 }
 
-impl JacAPIServer.register_update_username_endpoint(self: JacAPIServer) -> None {
+impl JacAPIServer.register_update_username_endpoint -> None {
     import from fastapi { Request }
     async def update_username_handler(
         request: Request, current_username: str, new_username: str
@@ -972,7 +968,7 @@ impl JacAPIServer.register_update_username_endpoint(self: JacAPIServer) -> None 
     );
 }
 
-impl JacAPIServer.register_update_password_endpoint(self: JacAPIServer) -> None {
+impl JacAPIServer.register_update_password_endpoint -> None {
     import from fastapi { Request }
     async def update_password_handler(
         request: Request, username: str, current_password: str, new_password: str
@@ -1021,7 +1017,7 @@ impl JacAPIServer.register_update_password_endpoint(self: JacAPIServer) -> None 
     );
 }
 
-impl JacAPIServer.register_login_endpoint(self: JacAPIServer) -> None {
+impl JacAPIServer.register_login_endpoint -> None {
     self.server.add_endpoint(
         JEndPoint(
             method=HTTPMethod.POST,
@@ -1053,9 +1049,7 @@ impl JacAPIServer.register_login_endpoint(self: JacAPIServer) -> None {
     );
 }
 
-impl JacAPIServer.login(
-    self: JacAPIServer, username: str, password: str
-) -> TransportResponse {
+impl JacAPIServer.login(username: str, password: str) -> TransportResponse {
     import from jaclang.runtimelib.transport { TransportResponse, Meta }
     if (not username or not password) {
         return TransportResponse.fail(
@@ -1117,7 +1111,7 @@ impl JacAPIServer.postinit -> None {
     }
 }
 
-impl JacAPIServer.register_sso_endpoints(self: JacAPIServer) -> None {
+impl JacAPIServer.register_sso_endpoints -> None {
     self.server.add_endpoint(
         JEndPoint(
             method=HTTPMethod.GET,
