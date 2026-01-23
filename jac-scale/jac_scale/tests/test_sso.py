@@ -514,8 +514,6 @@ class TestJacScaleUserManagerSSO:
             user_manager = JacScaleUserManager(base_path="")
             assert "google" not in user_manager.SUPPORTED_PLATFORMS
 
-
-
     def test_link_sso_account_success(self) -> None:
         """Test linking an SSO account successfully."""
         # Setup: Create a user in the DB directly to satisfy Foreign Key
