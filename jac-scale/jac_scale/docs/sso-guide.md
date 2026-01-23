@@ -23,8 +23,9 @@ host = "http://localhost:8000/sso"
 
 # Configure specific providers
 [plugins.scale.sso.google]
-client_id = "your_google_client_id"
-client_secret = "your_google_client_secret"
+# Ideally, use env vars: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET
+# client_id = "your_google_client_id"
+# client_secret = "your_google_client_secret"
 ```
 
 ## 2. Google SSO Setup
@@ -40,7 +41,7 @@ To use Google Sign-In:
     `http://localhost:8000/sso/google/login/callback`
     and
     `http://localhost:8000/sso/google/register/callback`
-7. Copy the **Client ID** and **Client Secret** to your `jac.toml` or environment variables.
+7. Copy the **Client ID** and **Client Secret** to your `jac.toml` or export them as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` environment variables.
 
 ## 3. Adding New SSO Providers
 

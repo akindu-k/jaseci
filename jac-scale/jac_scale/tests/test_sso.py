@@ -13,7 +13,7 @@ import pytest
 from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from jac_scale.config_loader import reset_scale_config
+from jac_scale.config_loader import JacScaleConfig, reset_scale_config
 from jac_scale.google_sso_provider import GoogleSSOProvider
 from jac_scale.serve import JacAPIServer, Operations, Platforms
 from jac_scale.user_manager import JacScaleUserManager
@@ -513,6 +513,24 @@ class TestJacScaleUserManagerSSO:
         with patch("jac_scale.user_manager.get_scale_config", return_value=mock_config):
             user_manager = JacScaleUserManager(base_path="")
             assert "google" not in user_manager.SUPPORTED_PLATFORMS
+
+    def test_sso_config_with_env_vars(self) -> None:
+        """Test JacScaleConfig.get_sso_config with environment variables."""
+        # Mock load to return empty config, forcing reliance on defaults/env vars
+        with patch.object(JacScaleConfig, "load", return_value={}):
+            with patch.dict(
+                os.environ,
+                {
+                    "GOOGLE_CLIENT_ID": "env_id",
+                    "GOOGLE_CLIENT_SECRET": "env_secret",
+                },
+            ):
+                config = JacScaleConfig()
+                sso_config = config.get_sso_config()
+
+                assert sso_config["google"]["client_id"] == "env_id"
+                assert sso_config["google"]["client_secret"] == "env_secret"
+
 
     def test_link_sso_account_success(self) -> None:
         """Test linking an SSO account successfully."""
