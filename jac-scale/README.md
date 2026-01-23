@@ -23,6 +23,8 @@
 - **Database Auto-Provisioning**: Automatically spawns and configures Redis and MongoDB instances
 - **Production-Ready**: Built-in health checks, persistent storage, and service discovery
 
+Whether you're developing locally with `jac start` or deploying to production with `jac start --scale`, you get the same powerful features with the flexibility to choose your deployment strategy.
+
 ### 4. Single Sign-On (SSO) Support
 
 - **Google SSO**: Built-in support for Google Sign-In out of the box
