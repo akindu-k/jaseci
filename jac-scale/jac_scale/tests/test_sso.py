@@ -147,11 +147,9 @@ class TestJacScaleUserManagerSSO:
         reset_scale_config()
 
         mock_config = MockScaleConfig(mock_sso_config_with_credentials())
+
         with patch("jac_scale.user_manager.get_scale_config", return_value=mock_config):
-            with patch(
-                "jac_scale.user_manager.get_scale_config", return_value=mock_config
-            ):
-                self.user_manager = JacScaleUserManager(base_path=self.test_dir)
+            self.user_manager = JacScaleUserManager(base_path=self.test_dir)
 
         self.user_manager.create_user = Mock()
         self.user_manager.get_user = Mock()
@@ -233,7 +231,7 @@ class TestJacScaleUserManagerSSO:
         """Test get_sso creates correct redirect URI based on jac.toml SSO host."""
         with patch(
             "jac_scale.google_sso_provider.GoogleSSOProvider", side_effect=MockGoogleSSO
-        ) as mock_sso:
+        ):
             sso = self.user_manager.get_sso(
                 Platforms.GOOGLE.value, Operations.LOGIN.value
             )
@@ -499,9 +497,6 @@ class TestJacScaleUserManagerSSO:
         )
         # Patch both places where config is loaded
         with patch("jac_scale.user_manager.get_scale_config", return_value=mock_config):
-            with patch(
-                "jac_scale.user_manager.get_scale_config", return_value=mock_config
-            ):
                 user_manager = JacScaleUserManager(base_path="")
                 assert "google" in user_manager.SUPPORTED_PLATFORMS
                 assert (
@@ -516,9 +511,6 @@ class TestJacScaleUserManagerSSO:
         reset_scale_config()
         mock_config = MockScaleConfig(mock_sso_config_without_credentials())
         with patch("jac_scale.user_manager.get_scale_config", return_value=mock_config):
-            with patch(
-                "jac_scale.user_manager.get_scale_config", return_value=mock_config
-            ):
                 user_manager = JacScaleUserManager(base_path="")
                 assert "google" not in user_manager.SUPPORTED_PLATFORMS
 
@@ -630,11 +622,13 @@ class TestJacAPIServerEndpoints:
         self.mock_user_manager = Mock()
         self.mock_config = MockScaleConfig(mock_sso_config_with_credentials())
 
-        with patch("jac_scale.serve.get_scale_config", return_value=self.mock_config):
-            with patch(
+        with (
+            patch("jac_scale.serve.get_scale_config", return_value=self.mock_config),
+            patch(
                 "jaclang.pycore.runtime.JacRuntimeInterface.get_user_manager",
                 return_value=self.mock_user_manager,
-            ):
+            ),
+        ):
                 self.server = JacAPIServer(module_name="test_module", port=8000)
 
         self.server.server = self.mock_server_impl
