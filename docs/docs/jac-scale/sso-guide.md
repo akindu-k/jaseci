@@ -27,21 +27,20 @@ client_id = "your_google_client_id"
 client_secret = "your_google_client_secret"
 ```
 
-
 ## 2. Google SSO Setup
 
 To use Google Sign-In:
 
-1.  Go to the [Google Cloud Console](https://console.cloud.google.com/).
-2.  Create a new project or select an existing one.
-3.  Go to **APIs & Services > Credentials**.
-4.  Click **Create Credentials > OAuth client ID**.
-5.  Select **Web application**.
-6.  Add your redirect URI. For local development, this is typically:
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
+2. Create a new project or select an existing one.
+3. Go to **APIs & Services > Credentials**.
+4. Click **Create Credentials > OAuth client ID**.
+5. Select **Web application**.
+6. Add your redirect URI. For local development, this is typically:
     `http://localhost:8000/sso/google/login/callback`
     and
     `http://localhost:8000/sso/google/register/callback`
-7.  Copy the **Client ID** and **Client Secret** to your `jac.toml` or environment variables.
+7. Copy the **Client ID** and **Client Secret** to your `jac.toml` or environment variables.
 
 ## 3. Adding New SSO Providers
 
@@ -94,8 +93,8 @@ Jac Scale allows you to override the core `UserManager` using the plugin hook sy
 
 ### How it works
 
-1.  **Hook Definition**: The core `jac` runtime defines a hook spec `get_user_manager()`.
-2.  **Implementation**: `jac-scale` provides an implementation in `plugin.jac`:
+1. **Hook Definition**: The core `jac` runtime defines a hook spec `get_user_manager()`.
+2. **Implementation**: `jac-scale` provides an implementation in `plugin.jac`:
 
     ```jac
     @hookimpl
@@ -104,7 +103,7 @@ Jac Scale allows you to override the core `UserManager` using the plugin hook sy
     }
     ```
 
-3.  **Custom Logic**: The `JacScaleUserManager` extends the base `UserManager` to add:
+3. **Custom Logic**: The `JacScaleUserManager` extends the base `UserManager` to add:
     - JWT-based authentication
     - SSO handling
     - Custom specific logic (like the `sso_accounts` table).
