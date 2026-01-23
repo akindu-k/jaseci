@@ -497,12 +497,12 @@ class TestJacScaleUserManagerSSO:
         )
         # Patch both places where config is loaded
         with patch("jac_scale.user_manager.get_scale_config", return_value=mock_config):
-                user_manager = JacScaleUserManager(base_path="")
-                assert "google" in user_manager.SUPPORTED_PLATFORMS
-                assert (
-                    user_manager.SUPPORTED_PLATFORMS["google"]["client_id"]
-                    == "toml_test_id"
-                )
+            user_manager = JacScaleUserManager(base_path="")
+            assert "google" in user_manager.SUPPORTED_PLATFORMS
+            assert (
+                user_manager.SUPPORTED_PLATFORMS["google"]["client_id"]
+                == "toml_test_id"
+            )
 
     def test_supported_platforms_initialization_without_jac_toml_credentials(
         self,
@@ -511,8 +511,8 @@ class TestJacScaleUserManagerSSO:
         reset_scale_config()
         mock_config = MockScaleConfig(mock_sso_config_without_credentials())
         with patch("jac_scale.user_manager.get_scale_config", return_value=mock_config):
-                user_manager = JacScaleUserManager(base_path="")
-                assert "google" not in user_manager.SUPPORTED_PLATFORMS
+            user_manager = JacScaleUserManager(base_path="")
+            assert "google" not in user_manager.SUPPORTED_PLATFORMS
 
     def test_link_sso_account_success(self) -> None:
         """Test linking an SSO account successfully."""
@@ -629,7 +629,7 @@ class TestJacAPIServerEndpoints:
                 return_value=self.mock_user_manager,
             ),
         ):
-                self.server = JacAPIServer(module_name="test_module", port=8000)
+            self.server = JacAPIServer(module_name="test_module", port=8000)
 
         self.server.server = self.mock_server_impl
 
