@@ -517,20 +517,21 @@ class TestJacScaleUserManagerSSO:
     def test_sso_config_with_env_vars(self) -> None:
         """Test JacScaleConfig.get_sso_config with environment variables."""
         # Mock load to return empty config, forcing reliance on defaults/env vars
-        with patch.object(JacScaleConfig, "load", return_value={}):
-            with patch.dict(
+        with (
+            patch.object(JacScaleConfig, "load", return_value={}),
+            patch.dict(
                 os.environ,
                 {
                     "GOOGLE_CLIENT_ID": "env_id",
                     "GOOGLE_CLIENT_SECRET": "env_secret",
                 },
-            ):
-                config = JacScaleConfig()
-                sso_config = config.get_sso_config()
+            ),
+        ):
+            config = JacScaleConfig()
+            sso_config = config.get_sso_config()
 
-                assert sso_config["google"]["client_id"] == "env_id"
-                assert sso_config["google"]["client_secret"] == "env_secret"
-
+            assert sso_config["google"]["client_id"] == "env_id"
+            assert sso_config["google"]["client_secret"] == "env_secret"
 
     def test_link_sso_account_success(self) -> None:
         """Test linking an SSO account successfully."""
