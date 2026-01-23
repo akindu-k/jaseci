@@ -631,8 +631,6 @@ class TestJacAPIServerEndpoints:
         self.mock_config = MockScaleConfig(mock_sso_config_with_credentials())
 
         with patch("jac_scale.serve.get_scale_config", return_value=self.mock_config):
-            # We need to mock JacAPIServer user manager creation or it will create a real one.
-            # The real one is fine if we mock its methods, or we can mock Jac.get_user_manager
             with patch(
                 "jaclang.pycore.runtime.JacRuntimeInterface.get_user_manager",
                 return_value=self.mock_user_manager,
@@ -640,7 +638,6 @@ class TestJacAPIServerEndpoints:
                 self.server = JacAPIServer(module_name="test_module", port=8000)
 
         self.server.server = self.mock_server_impl
-        # self.server.user_manager is already mocked via hook
 
     def test_register_sso_endpoints(self) -> None:
         """Test SSO endpoints registration."""
@@ -651,9 +648,6 @@ class TestJacAPIServerEndpoints:
         first_endpoint = calls[0][0][0]
         assert "/sso/{platform}/{operation}" in first_endpoint.path
         assert first_endpoint.method.name == "GET"
-
-        # Verify callback is linked to user_manager
-        # Note: In register_sso_endpoints implementation, it uses self.user_manager.sso_initiate
 
 
 class TestGoogleSSOProvider:
