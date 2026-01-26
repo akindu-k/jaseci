@@ -7,10 +7,9 @@ import socket
 import subprocess
 import time
 from pathlib import Path
-from typing import Any
 
 import requests
-import pytest
+
 
 def get_free_port() -> int:
     """Get a free port by binding to port 0 and releasing it."""
@@ -19,6 +18,7 @@ def get_free_port() -> int:
         s.listen(1)
         port = s.getsockname()[1]
     return port
+
 
 class TestJacScaleSpecs:
     """Test jac-scale specs functionality."""
@@ -64,7 +64,7 @@ class TestJacScaleSpecs:
     def _start_server(cls) -> None:
         """Start the jac-scale server in a subprocess."""
         import sys
-        
+
         # Assume 'jac' is available in the path or same venv
         jac_executable = Path(sys.executable).parent / "jac"
 
@@ -115,6 +115,7 @@ class TestJacScaleSpecs:
     @classmethod
     def _cleanup_db_files(cls) -> None:
         import shutil
+
         for pattern in ["*.db", "*.db-wal", "*.db-shm", "anchor_store.db*"]:
             for db_file in glob.glob(pattern):
                 with contextlib.suppress(Exception):
@@ -132,25 +133,23 @@ class TestJacScaleSpecs:
 
     def test_custom_walker_endpoint(self) -> None:
         """Test accessing walker via custom POST endpoint."""
-        
+
         # Register user
         requests.post(
             f"{self.base_url}/user/register",
             json={"username": "metauser", "password": "pass"},
         )
-        login_res = requests.post(  
+        login_res = requests.post(
             f"{self.base_url}/user/login",
             json={"username": "metauser", "password": "pass"},
         ).json()
         token = login_res.get("data", {}).get("token") or login_res.get("token")
 
         headers = {"Authorization": f"Bearer {token}"}
-        
+
         # POST /custom/walker
         response = requests.post(
-            f"{self.base_url}/custom/walker",
-            headers=headers,
-            json={}
+            f"{self.base_url}/custom/walker", headers=headers, json={}
         )
         assert response.status_code == 200
         data = response.json().get("data", response.json())
@@ -176,10 +175,7 @@ class TestJacScaleSpecs:
         headers = {"Authorization": f"Bearer {token}"}
 
         # GET /custom/get
-        response = requests.get(
-            f"{self.base_url}/custom/get",
-            headers=headers
-        )
+        response = requests.get(f"{self.base_url}/custom/get", headers=headers)
         assert response.status_code == 200
         data = response.json().get("data", response.json())
         assert "reports" in data
