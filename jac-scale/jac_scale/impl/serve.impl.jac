@@ -597,11 +597,6 @@ impl JacAPIServer.register_walkers_endpoints -> None {
             path = meta.get('path');
             method_str = meta.get('method', 'POST').upper();
             method = HTTPMethod(method_str);
-            # For GET requests, we likely want parameters in query string
-            # For POST/PUT/etc, mostly body
-            # But create_walker_parameters handles this based on param type logic usually
-            # We might need to adjust create_walker_parameters if method is GET to force query params?
-            # For now, let's trust existing logic or just register the endpoint.
             self.server.add_endpoint(
                 JEndPoint(
                     method=method,
