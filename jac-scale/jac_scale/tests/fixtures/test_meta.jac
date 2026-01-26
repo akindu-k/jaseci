@@ -13,3 +13,12 @@ walker GetWalker {
         report {"message": "Get walker ran"};
     }
 }
+
+@meta(path="/custom/query", method="GET")
+walker QueryWalker {
+    has val: str;
+
+    can run with `root entry {
+        report {"message": "Query walker ran", "val": self.val};
+    }
+}

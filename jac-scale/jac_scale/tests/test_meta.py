@@ -182,3 +182,32 @@ class TestJacScaleSpecs:
         reports = data["reports"]
         assert len(reports) > 0
         assert reports[0].get("message") == "Get walker ran"
+
+    def test_custom_query_endpoint(self) -> None:
+        """Test accessing walker via custom GET endpoint with query params."""
+        # Register user
+        requests.post(
+            f"{self.base_url}/user/register",
+            json={"username": "queryuser", "password": "pass"},
+        )
+        login_res = requests.post(
+            f"{self.base_url}/user/login",
+            json={"username": "queryuser", "password": "pass"},
+        ).json()
+        token = login_res.get("data", {}).get("token") or login_res.get("token")
+
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # GET /custom/query (with body)
+        response = requests.get(
+            f"{self.base_url}/custom/query", 
+            headers=headers,
+            json={"val": "testval"}
+        )
+        assert response.status_code == 200
+        data = response.json().get("data", response.json())
+        assert "reports" in data
+        reports = data["reports"]
+        assert len(reports) > 0
+        assert reports[0].get("message") == "Query walker ran"
+        assert reports[0].get("val") == "testval"

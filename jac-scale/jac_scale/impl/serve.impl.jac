@@ -692,6 +692,7 @@ impl JacAPIServer.create_walker_parameters(
         }
         field_type = walker_fields[field_name]['type'];
         # Determine parameter type based on field type
+        # TODO: Fix parameter type for GET requests (should be QUERY)
         if (field_name == '_jac_spawn_node') {
             param_type = ParameterType.PATH;
         } elif ('UploadFile' in field_type or 'uploadfile' in field_type.lower()) {
