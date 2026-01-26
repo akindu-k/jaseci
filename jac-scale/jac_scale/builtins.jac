@@ -11,7 +11,7 @@ Decorator to configure HTTP endpoint specifications for a walker.
 """
 def meta(path: str, method: str = "POST") -> Any {
     def decorator(cls: Any) -> Any {
-        cls._meta__ = {'path': path, 'method': method};
+        cls.__meta__ = {'path': path, 'method': method};
         return cls;
     }
     return decorator;
