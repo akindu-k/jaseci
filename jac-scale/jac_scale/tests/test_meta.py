@@ -200,9 +200,7 @@ class TestJacScaleSpecs:
 
         # GET /custom/query (with body)
         response = requests.get(
-            f"{self.base_url}/custom/query", 
-            headers=headers,
-            json={"val": "testval"}
+            f"{self.base_url}/custom/query", headers=headers, json={"val": "testval"}
         )
         assert response.status_code == 200
         data = response.json().get("data", response.json())
