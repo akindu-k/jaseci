@@ -590,25 +590,25 @@ impl JacAPIServer.register_walkers_endpoints -> None {
     for walker_name in self.get_walkers() {
         walker_cls = self.get_walkers()[walker_name];
         # Check for custom meta (from @meta decorator)
-        meta = getattr(walker_cls, '__meta__', None); 
-        
+        meta = getattr(walker_cls, '__meta__', None);
+
         if meta {
             # Register custom endpoint
             path = meta.get('path');
             method_str = meta.get('method', 'POST').upper();
             method = HTTPMethod(method_str);
-
             # For GET requests, we likely want parameters in query string
             # For POST/PUT/etc, mostly body
             # But create_walker_parameters handles this based on param type logic usually
             # We might need to adjust create_walker_parameters if method is GET to force query params?
             # For now, let's trust existing logic or just register the endpoint.
-            
             self.server.add_endpoint(
                 JEndPoint(
                     method=method,
                     path=path,
-                    callback=self.create_walker_callback(walker_name, has_node_param=False),
+                    callback=self.create_walker_callback(
+                        walker_name, has_node_param=False
+                    ),
                     parameters=self.create_walker_parameters(
                         walker_name, invoke_on_root=True
                     ),
@@ -624,7 +624,9 @@ impl JacAPIServer.register_walkers_endpoints -> None {
                 JEndPoint(
                     method=HTTPMethod.POST,
                     path=f"/walker/{walker_name}/{{node}}",
-                    callback=self.create_walker_callback(walker_name, has_node_param=True),
+                    callback=self.create_walker_callback(
+                        walker_name, has_node_param=True
+                    ),
                     parameters=self.create_walker_parameters(
                         walker_name, invoke_on_root=False
                     ),
@@ -638,7 +640,9 @@ impl JacAPIServer.register_walkers_endpoints -> None {
                 JEndPoint(
                     method=HTTPMethod.POST,
                     path=f"/walker/{walker_name}",
-                    callback=self.create_walker_callback(walker_name, has_node_param=False),
+                    callback=self.create_walker_callback(
+                        walker_name, has_node_param=False
+                    ),
                     parameters=self.create_walker_parameters(
                         walker_name, invoke_on_root=True
                     ),
