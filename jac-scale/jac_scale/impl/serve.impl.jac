@@ -618,12 +618,13 @@ impl JacAPIServer.register_walkers_endpoints -> None {
                     description=f'Custom Endpoint for {walker_name} on Root Node'
                 )
             );
-
             self.server.add_endpoint(
                 JEndPoint(
                     method=method,
                     path=path,
-                    callback=self.create_walker_callback(walker_name, has_node_param=True),
+                    callback=self.create_walker_callback(
+                        walker_name, has_node_param=True
+                    ),
                     parameters=self.create_walker_parameters(
                         walker_name, invoke_on_root=False
                     ),
