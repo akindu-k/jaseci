@@ -12,7 +12,7 @@ Introduced the `@meta` decorator (via `jaclang.pycore.constructs`) to customize 
 import from jaclang.pycore.constructs { meta }
 
 @meta(path="/custom/path", method="POST")
-walker MyWalker { ... }
+walker MyWalker {  }
 ```
 
 ### PyPI Installation by Default
