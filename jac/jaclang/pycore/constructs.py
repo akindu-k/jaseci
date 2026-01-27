@@ -13,6 +13,7 @@ from jaclang.pycore.archetype import (
     Root,
     WalkerAnchor,
     WalkerArchetype,
+    meta,
 )
 from jaclang.pycore.mtp import MTIR, MTRuntime
 
@@ -31,4 +32,5 @@ __all__ = [
     "MTIR",
     "MTRuntime",
     "ObjectSpatialFunction",
+    "meta",
 ]

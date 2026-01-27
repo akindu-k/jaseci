@@ -1,4 +1,4 @@
-import from jac_scale { meta }
+import from jaclang.pycore.constructs { meta }
 
 @meta(path="/custom/walker", method="POST")
 walker CustomWalker {

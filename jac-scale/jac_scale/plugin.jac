@@ -205,6 +205,11 @@ class JacScalePlugin {
     static def get_user_manager(base_path: str) -> UserManager {
         return JacScaleUserManager(base_path=base_path);
     }
+
+    @hookimpl
+    static def get_walker_specs(walker_cls: type) -> dict[str, Any] | None {
+        return getattr(walker_cls, "__meta__", None);
+    }
 }
 
 # Pluggy's varnames() puts parameters with defaults into kwargnames, not argnames.

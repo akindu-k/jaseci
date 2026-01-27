@@ -589,8 +589,10 @@ impl JacAPIServer.create_function_callback(
 impl JacAPIServer.register_walkers_endpoints -> None {
     for walker_name in self.get_walkers() {
         walker_cls = self.get_walkers()[walker_name];
-        # Check for custom meta (from @meta decorator)
-        meta = getattr(walker_cls, '__meta__', None);
+        # Check for custom meta (from plugin hook)
+        import from jaclang.pycore.runtime { plugin_manager }
+        meta = plugin_manager.hook.get_walker_specs(walker_cls=walker_cls);
+
 
         if meta {
             # Register custom endpoint

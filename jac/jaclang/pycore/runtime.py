@@ -72,6 +72,17 @@ hookspec = pluggy.HookspecMarker("jac")
 hookimpl = pluggy.HookimplMarker("jac")
 logger = getLogger(__name__)
 
+
+class JacPlugin:
+    """Jac Plugin Specification."""
+
+    @hookspec(firstresult=True)
+    def get_walker_specs(self, walker_cls: type) -> dict[str, Any] | None:
+        """Get custom specifications for a walker."""
+
+
+plugin_manager.add_hookspecs(JacPlugin)
+
 T = TypeVar("T")
 P = ParamSpec("P")
 JsonValue: TypeAlias = (

@@ -1,3 +1,8 @@
-from .builtins import meta
+from jaclang.pycore.runtime import plugin_manager
 
-__all__ = ["meta"]  # allowing all the users to to import meta
+from .plugin import JacScalePlugin
+
+plugin_manager.register(JacScalePlugin())
+
+__all__ = []
+
