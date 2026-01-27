@@ -486,18 +486,35 @@ impl JacAPIServer.render_base_route_callback(
 
 impl JacAPIServer.register_functions_endpoints -> None {
     for func_name in self.get_functions() {
-        self.server.add_endpoint(
-            JEndPoint(
-                method=HTTPMethod.POST,
-                path=f"/function/{func_name}",
-                callback=self.create_function_callback(func_name),
-                parameters=self.create_function_parameters(func_name),
-                response_model=None,
-                tags=['Functions'],
-                summary='This is a summary',
-                description='This is a description'
-            )
-        );
+        func_obj = self.get_functions()[func_name];
+        if func_obj?.restspec {
+            spec_method = func_obj.restspec.method;
+            self.server.add_endpoint(
+                JEndPoint(
+                    method=spec_method,
+                    path=f"/function/{func_name}",
+                    callback=self.create_function_callback(func_name),
+                    parameters=self.create_function_parameters(func_name),
+                    response_model=None,
+                    tags=['Functions'],
+                    summary='This is a summary',
+                    description='This is a description'
+                )
+            );
+        } else {
+            self.server.add_endpoint(
+                JEndPoint(
+                    method=HTTPMethod.POST,
+                    path=f"/function/{func_name}",
+                    callback=self.create_function_callback(func_name),
+                    parameters=self.create_function_parameters(func_name),
+                    response_model=None,
+                    tags=['Functions'],
+                    summary='This is a summary',
+                    description='This is a description'
+                )
+            );
+        }
     }
 }
 
@@ -588,34 +605,68 @@ impl JacAPIServer.create_function_callback(
 
 impl JacAPIServer.register_walkers_endpoints -> None {
     for walker_name in self.get_walkers() {
-        self.server.add_endpoint(
-            JEndPoint(
-                method=HTTPMethod.POST,
-                path=f"/walker/{walker_name}/{{node}}",
-                callback=self.create_walker_callback(walker_name, has_node_param=True),
-                parameters=self.create_walker_parameters(
-                    walker_name, invoke_on_root=False
-                ),
-                response_model=None,
-                tags=['Walkers'],
-                summary='API Entry',
-                description='API Entry'
-            )
-        );
-        self.server.add_endpoint(
-            JEndPoint(
-                method=HTTPMethod.POST,
-                path=f"/walker/{walker_name}",
-                callback=self.create_walker_callback(walker_name, has_node_param=False),
-                parameters=self.create_walker_parameters(
-                    walker_name, invoke_on_root=True
-                ),
-                response_model=None,
-                tags=['Walkers'],
-                summary='API Root',
-                description='API Root'
-            )
-        );
+        walker_cls = self.get_walkers()[walker_name];
+        
+        if walker_cls?.restspec {
+            spec_method = walker_cls.restspec.method;
+            self.server.add_endpoint(
+                JEndPoint(
+                    method=spec_method,
+                    path=f"/walker/{walker_name}/{{node}}",
+                    callback=self.create_walker_callback(walker_name, has_node_param=True),
+                    parameters=self.create_walker_parameters(
+                        walker_name, invoke_on_root=False
+                    ),
+                    response_model=None,
+                    tags=['Walkers'],
+                    summary='API Entry',
+                    description='API Entry'
+                )
+            );
+            self.server.add_endpoint(
+                JEndPoint(
+                    method=spec_method,
+                    path=f"/walker/{walker_name}",
+                    callback=self.create_walker_callback(walker_name, has_node_param=False),
+                    parameters=self.create_walker_parameters(
+                        walker_name, invoke_on_root=True
+                    ),
+                    response_model=None,
+                    tags=['Walkers'],
+                    summary='API Root',
+                    description='API Root'
+                )
+            );
+        } else {
+            self.server.add_endpoint(
+                JEndPoint(
+                    method=HTTPMethod.POST,
+                    path=f"/walker/{walker_name}/{{node}}",
+                    callback=self.create_walker_callback(walker_name, has_node_param=True),
+                    parameters=self.create_walker_parameters(
+                        walker_name, invoke_on_root=False
+                    ),
+                    response_model=None,
+                    tags=['Walkers'],
+                    summary='API Entry',
+                    description='API Entry'
+                )
+            );
+            self.server.add_endpoint(
+                JEndPoint(
+                    method=HTTPMethod.POST,
+                    path=f"/walker/{walker_name}",
+                    callback=self.create_walker_callback(walker_name, has_node_param=False),
+                    parameters=self.create_walker_parameters(
+                        walker_name, invoke_on_root=True
+                    ),
+                    response_model=None,
+                    tags=['Walkers'],
+                    summary='API Root',
+                    description='API Root'
+                )
+            );
+        }
     }
 }
 
