@@ -4,8 +4,6 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.9.12 (Unreleased)
 
-
-
 - **Walker Meta Decorator**: Added `meta` decorator to `jaclang.pycore.constructs` (and exposed via `jaclang.pycore.archetype`). This decorator allows attaching metadata (such as HTTP path and method) to walkers, which can be protected and utilized by plugins like `jac-scale`.
 
 - **Plugin Hooks for Walker Specs**: Defined `get_walker_specs` hook specification in `JacPlugin`. This allows plugins to retrieve custom specifications defined on walkers, enabling extensible metadata handling.
