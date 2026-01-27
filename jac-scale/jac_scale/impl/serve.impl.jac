@@ -593,7 +593,6 @@ impl JacAPIServer.register_walkers_endpoints -> None {
         import from jaclang.pycore.runtime { plugin_manager }
         meta = plugin_manager.hook.get_walker_specs(walker_cls=walker_cls);
 
-
         if meta {
             # Register custom endpoint
             path = meta.get('path');
