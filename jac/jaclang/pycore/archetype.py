@@ -25,7 +25,7 @@ def meta(path: str, method: str = "POST") -> Callable[[T], T]:
     """Decorate walker with custom specs."""
 
     def decorator(cls: T) -> T:
-        cls.__meta__ = {"path": path, "method": method} 
+        cls.__meta__ = {"path": path, "method": method}
         return cls
 
     return decorator
