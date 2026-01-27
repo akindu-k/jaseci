@@ -204,7 +204,8 @@ obj JacAPIServer {
         base_path: str = "";
 
     obj RestSpecs {
-        has method: str;
+        has method: str,
+            path: str = "";
     }
 
     def postinit -> None;

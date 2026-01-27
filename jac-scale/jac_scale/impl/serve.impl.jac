@@ -489,10 +489,14 @@ impl JacAPIServer.register_functions_endpoints -> None {
         func_obj = self.get_functions()[func_name];
         if func_obj?.restspec {
             spec_method = func_obj.restspec.method;
+            spec_path = func_obj.restspec.path;
+            
+            final_path = spec_path if spec_path else f"/function/{func_name}";
+
             self.server.add_endpoint(
                 JEndPoint(
                     method=spec_method,
-                    path=f"/function/{func_name}",
+                    path=final_path,
                     callback=self.create_function_callback(func_name),
                     parameters=self.create_function_parameters(func_name),
                     response_model=None,
@@ -609,34 +613,55 @@ impl JacAPIServer.register_walkers_endpoints -> None {
         
         if walker_cls?.restspec {
             spec_method = walker_cls.restspec.method;
-            self.server.add_endpoint(
-                JEndPoint(
-                    method=spec_method,
-                    path=f"/walker/{walker_name}/{{node}}",
-                    callback=self.create_walker_callback(walker_name, has_node_param=True),
-                    parameters=self.create_walker_parameters(
-                        walker_name, invoke_on_root=False
-                    ),
-                    response_model=None,
-                    tags=['Walkers'],
-                    summary='API Entry',
-                    description='API Entry'
-                )
-            );
-            self.server.add_endpoint(
-                JEndPoint(
-                    method=spec_method,
-                    path=f"/walker/{walker_name}",
-                    callback=self.create_walker_callback(walker_name, has_node_param=False),
-                    parameters=self.create_walker_parameters(
-                        walker_name, invoke_on_root=True
-                    ),
-                    response_model=None,
-                    tags=['Walkers'],
-                    summary='API Root',
-                    description='API Root'
-                )
-            );
+            spec_path = walker_cls.restspec.path;
+            
+            if spec_path {
+                 # If path is custom, we register a single endpoint at that path
+                 # We assume it acts like the 'root' endpoint (invoke_on_root=True)
+                 self.server.add_endpoint(
+                    JEndPoint(
+                        method=spec_method,
+                        path=spec_path,
+                        callback=self.create_walker_callback(walker_name, has_node_param=False),
+                        parameters=self.create_walker_parameters(
+                            walker_name, invoke_on_root=True
+                        ),
+                        response_model=None,
+                        tags=['Walkers'],
+                        summary='Custom API Endpoint',
+                        description='Custom API Endpoint'
+                    )
+                );
+            } else {
+                self.server.add_endpoint(
+                    JEndPoint(
+                        method=spec_method,
+                        path=f"/walker/{walker_name}/{{node}}",
+                        callback=self.create_walker_callback(walker_name, has_node_param=True),
+                        parameters=self.create_walker_parameters(
+                            walker_name, invoke_on_root=False
+                        ),
+                        response_model=None,
+                        tags=['Walkers'],
+                        summary='API Entry',
+                        description='API Entry'
+                    )
+                );
+                self.server.add_endpoint(
+                    JEndPoint(
+                        method=spec_method,
+                        path=f"/walker/{walker_name}",
+                        callback=self.create_walker_callback(walker_name, has_node_param=False),
+                        parameters=self.create_walker_parameters(
+                            walker_name, invoke_on_root=True
+                        ),
+                        response_model=None,
+                        tags=['Walkers'],
+                        summary='API Root',
+                        description='API Root'
+                    )
+                );
+            }
         } else {
             self.server.add_endpoint(
                 JEndPoint(
