@@ -41,6 +41,7 @@ When not specified, defaults to `"latest"` for all packages.
 ### Enhanced `restspec` Decorator
 
 The `@restspec` decorator now supports custom HTTP methods and custom endpoint paths for both walkers and functions.
+
 - **Custom Methods**: Use `method=HTTPMethod.GET`, `method=HTTPMethod.PUT`, etc.
 - **Custom Paths**: Use `path="/my/custom/path"` to override the default routing.
 
