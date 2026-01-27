@@ -19,7 +19,7 @@ walker : pub GetWalker {
 @restspec(method=HTTPMethod.POST)
 walker : pub PostWalker {
     has data: str = "";
-    
+
     can post_data with `root entry {
         report {"message": "PostWalker executed", "data": self.data, "method": "POST"};
     }

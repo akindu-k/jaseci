@@ -284,7 +284,7 @@ class TestRestSpec:
         assert "post" not in paths["/walker/GetWalker"]
 
         assert "post" in paths["/walker/PostWalker"]
-        
+
         assert "get" in paths["/function/get_func_test"]
         assert "post" not in paths["/function/get_func_test"]
 
@@ -331,12 +331,12 @@ class TestRestSpec:
         # Custom paths should exist
         assert "/custom/my_walker" in paths
         assert "/custom/my_func" in paths
-        
+
         # Default keys based on name should NOT exist for these custom path items if we only register custom path
         # In our implementation logic:
         # For walker: if spec_path { ... } else { default paths } -> So default paths should NOT exist
         assert "/walker/CustomPathWalker" not in paths
-        
+
         # For function: if spec_path { register at path } -> But wait, logic was:
         # final_path = spec_path if spec_path else f"/function/{func_name}"
         # So we only register ONE endpoint. Default path shouldn't exist.
