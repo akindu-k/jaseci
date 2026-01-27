@@ -487,36 +487,24 @@ impl JacAPIServer.render_base_route_callback(
 impl JacAPIServer.register_functions_endpoints -> None {
     for func_name in self.get_functions() {
         func_obj = self.get_functions()[func_name];
-        if func_obj?.restspec {
-            spec_method = func_obj.restspec.method;
-            spec_path = func_obj.restspec.path;
-            final_path = spec_path or f"/function/{func_name}";
-            self.server.add_endpoint(
-                JEndPoint(
-                    method=spec_method,
-                    path=final_path,
-                    callback=self.create_function_callback(func_name),
-                    parameters=self.create_function_parameters(func_name),
-                    response_model=None,
-                    tags=['Functions'],
-                    summary='This is a summary',
-                    description='This is a description'
-                )
-            );
-        } else {
-            self.server.add_endpoint(
-                JEndPoint(
-                    method=HTTPMethod.POST,
-                    path=f"/function/{func_name}",
-                    callback=self.create_function_callback(func_name),
-                    parameters=self.create_function_parameters(func_name),
-                    response_model=None,
-                    tags=['Functions'],
-                    summary='This is a summary',
-                    description='This is a description'
-                )
-            );
-        }
+        restspec = func_obj.restspec if func_obj?.restspec else None;
+        spec_method = restspec.method if restspec else HTTPMethod.POST;
+        spec_path = restspec.path if restspec else None;
+
+        final_path = spec_path or f"/function/{func_name}";
+
+        self.server.add_endpoint(
+            JEndPoint(
+                method=spec_method,
+                path=final_path,
+                callback=self.create_function_callback(func_name),
+                parameters=self.create_function_parameters(func_name),
+                response_model=None,
+                tags=['Functions'],
+                summary='This is a summary',
+                description='This is a description'
+            )
+        );
     }
 }
 
@@ -608,67 +596,33 @@ impl JacAPIServer.create_function_callback(
 impl JacAPIServer.register_walkers_endpoints -> None {
     for walker_name in self.get_walkers() {
         walker_cls = self.get_walkers()[walker_name];
+        restspec = walker_cls.restspec if walker_cls?.restspec else None;
+        spec_method = restspec.method if restspec else HTTPMethod.POST;
+        spec_path = restspec.path if restspec else None;
 
-        if walker_cls?.restspec {
-            spec_method = walker_cls.restspec.method;
-            spec_path = walker_cls.restspec.path;
-            if spec_path {
-                # If path is custom, we register a single endpoint at that path
-                # We assume it acts like the 'root' endpoint (invoke_on_root=True)
-                self.server.add_endpoint(
-                    JEndPoint(
-                        method=spec_method,
-                        path=spec_path,
-                        callback=self.create_walker_callback(
-                            walker_name, has_node_param=False
-                        ),
-                        parameters=self.create_walker_parameters(
-                            walker_name, invoke_on_root=True
-                        ),
-                        response_model=None,
-                        tags=['Walkers'],
-                        summary='Custom API Endpoint',
-                        description='Custom API Endpoint'
-                    )
-                );
-            } else {
-                self.server.add_endpoint(
-                    JEndPoint(
-                        method=spec_method,
-                        path=f"/walker/{walker_name}/{{node}}",
-                        callback=self.create_walker_callback(
-                            walker_name, has_node_param=True
-                        ),
-                        parameters=self.create_walker_parameters(
-                            walker_name, invoke_on_root=False
-                        ),
-                        response_model=None,
-                        tags=['Walkers'],
-                        summary='API Entry',
-                        description='API Entry'
-                    )
-                );
-                self.server.add_endpoint(
-                    JEndPoint(
-                        method=spec_method,
-                        path=f"/walker/{walker_name}",
-                        callback=self.create_walker_callback(
-                            walker_name, has_node_param=False
-                        ),
-                        parameters=self.create_walker_parameters(
-                            walker_name, invoke_on_root=True
-                        ),
-                        response_model=None,
-                        tags=['Walkers'],
-                        summary='API Root',
-                        description='API Root'
-                    )
-                );
-            }
+        if spec_path {
+            # If path is custom, we register a single endpoint at that path
+            # We assume it acts like the 'root' endpoint (invoke_on_root=True)
+            self.server.add_endpoint(
+                JEndPoint(
+                    method=spec_method,
+                    path=spec_path,
+                    callback=self.create_walker_callback(
+                        walker_name, has_node_param=False
+                    ),
+                    parameters=self.create_walker_parameters(
+                        walker_name, invoke_on_root=True
+                    ),
+                    response_model=None,
+                    tags=['Walkers'],
+                    summary='Custom API Endpoint',
+                    description='Custom API Endpoint'
+                )
+            );
         } else {
             self.server.add_endpoint(
                 JEndPoint(
-                    method=HTTPMethod.POST,
+                    method=spec_method,
                     path=f"/walker/{walker_name}/{{node}}",
                     callback=self.create_walker_callback(
                         walker_name, has_node_param=True
@@ -684,7 +638,7 @@ impl JacAPIServer.register_walkers_endpoints -> None {
             );
             self.server.add_endpoint(
                 JEndPoint(
-                    method=HTTPMethod.POST,
+                    method=spec_method,
                     path=f"/walker/{walker_name}",
                     callback=self.create_walker_callback(
                         walker_name, has_node_param=False
