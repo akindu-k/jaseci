@@ -21,11 +21,11 @@ TANCH = TypeVar("TANCH", bound="Anchor")
 T = TypeVar("T")
 
 
-def meta(path: str, method: str = "POST") -> Any:
+def meta(path: str, method: str = "POST") -> Callable[[T], T]:
     """Decorate walker with custom specs."""
 
-    def decorator(cls: Any) -> Any:
-        cls.__meta__ = {"path": path, "method": method}
+    def decorator(cls: T) -> T:
+        cls.__meta__ = {"path": path, "method": method} 
         return cls
 
     return decorator
