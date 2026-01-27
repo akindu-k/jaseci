@@ -7,6 +7,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Walker Meta Decorator**: Added `meta` decorator to `jaclang.pycore.constructs` (and exposed via `jaclang.pycore.archetype`). This decorator allows attaching metadata (such as HTTP path and method) to walkers, which can be protected and utilized by plugins like `jac-scale`.
 
 - **Plugin Hooks for Walker Specs**: Defined `get_walker_specs` hook specification in `JacPlugin`. This allows plugins to retrieve custom specifications defined on walkers, enabling extensible metadata handling.
+- **Pip-Compatible Uninstall with RECORD Support**: Package removal now matches `pip uninstall` by using `RECORD` files to accurately remove all installed files, including scripts and data directories, while cleaning up leftover paths.
 
 ## jaclang 0.9.11 (Latest Release)
 
