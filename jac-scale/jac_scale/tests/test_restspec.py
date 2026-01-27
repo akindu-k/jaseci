@@ -1,4 +1,3 @@
-
 """Test for restspec decorator functionality."""
 
 import contextlib
@@ -11,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
-import pytest
+
 
 def get_free_port() -> int:
     """Get a free port by binding to port 0 and releasing it."""
@@ -20,6 +19,7 @@ def get_free_port() -> int:
         s.listen(1)
         port = s.getsockname()[1]
     return port
+
 
 class TestRestSpec:
     """Test restspec decorator functionality."""
@@ -41,7 +41,7 @@ class TestRestSpec:
 
         cls.port = get_free_port()
         cls.base_url = f"http://localhost:{cls.port}"
-        
+
         cls._cleanup_db_files()
         cls._start_server()
 
@@ -55,7 +55,7 @@ class TestRestSpec:
             except subprocess.TimeoutExpired:
                 cls.server_process.kill()
                 cls.server_process.wait()
-        
+
         time.sleep(0.5)
         gc.collect()
         cls._cleanup_db_files()
@@ -64,13 +64,24 @@ class TestRestSpec:
     def _start_server(cls) -> None:
         """Start the jac-scale server in a subprocess."""
         import sys
+
         jac_executable = Path(sys.executable).parent / "jac"
-        cmd = [str(jac_executable), "start", cls.test_file.name, "--port", str(cls.port)]
-        
+        cmd = [
+            str(jac_executable),
+            "start",
+            cls.test_file.name,
+            "--port",
+            str(cls.port),
+        ]
+
         cls.server_process = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=str(cls.fixtures_dir)
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=str(cls.fixtures_dir),
         )
-        
+
         # Wait for server
         max_attempts = 50
         for _ in range(max_attempts):
@@ -82,7 +93,7 @@ class TestRestSpec:
                 return
             except requests.RequestException:
                 time.sleep(0.5)
-        
+
         cls.server_process.kill()
         raise RuntimeError("Server failed to start")
 
@@ -90,6 +101,7 @@ class TestRestSpec:
     def _cleanup_db_files(cls) -> None:
         """Cleanup database files."""
         import shutil
+
         for pattern in ["*.db", "*.db-wal", "*.db-shm", "anchor_store*"]:
             for f in glob.glob(pattern):
                 with contextlib.suppress(Exception):
@@ -107,9 +119,9 @@ class TestRestSpec:
         # Handle tuple response [status, body]
         if isinstance(response, list) and len(response) == 2:
             response = response[1]
-        
+
         if isinstance(response, dict) and "data" in response:
-             return response["data"]
+            return response["data"]
         return response
 
     def test_custom_method_walker(self) -> None:
@@ -129,14 +141,18 @@ class TestRestSpec:
 
     def test_custom_method_func(self) -> None:
         """Test function with custom GET method."""
-        requests.post(f"{self.base_url}/user/register", json={"username": "u1", "password": "p1"})
-        login = requests.post(f"{self.base_url}/user/login", json={"username": "u1", "password": "p1"})
+        requests.post(
+            f"{self.base_url}/user/register", json={"username": "u1", "password": "p1"}
+        )
+        login = requests.post(
+            f"{self.base_url}/user/login", json={"username": "u1", "password": "p1"}
+        )
         token = self._extract_data(login.json())["token"]
-        
+
         response = requests.get(
             f"{self.base_url}/function/get_func",
             headers={"Authorization": f"Bearer {token}"},
-            timeout=5
+            timeout=5,
         )
         assert response.status_code == 200
         data = self._extract_data(response.json())
@@ -145,13 +161,15 @@ class TestRestSpec:
     def test_custom_path_func(self) -> None:
         """Test function with custom path."""
         # Use existing user token if possible, but simplest is fresh login
-        login = requests.post(f"{self.base_url}/user/login", json={"username": "u1", "password": "p1"})
+        login = requests.post(
+            f"{self.base_url}/user/login", json={"username": "u1", "password": "p1"}
+        )
         token = self._extract_data(login.json())["token"]
 
         response = requests.get(
-            f"{self.base_url}/custom/func", 
+            f"{self.base_url}/custom/func",
             headers={"Authorization": f"Bearer {token}"},
-            timeout=5
+            timeout=5,
         )
         assert response.status_code == 200
         data = self._extract_data(response.json())
@@ -162,13 +180,13 @@ class TestRestSpec:
         """Verify OpenAPI documentation reflects custom paths and methods."""
         spec = requests.get(f"{self.base_url}/openapi.json").json()
         paths = spec["paths"]
-        
+
         assert "/custom/walker" in paths
         assert "get" in paths["/custom/walker"]
-        
+
         assert "/custom/func" in paths
         assert "get" in paths["/custom/func"]
-        
+
         assert "/walker/GetWalker" in paths
         assert "get" in paths["/walker/GetWalker"]
         assert "post" not in paths["/walker/GetWalker"]
