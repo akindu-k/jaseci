@@ -4,6 +4,12 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.9.12 (Unreleased)
 
+
+
+- **Walker Meta Decorator**: Added `meta` decorator to `jaclang.pycore.constructs` (and exposed via `jaclang.pycore.archetype`). This decorator allows attaching metadata (such as HTTP path and method) to walkers, which can be protected and utilized by plugins like `jac-scale`.
+
+- **Plugin Hooks for Walker Specs**: Defined `get_walker_specs` hook specification in `JacPlugin`. This allows plugins to retrieve custom specifications defined on walkers, enabling extensible metadata handling.
+
 ## jaclang 0.9.11 (Latest Release)
 
 - **Reactive Effects with `can with entry/exit`**: The `can with entry` and `can with exit` syntax now automatically generates React `useEffect` hooks in client-side code. When used inside a `cl` codespace, `async can with entry { items = await fetch(); }` generates `useEffect(() => { (async () => { setItems(await fetch()); })(); }, []);`. Supports dependency arrays using list or tuple syntax: `can with (userId, count) entry { ... }` generates effects that re-run when dependencies change. The `can with exit` variant generates cleanup functions via `return () => { ... }` inside the effect. This provides a declarative, Jac-native way to handle component lifecycle without manual `useEffect` boilerplate.

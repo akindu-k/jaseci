@@ -4,6 +4,17 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.1.2 (Unreleased)
 
+### Custom Walker Endpoints
+
+Introduced the `@meta` decorator (via `jaclang.pycore.constructs`) to customize HTTP paths and methods for walker endpoints. This allows developers to define RESTful routes for their walkers directly in Jac code.
+
+```jac
+import from jaclang.pycore.constructs { meta }
+
+@meta(path="/custom/path", method="POST")
+walker MyWalker { ... }
+```
+
 ### PyPI Installation by Default
 
 Kubernetes deployments now install Jaseci packages from PyPI by default instead of cloning the entire repository. This provides faster startup times and more reproducible deployments.
