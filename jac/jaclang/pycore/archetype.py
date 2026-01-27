@@ -10,7 +10,7 @@ from inspect import _empty, signature
 from logging import getLogger
 from pickle import dumps
 from types import UnionType
-from typing import Any, ClassVar, TypeAlias, TypeVar
+from typing import Any, ClassVar, TypeAlias, TypeVar, cast
 from uuid import UUID, uuid4
 
 from jaclang.pycore.constant import EdgeDir
@@ -25,7 +25,7 @@ def meta(path: str, method: str = "POST") -> Callable[[T], T]:
     """Decorate walker with custom specs."""
 
     def decorator(cls: T) -> T:
-        cls.__meta__ = {"path": path, "method": method}
+        cast(Any, cls).__meta__ = {"path": path, "method": method}
         return cls
 
     return decorator
