@@ -205,7 +205,9 @@ obj JacAPIServer {
 
     obj RestSpecs {
         has method: str,
-            path: str = "";
+            path: str = "",
+            query: dict[(str, Any)] = {},
+            webhook: bool = False;
     }
 
     def postinit -> None;
