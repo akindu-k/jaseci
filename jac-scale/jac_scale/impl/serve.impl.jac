@@ -498,7 +498,9 @@ impl JacAPIServer.register_functions_endpoints -> None {
                 method=spec_method,
                 path=final_path,
                 callback=self.create_function_callback(func_name),
-                parameters=self.create_function_parameters(func_name),
+                parameters=self.create_function_parameters(
+                    func_name, method=spec_method
+                ),
                 response_model=None,
                 tags=['Functions'],
                 summary='This is a summary',
@@ -508,7 +510,9 @@ impl JacAPIServer.register_functions_endpoints -> None {
     }
 }
 
-impl JacAPIServer.create_function_parameters(func_name: str) -> list[APIParameter] {
+impl JacAPIServer.create_function_parameters(
+    func_name: str, method: HTTPMethod = HTTPMethod.POST
+) -> list[APIParameter] {
     parameters: list[APIParameter] = [];
     if self.introspector.is_auth_required_for_function(func_name) {
         parameters.append(
@@ -527,8 +531,13 @@ impl JacAPIServer.create_function_parameters(func_name: str) -> list[APIParamete
     )['parameters'];
     for field_name in func_fields {
         field_type = func_fields[field_name]['type'];
-        # Determine parameter type based on field type
-        if ('UploadFile' in field_type or 'uploadfile' in field_type.lower()) {
+        # Determine parameter type based on field type and method
+        if (
+            method == HTTPMethod.GET
+            and not ('UploadFile' in field_type or 'uploadfile' in field_type.lower())
+        ) {
+            param_type = ParameterType.QUERY;
+        } elif ('UploadFile' in field_type or 'uploadfile' in field_type.lower()) {
             # Support UploadFile type for file uploads
             param_type = ParameterType.FILE;
         } else {
@@ -618,7 +627,7 @@ impl JacAPIServer.register_walkers_endpoints -> None {
                 path=f"{spec_path}/{{node}}",
                 callback=self.create_walker_callback(walker_name, has_node_param=True),
                 parameters=self.create_walker_parameters(
-                    walker_name, invoke_on_root=False
+                    walker_name, invoke_on_root=False, method=spec_method
                 ),
                 response_model=None,
                 tags=['Walkers'],
@@ -632,7 +641,7 @@ impl JacAPIServer.register_walkers_endpoints -> None {
                 path=spec_path,
                 callback=self.create_walker_callback(walker_name, has_node_param=False),
                 parameters=self.create_walker_parameters(
-                    walker_name, invoke_on_root=True
+                    walker_name, invoke_on_root=True, method=spec_method
                 ),
                 response_model=None,
                 tags=['Walkers'],
@@ -644,7 +653,7 @@ impl JacAPIServer.register_walkers_endpoints -> None {
 }
 
 impl JacAPIServer.create_walker_parameters(
-    walker_name: str, invoke_on_root: bool
+    walker_name: str, invoke_on_root: bool, method: HTTPMethod = HTTPMethod.POST
 ) -> list[APIParameter] {
     parameters: list[APIParameter] = [];
     if self.introspector.is_auth_required_for_walker(walker_name) {
@@ -667,9 +676,14 @@ impl JacAPIServer.create_walker_parameters(
             continue;
         }
         field_type = walker_fields[field_name]['type'];
-        # Determine parameter type based on field type
+        # Determine parameter type based on field type and method
         if (field_name == '_jac_spawn_node') {
             param_type = ParameterType.PATH;
+        } elif (
+            method == HTTPMethod.GET
+            and not ('UploadFile' in field_type or 'uploadfile' in field_type.lower())
+        ) {
+            param_type = ParameterType.QUERY;
         } elif ('UploadFile' in field_type or 'uploadfile' in field_type.lower()) {
             # Support UploadFile type for file uploads
             param_type = ParameterType.FILE;
@@ -1239,13 +1253,17 @@ impl JacAPIServer.register_dynamic_walker_endpoint -> None {
         node: str | None = None,
         Authorization: str | None = None
     ) -> TransportResponse {
-        # Parse request body to get walker fields
-        try {
-            body = await request.json();
-        } except Exception {
-            body = {};
+        # Parse request body or query params to get walker fields
+        if request.method == 'GET' {
+            kwargs: dict[str, Any] = dict(request.query_params);
+        } else {
+            try {
+                body = await request.json();
+            } except Exception {
+                body = {};
+            }
+            kwargs = dict(body) if body else {};
         }
-        kwargs: dict[str, Any] = dict(body) if body else {};
 
         # Reload introspector if files changed (HMR)
         if self._hmr_pending {
@@ -1321,7 +1339,7 @@ impl JacAPIServer.register_dynamic_walker_endpoint -> None {
             data=result, meta=Meta(extra={'http_status': 200})
         );
     }
-    # Register catch-all route for walkers with node parameter
+    # Register catch-all route for walkers with node parameter (POST)
     self.server.add_endpoint(
         JEndPoint(
             method=HTTPMethod.POST,
@@ -1359,10 +1377,78 @@ impl JacAPIServer.register_dynamic_walker_endpoint -> None {
             description='Dynamically routes to any registered walker. Supports HMR - walker changes are reflected immediately.'
         )
     );
-    # Register catch-all route for walkers without node parameter (root)
+    # Register catch-all route for walkers with node parameter (GET)
+    self.server.add_endpoint(
+        JEndPoint(
+            method=HTTPMethod.GET,
+            path='/walker/{walker_name}/{node}',
+            callback=dynamic_walker_handler,
+            parameters=[
+                APIParameter(
+                    name='walker_name',
+                    data_type='string',
+                    required=True,
+                    default=None,
+                    description='Name of the walker to execute',
+                    type=ParameterType.PATH
+                ),
+                APIParameter(
+                    name='node',
+                    data_type='string',
+                    required=True,
+                    default=None,
+                    description='Node ID to spawn walker on',
+                    type=ParameterType.PATH
+                ),
+                APIParameter(
+                    name='Authorization',
+                    data_type='string',
+                    required=False,
+                    default=None,
+                    description='Bearer token for authentication',
+                    type=ParameterType.HEADER
+                )
+            ],
+            response_model=None,
+            tags=['Walkers (Dynamic)'],
+            summary='Execute walker on node (dynamic HMR)',
+            description='Dynamically routes to any registered walker. Supports HMR - walker changes are reflected immediately.'
+        )
+    );
+    # Register catch-all route for walkers without node parameter (root) (POST)
     self.server.add_endpoint(
         JEndPoint(
             method=HTTPMethod.POST,
+            path='/walker/{walker_name}',
+            callback=dynamic_walker_handler,
+            parameters=[
+                APIParameter(
+                    name='walker_name',
+                    data_type='string',
+                    required=True,
+                    default=None,
+                    description='Name of the walker to execute',
+                    type=ParameterType.PATH
+                ),
+                APIParameter(
+                    name='Authorization',
+                    data_type='string',
+                    required=False,
+                    default=None,
+                    description='Bearer token for authentication',
+                    type=ParameterType.HEADER
+                )
+            ],
+            response_model=None,
+            tags=['Walkers (Dynamic)'],
+            summary='Execute walker on root (dynamic HMR)',
+            description='Dynamically routes to any registered walker. Supports HMR - walker changes are reflected immediately.'
+        )
+    );
+    # Register catch-all route for walkers without node parameter (root) (GET)
+    self.server.add_endpoint(
+        JEndPoint(
+            method=HTTPMethod.GET,
             path='/walker/{walker_name}',
             callback=dynamic_walker_handler,
             parameters=[
@@ -1402,13 +1488,17 @@ impl JacAPIServer.register_dynamic_function_endpoint -> None {
     async def dynamic_function_handler(
         request: Request, function_name: str, Authorization: str | None = None
     ) -> TransportResponse {
-        # Parse request body to get function arguments
-        try {
-            body = await request.json();
-        } except Exception {
-            body = {};
+        # Parse request body or query params to get function arguments
+        if request.method == 'GET' {
+            kwargs: dict[str, Any] = dict(request.query_params);
+        } else {
+            try {
+                body = await request.json();
+            } except Exception {
+                body = {};
+            }
+            kwargs = dict(body) if body else {};
         }
-        kwargs: dict[str, Any] = dict(body) if body else {};
 
         # Reload introspector if files changed (HMR)
         if self._hmr_pending {
@@ -1477,9 +1567,40 @@ impl JacAPIServer.register_dynamic_function_endpoint -> None {
             data=result, meta=Meta(extra={'http_status': 200})
         );
     }
+    # Register POST endpoint
     self.server.add_endpoint(
         JEndPoint(
             method=HTTPMethod.POST,
+            path='/function/{function_name}',
+            callback=dynamic_function_handler,
+            parameters=[
+                APIParameter(
+                    name='function_name',
+                    data_type='string',
+                    required=True,
+                    default=None,
+                    description='Name of the function to call',
+                    type=ParameterType.PATH
+                ),
+                APIParameter(
+                    name='Authorization',
+                    data_type='string',
+                    required=False,
+                    default=None,
+                    description='Bearer token for authentication',
+                    type=ParameterType.HEADER
+                )
+            ],
+            response_model=None,
+            tags=['Functions (Dynamic)'],
+            summary='Call function (dynamic HMR)',
+            description='Dynamically routes to any registered function. Supports HMR - function changes are reflected immediately.'
+        )
+    );
+    # Register GET endpoint
+    self.server.add_endpoint(
+        JEndPoint(
+            method=HTTPMethod.GET,
             path='/function/{function_name}',
             callback=dynamic_function_handler,
             parameters=[
