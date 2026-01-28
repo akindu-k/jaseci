@@ -15,10 +15,6 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Custom Paths**: Use `path="/my/custom/path"` to override the default routing.
 
 - **Suppress Warnings in `jac check`**: Added `--nowarn` flag to `jac check` command to suppress warning output while still counting warnings in the summary.
-- **Rest API Specifications Supported**: The `@restspec` decorator now supports custom HTTP methods and custom endpoint paths for both walkers and functions.
-
-- **Custom Methods**: Use `method=HTTPMethod.GET`, `method=HTTPMethod.PUT`, etc.
-- **Custom Paths**: Use `path="/my/custom/path"` to override the default routing.
 
 - **Internal**: Explicitly declared all postinit fields across the codebase.
 - **Build (jacpack)**: `.jac/.gitignore` now contains only a comment (not `*`), so compiled assets (e.g., `compiled/`) aren't ignored and Tailwind builds correctly.
