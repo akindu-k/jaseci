@@ -11,7 +11,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Ensurepip Error Handling**: Added a clear error message when venv creation fails due to missing `ensurepip` (common on Debian/Ubuntu where `python3-venv` is a separate package), with platform-specific install instructions.
 - **Rest API Specifications Supported**: The `@restspec` decorator now supports custom HTTP methods and custom endpoint paths for both walkers and functions.
 
-- **Custom Methods**: Use `method=HTTPMethod.GET`, `method=HTTPMethod.PUT`, etc.
+- **Custom Methods**: Use `method=HTTPMethod.GET`, `method=HTTPMethod.POST`, etc.
 - **Custom Paths**: Use `path="/my/custom/path"` to override the default routing.
 
 - **Suppress Warnings in `jac check`**: Added `--nowarn` flag to `jac check` command to suppress warning output while still counting warnings in the summary.
