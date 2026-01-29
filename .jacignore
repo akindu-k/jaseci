@@ -99,6 +99,7 @@ corelib.impl.jac
 corelib_fmt.jac
 custom_access_validation.jac
 data_spatial_types.jac
+db.jac
 dead_code_elimination_pass.impl.jac
 decorator_stack.jac
 deep_import.jac
