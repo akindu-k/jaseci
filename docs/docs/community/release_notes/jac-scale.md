@@ -2,7 +2,9 @@
 
 This document provides a summary of new features, improvements, and bug fixes in each version of **Jac-Scale**. For details on changes that might require updates to your existing code, please refer to the [Breaking Changes](../breaking-changes.md) page.
 
-## jac-scale 0.1.3 (Unreleased)
+## jac-scale 0.1.4 (Unreleased)
+
+## jac-scale 0.1.3 (Latest Release)
 
 - **GET Method Support**: Added full support for HTTP GET requests for both walkers and functions:
   - **Query Parameters**: GET request parameters are now correctly mapped to query string parameters.
@@ -11,9 +13,15 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 - **Streaming Response Support**: Streaming responses are supported with walker spawn calls and function calls.
 
-- **Internal**: Explicitly declared all postinit fields across the codebase.
+- **Storage Abstraction**: Introduced a pluggable storage abstraction layer for file operations.
+  - Abstract `Storage` interface with standard operations: `upload`, `download`, `delete`, `list`, `copy`, `move`, `get_metadata`
+  - Default `LocalStorage` implementation in `jaclang.runtimelib.storage`
+  - Hookable `store(base_path, create_dirs)` builtin that returns a configured `Storage` instance
+  - Configure via `jac.toml [storage]` section or `JAC_STORAGE_PATH` / `JAC_STORAGE_CREATE_DIRS` environment variables
 
-- **jac destroy command wait till fully removal of resources**
+- **jac destroy** command wait till fully removal of resources
+
+- **Internal**: Explicitly declared all postinit fields across the codebase.
 
 ### PyPI Installation by Default
 
@@ -56,7 +64,7 @@ The `@restspec` decorator now supports custom HTTP methods and custom endpoint p
 - **Custom Methods**: Use `method=HTTPMethod.GET`, `method=HTTPMethod.PUT`, etc.
 - **Custom Paths**: Use `path="/my/custom/path"` to override the default routing.
 
-## jac-scale 0.1.1 (Latest Release)
+## jac-scale 0.1.1
 
 ## jac-scale 0.1.0
 
