@@ -6,10 +6,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.1.3 (Latest Release)
 
-- **GET Method Support**: Added full support for HTTP GET requests for both walkers and functions:
-  - **Query Parameters**: GET request parameters are now correctly mapped to query string parameters.
-  - **Dynamic & Static**: Works for both dynamic (HMR) and static endpoints.
-  - **Customizable**: Use `@restspec(method=HTTPMethod.GET)` to enable.
+- **GET Method Support**: Added full support for HTTP GET requests for both walkers and functions, including correct mapping of query parameters, support for both dynamic (HMR) and static endpoints, and customization via `@restspec(method=HTTPMethod.GET)`.
 
 - **Streaming Response Support**: Streaming responses are supported with walker spawn calls and function calls.
 
