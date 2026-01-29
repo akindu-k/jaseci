@@ -3,7 +3,7 @@ import from pymongo { MongoClient }
 import from typing { Any }
 import from jac_scale.config_loader { get_scale_config }
 
-glob _client: MongoClient | None = None;
+glob _client: (MongoClient | None) = None;
 
 def get_mongo_client -> MongoClient {
     global _client;
@@ -29,5 +29,4 @@ obj Db {
     ) -> Any;
 
     def delete_one(col_name: str, filter: dict) -> Any;
-    def commit -> None;
 }

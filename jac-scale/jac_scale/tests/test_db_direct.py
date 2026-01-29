@@ -77,9 +77,3 @@ class TestDirectDb:
 
         deleted = db.find_one(col_name, {"key": "value"})
         assert deleted is None
-
-    def test_commit_noop(self):
-        from jac_scale.db import get_db
-
-        db = get_db()
-        db.commit()

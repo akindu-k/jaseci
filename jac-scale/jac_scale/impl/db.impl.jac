@@ -30,10 +30,6 @@ impl Db.delete_one(col_name: str, filter: dict) -> Any {
     return col.delete_one(filter);
 }
 
-impl Db.commit -> None {
-# No-op for MongoDB
-}
-
 def get_db -> Db {
     return Db();
 }
