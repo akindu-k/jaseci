@@ -9,17 +9,20 @@ impl JacAutoLintPass.init(ir_in: uni.Module, prog: Any) -> None {
 impl JacAutoLintPass._load_lint_config -> None {
     import from jaclang.project.config { get_config, LintRule as LR }
     rule_by_name: dict[str, LR] = {r.value: r for r in LR};
-    # Rules that require explicit opt-in (not included in "all")
-    opt_in_only: set[LR] = {LR.NO_PRINT};
-    default_rules: set[LR] = set(LR) - opt_in_only;
+    # Warning-only rules not included in "default" (but included in "all")
+    non_default: set[LR] = {LR.NO_PRINT};
+    default_rules: set[LR] = set(LR) - non_default;
+    all_rules: set[LR] = set(LR);
     config = get_config();
     if config is not None {
         lint = config.check.lint;
         if "all" in lint.select {
+            self._enabled_rules = set(all_rules);
+        } elif "default" in lint.select {
             self._enabled_rules = set(default_rules);
-            # Allow explicit opt-in alongside "all"
+            # Allow adding specific rules alongside "default"
             for name in lint.select {
-                if name != "all" and name in rule_by_name {
+                if name != "default" and name in rule_by_name {
                     self._enabled_rules.add(rule_by_name[name]);
                 }
             }
@@ -36,6 +39,8 @@ impl JacAutoLintPass._load_lint_config -> None {
             if name in rule_by_name
         };
         self._enabled_rules -= ignore_rules;
+        self._exclude_patterns = lint.exclude;
+        self._project_root = str(config.project_root) if config.project_root else "";
     } else {
         self._enabled_rules = set(default_rules);
     }
@@ -44,6 +49,27 @@ impl JacAutoLintPass._load_lint_config -> None {
 """Check if a specific lint rule is enabled."""
 impl JacAutoLintPass.is_rule_enabled(rule: LintRule) -> bool {
     return rule in self._enabled_rules;
+}
+
+"""Check if a file path matches any exclude pattern."""
+impl JacAutoLintPass._is_file_excluded(file_path: str) -> bool {
+    import fnmatch;
+    import os;
+    if not self._exclude_patterns {
+        return False;
+    }
+    # Normalize to relative path from project root
+    rel_path = file_path;
+    if self._project_root and file_path.startswith(self._project_root) {
+        rel_path = file_path[len(self._project_root):].lstrip(os.sep);
+    }
+    for pattern in self._exclude_patterns {
+        if fnmatch.fnmatch(rel_path, pattern)
+        or fnmatch.fnmatch(os.path.basename(file_path), pattern) {
+            return True;
+        }
+    }
+    return False;
 }
 
 """Remove empty parentheses from function signatures with no parameters."""
@@ -1545,10 +1571,13 @@ impl JacAutoLintPass._check_no_print(node: uni.FuncCall) -> None {
     if node.target.value != "print" {
         return;
     }
-    # It's a bare print() call — report warning with location
-    self.log_warning(
-        "Use console abstraction instead of bare print() [no-print]",
-        node_override=node
+    # Skip excluded files (docs, examples, tests, console.impl.jac, etc.)
+    if self._is_file_excluded(node.loc.mod_path) {
+        return;
+    }
+    # It's a bare print() call — report error with location
+    self.log_error(
+        "Calling print() is disallowed by rule [no-print]", node_override=node
     );
 }
 

@@ -1,3 +1,5 @@
+import from jaclang.cli.console { console }
+
 """Helper function to convert TransportResponse to dict for JSONResponse."""
 def _transport_response_to_dict(
     transport_response: TransportResponse
@@ -65,7 +67,6 @@ impl JacAPIServer.start(dev: bool = False, no_client: bool = False) -> None {
         if client_exports {
             import time;
             import sys;
-            import from jaclang.cli.console { console }
             start_time = time.time();
             try {
                 with console.status(
@@ -471,7 +472,7 @@ impl JacAPIServer.render_page_callback -> Callable[..., HTMLResponse] {
         } except ValueError as exc {
             return HTMLResponse(content=f"<h1>404 Not Found</h1>", status_code=404);
         } except RuntimeError as exc {
-            print(f"Error rendering page '{page_name}': {exc}");
+            console.print(f"Error rendering page '{page_name}': {exc}");
             return HTMLResponse(
                 content=f"<h1>503 Service Unavailable</h1>", status_code=503
             );
@@ -494,7 +495,7 @@ impl JacAPIServer.render_base_route_callback(
         } except ValueError as exc {
             return HTMLResponse(content=f"<h1>404 Not Found</h1>", status_code=404);
         } except RuntimeError as exc {
-            print(f"Error rendering base route app '{app_name}': {exc}");
+            console.print(f"Error rendering base route app '{app_name}': {exc}");
             return HTMLResponse(
                 content=f"<h1>503 Service Unavailable</h1>", status_code=503
             );
@@ -602,7 +603,7 @@ impl JacAPIServer.create_function_callback(
                 );
             }
         }
-        print(f"Executing function '{func_name}' with params: {kwargs}");
+        console.print(f"Executing function '{func_name}' with params: {kwargs}");
         result = await self.execution_manager.execute_function(
             self.get_functions()[func_name], kwargs, (username or '__guest__')
         );
@@ -888,7 +889,7 @@ impl JacAPIServer.create_user(username: str, password: str) -> TransportResponse
         );
     } except Exception as e {
         error_trace = traceback.format_exc();
-        print(f"Error in create_user: {e}\n{error_trace}");
+        console.print(f"Error in create_user: {e}\n{error_trace}");
         return TransportResponse.fail(
             code='INTERNAL_ERROR',
             message=f"Registration failed: {e}",
