@@ -36,8 +36,8 @@ Extends the base `ClientBundleBuilder` to provide Vite integration. Key responsi
      import { app as App } from "./app.js";
      ```
 
-   - Runs `npm run compile` then copies assets (`_copy_asset_files`)
-   - Runs `npm run build` to bundle with Vite
+   - Copies assets (`_copy_asset_files`)
+   - Runs `bun run build` to bundle with Vite
    - Generates hashed bundle file (`client.[hash].js`)
    - Vite extracts CSS to `dist/main.css`
    - Returns bundle code and SHA256 hash
@@ -50,7 +50,7 @@ Extends the base `ClientBundleBuilder` to provide Vite integration. Key responsi
 1. Module compilation
    ├── Compile root .jac file → JS
    ├── Extract exports & globals from manifest
-   └── Generate client_runtime.js from client_runtime.jac
+   └── Generate client_runtime.js from client_runtime.cl.jac
 
 2. Recursive dependency resolution
    ├── Traverse all .jac/.js imports
@@ -58,23 +58,18 @@ Extends the base `ClientBundleBuilder` to provide Vite integration. Key responsi
    ├── Accumulate exports & globals
    └── Skip bare specifiers (handled by Vite)
 
-3. Babel compilation
-   ├── Run npm run compile
-   ├── Transpile JavaScript from compiled/ to build/
-   └── Preserves CSS import statements
-
-4. Asset copying
-   ├── Copy CSS and other assets from compiled/ to build/
+3. Asset copying
+   ├── Copy CSS and other assets to compiled/
    └── Ensures Vite can resolve CSS imports during bundling
 
-5. Vite bundling
-   ├── Write entry point (main.js)
-   ├── Run npm run build
+4. Vite bundling
+   ├── Write entry point (_entry.js)
+   ├── Run bun run build (Vite handles JSX/TSX transpilation natively)
    ├── Process CSS imports and extract to dist/main.css
    ├── Locate generated bundle in dist/
    └── Return code + hash
 
-6. Cleanup
+5. Cleanup
    └── Remove compiled/ directory
 ```
 
@@ -94,21 +89,25 @@ Given the following source structure:
 
 ```
 nested-basic/
-├── app.jac                    (root module)
-├── buttonroot.jac
-└── components/
-    └── button.jac
+├── src/
+│   ├── app.jac                (root module)
+│   ├── buttonroot.jac
+│   └── components/
+│       └── button.jac
+└── jac.toml                   (entry-point = "src/app.jac")
 ```
 
 The compiled output in `compiled/` will be:
 
 ```
 compiled/
-├── app.js                     (from app.jac)
-├── buttonroot.js              (from buttonroot.jac)
+├── app.js                     (from src/app.jac)
+├── buttonroot.js              (from src/buttonroot.jac)
 └── components/
-    └── button.js              (from components/button.jac)
+    └── button.js              (from src/components/button.jac)
 ```
+
+**Note**: The `src/` directory is the `source_root`, so files are compiled to `compiled/` maintaining relative structure but without the `src/` prefix.
 
 #### Benefits
 
@@ -150,14 +149,14 @@ This gets compiled to JavaScript:
 import "./styles.css";
 ```
 
-#### 2. Asset Copying (`_copy_asset_files`)
+#### 2. Asset Copying
 
-After Babel compilation, CSS and other asset files are copied from `compiled/` to `build/`:
+CSS and other asset files are copied to the `compiled/` directory:
 
-- **Why**: Babel only transpiles JavaScript, so CSS files need manual copying
-- **When**: After `npm run compile`, before `npm run build`
+- **Why**: Vite needs access to CSS files during bundling
+- **When**: Before `bun run build`
 - **What**: Copies `.css`, `.scss`, `.sass`, `.less`, and image files
-- **Location**: `compiled/styles.css` → `build/styles.css`
+- **Location**: Source CSS files → `compiled/` directory
 
 #### 3. Vite CSS Processing
 
@@ -185,19 +184,30 @@ The `JacClientModuleIntrospector.render_page()` method:
 The `JacAPIServer` handles CSS file requests:
 
 - **Route**: `/static/*.css` (e.g., `/static/main.css`)
-- **Handler**: Reads CSS file from `dist/` directory
+- **Handler**: Reads CSS file from build output directory
 - **Response**: Serves with `text/css` content type
-- **Location**: `{base_path}/dist/{filename}.css`
+- **Locations checked** (in order):
+  1. `{base_path}/.jac/client/dist/{filename}.css` (primary)
+  2. `{base_path}/dist/{filename}.css` (fallback)
+  3. `{base_path}/assets/{filename}.css` (static assets)
 
-**Implementation** (`server.py`):
+**Implementation** (`server.impl.jac`):
 
-```python
-# CSS files from dist directory
-if path.startswith("/static/") and path.endswith(".css"):
-    css_file = base_path / "dist" / Path(path).name
-    if css_file.exists():
-        css_content = css_file.read_text(encoding="utf-8")
-        ResponseBuilder.send_css(self, css_content)
+```jac
+# CSS files from .jac/client/dist/ (primary) or dist/ (fallback)
+if path.endswith('.css') {
+    # Check .jac/client/dist/ first
+    if client_build_dist_file.exists() {
+        css_content = client_build_dist_file.read_text(encoding='utf-8');
+        Jac.send_css(self, css_content);
+        return;
+    } elif dist_file.exists() {
+        # Fallback to dist/ location
+        css_content = dist_file.read_text(encoding='utf-8');
+        Jac.send_css(self, css_content);
+        return;
+    }
+}
 ```
 
 #### CSS File Flow
@@ -207,15 +217,13 @@ app.jac (cl import ".styles.css")
   ↓
 compiled/app.js (import "./styles.css")
   ↓
-Babel: compiled/app.js → build/app.js (preserves import)
+_copy_asset_files: styles.css → compiled/styles.css
   ↓
-_copy_asset_files: compiled/styles.css → build/styles.css
-  ↓
-Vite: Processes CSS import, extracts to dist/main.css
+Vite: Processes CSS import, extracts to .jac/client/dist/main.css
   ↓
 HTML: <link href="/static/main.css?hash=..."/>
   ↓
-Server: Serves from dist/main.css
+Server: Serves from .jac/client/dist/main.css (or dist/main.css for fallback)
 ```
 
 ### Key Design Decisions
@@ -227,6 +235,121 @@ Server: Serves from dist/main.css
 - **Temp directory isolation**: Builds in `vite_package_json.parent/compiled/` to avoid conflicts
 - **Folder structure preservation**: Nested folder structures are preserved in `compiled/` directory, similar to TypeScript transpilation, ensuring relative imports work correctly
 - **CSS asset handling**: CSS files are copied after Babel compilation to ensure Vite can resolve imports, then extracted to separate files for optimal loading
+
+### Package Management System
+
+The Jac Client uses a **configuration-driven package management system** that abstracts npm package management into `config.json`, automatically generating `package.json` during the build process.
+
+#### Package Configuration in config.json
+
+The `package` section in `config.json` contains only the essential package metadata that developers need to manage:
+
+```json
+{
+  "package": {
+    "name": "my-app",
+    "version": "1.0.0",
+    "description": "My Jac application",
+    "dependencies": {},
+    "devDependencies": {}
+  }
+}
+```
+
+**Key Design Principles:**
+
+- **Minimal Configuration**: Only `name`, `version`, `description`, `dependencies`, and `devDependencies` are stored in `config.json`
+- **Build-Time Generation**: All other `package.json` fields (scripts, babel config, `type: 'module'`, etc.) are automatically generated during build
+- **Default Dependencies**: Core dependencies (React, Vite) are automatically included and merged with user-defined dependencies
+
+#### Package.json Generation
+
+The `package.json` file is dynamically generated from `jac.toml` by `ViteBundler.create_package_json()`:
+
+1. **Location**: Generated in `.jac/client/configs/package.json` (primary location)
+2. **Temporary Root Copy**: Also copied to `.jac/client/` temporarily for bun commands
+3. **Auto-Generated Fields**:
+   - `type: 'module'` (always included)
+   - `scripts` (build, dev, preview)
+   - Default dependencies (React, Vite)
+   - Default devDependencies (Vite plugins, TypeScript types if needed)
+
+4. **Merged Fields**:
+   - User-defined `dependencies` merged with defaults
+   - User-defined `devDependencies` merged with defaults
+   - User-defined `scripts` merged with defaults
+
+#### Package Installation Workflow
+
+The `jac add --npm` command manages packages through `jac.toml`:
+
+```
+1. Developer runs: jac add --npm lodash
+   ↓
+2. PackageInstaller updates jac.toml (adds lodash to dependencies.npm)
+   ↓
+3. ViteBundler.create_package_json() generates package.json from jac.toml
+   ↓
+4. package.json copied to .jac/client/ (bun requires it there)
+   ↓
+5. bun install runs (installs all packages from package.json)
+   ↓
+6. bun.lockb moved to .jac/client/configs/
+   ↓
+7. Temporary package.json removed (keeps only .jac/client/configs/package.json)
+```
+
+#### File Lifecycle
+
+**During Build/Install:**
+
+- `.jac/client/configs/package.json` - Generated from `jac.toml` (source of truth)
+- `.jac/client/package.json` - Temporary copy for bun commands
+- `.jac/client/bun.lockb` - Generated by bun, then moved to `.jac/client/configs/`
+
+**After Build/Install:**
+
+- `.jac/client/configs/package.json` - Persisted (generated file)
+- `.jac/client/configs/bun.lockb` - Persisted (lock file)
+- `.jac/client/package.json` - Removed (not needed after bun install)
+- `jac.toml` (root) - Source configuration (committed to git)
+
+#### CLI Commands
+
+**Add Package:**
+
+```bash
+jac add --npm lodash              # Add to dependencies
+jac add --npm -d @types/react     # Add to devDependencies
+jac add --npm lodash@^4.17.21     # Add with specific version
+```
+
+**Install All Packages:**
+
+```bash
+jac add --npm                     # Install all packages from jac.toml (uses bun)
+```
+
+**Remove Package:**
+
+```bash
+jac remove --npm lodash            # Remove from dependencies
+jac remove --npm -d @types/react   # Remove from devDependencies
+```
+
+**Project Creation:**
+
+```bash
+jac create --use client my-app            # Creates jac.toml with organized folder structure
+```
+
+#### Benefits
+
+- **Clean Project Root**: No `package.json` clutter in project root
+- **Version Control Friendly**: Only `jac.toml` needs to be committed
+- **Simplified Configuration**: Developers only manage essential package info
+- **Automatic Defaults**: Build tools and scripts are automatically configured
+- **Bun Compatibility**: Temporary `package.json` in `.jac/client/` ensures bun commands work correctly
 
 ### Configuration System
 
@@ -245,7 +368,14 @@ The `config.json` file uses a hierarchical structure with predefined keys for di
     "server": {},
     "resolve": {}
   },
-  "ts": {}
+  "ts": {},
+  "package": {
+    "name": "my-app",
+    "version": "1.0.0",
+    "description": "My Jac application",
+    "dependencies": {},
+    "devDependencies": {}
+  }
 }
 ```
 
@@ -258,8 +388,8 @@ The `config.json` file uses a hierarchical structure with predefined keys for di
    - Validates JSON structure
 
 2. **Config Generation** (`ViteBundler.create_vite_config`)
-   - Reads configuration from `config.json`
-   - Generates `vite.config.js` in `.jac-client.configs/` directory
+   - Reads configuration from `jac.toml`
+   - Generates `vite.config.js` in `.jac/client/configs/` directory
    - Injects user customizations into the generated config
    - Automatically includes base plugins and required aliases
 
@@ -268,6 +398,38 @@ The `config.json` file uses a hierarchical structure with predefined keys for di
    - Config is regenerated on each build to reflect latest changes
 
 #### Configuration Keys
+
+##### `package.*`
+
+Package configuration for dependencies. See [Package Management Architecture](./package_management.md) for detailed documentation.
+
+**Fields**:
+
+- `package.name`: Project name (auto-populated from project filename)
+- `package.version`: Project version (default: "1.0.0")
+- `package.description`: Project description
+- `package.dependencies`: Runtime packages
+- `package.devDependencies`: Development packages
+
+**Example**:
+
+```json
+{
+  "package": {
+    "name": "my-app",
+    "version": "1.0.0",
+    "description": "My Jac application",
+    "dependencies": {
+      "lodash": "^4.17.21"
+    },
+    "devDependencies": {
+      "@types/react": "^18.2.45"
+    }
+  }
+}
+```
+
+**Note**: Other `package.json` fields (scripts, type) are automatically generated during build.
 
 ##### `vite.plugins`
 
@@ -343,14 +505,14 @@ The system automatically includes essential configuration:
 
 - **Base plugins**: React plugin (if TypeScript is detected)
 - **Required aliases**:
-  - `@jac-client/utils` → `compiled/client_runtime.js`
+  - `@jac/runtime` → `compiled/client_runtime.js`
   - `@jac-client/assets` → `compiled/assets`
 - **Build settings**: Entry point, output directory, file naming
 - **Extensions**: JavaScript and TypeScript file extensions
 
 #### Generated Vite Config
 
-The generated `vite.config.js` in `.jac-client.configs/` includes:
+The generated `vite.config.js` in `.jac/client/configs/` includes:
 
 ```javascript
 export default defineConfig({
@@ -373,7 +535,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@jac-client/utils": path.resolve(projectRoot, "compiled/client_runtime.js"),
+      "@jac/runtime": path.resolve(projectRoot, "compiled/client_runtime.js"),
       "@jac-client/assets": path.resolve(projectRoot, "compiled/assets"),
     },
     extensions: [".mjs", ".js", ".mts", ".ts", ".jsx", ".tsx", ".json"],
@@ -391,11 +553,47 @@ export default defineConfig({
    ↓
 3. Config merged with defaults (deep merge)
    ↓
-4. ViteBundler generates vite.config.js in .jac-client.configs/
+4. ViteBundler generates:
+   ├── vite.config.js in .jac/client/configs/
+   └── package.json in .jac/client/configs/ (from jac.toml)
    ↓
-5. Vite uses generated config for bundling
+5. package.json copied to .jac/client/ (temporary, for bun commands)
    ↓
-6. Generated config is gitignored (config.json is committed)
+6. Vite uses generated configs for bundling
+   ↓
+7. Generated configs are gitignored (jac.toml is committed)
+```
+
+**Package Management Workflow**:
+
+```
+1. Developer runs: jac add --npm lodash
+   ↓
+2. PackageInstaller updates jac.toml (dependencies.npm)
+   ↓
+3. ViteBundler generates package.json from jac.toml
+   ↓
+4. bun install runs (installs packages)
+   ↓
+5. bun.lockb moved to .jac/client/configs/
+   ↓
+6. Temporary package.json removed (keeps only .jac/client/configs/)
+```
+
+**Remove Workflow**:
+
+```
+1. Developer runs: jac remove --npm lodash
+   ↓
+2. PackageInstaller removes package from jac.toml
+   ↓
+3. ViteBundler regenerates package.json from updated jac.toml
+   ↓
+4. bun install runs (removes package from node_modules)
+   ↓
+5. bun.lockb moved to .jac/client/configs/
+   ↓
+6. Temporary package.json removed (keeps only .jac/client/configs/)
 ```
 
 #### Benefits
@@ -404,7 +602,7 @@ export default defineConfig({
 - **Standardized**: Predefined keys prevent configuration errors
 - **Extensible**: Easy to add new config types (e.g., `ts`)
 - **Maintainable**: Defaults are always preserved
-- **Version controlled**: `config.json` can be committed to git
+- **Version controlled**: `jac.toml` can be committed to git
 - **Auto-generated**: `vite.config.js` is generated automatically
 
 ### Configuration Parameters
@@ -413,3 +611,52 @@ export default defineConfig({
 - `runtime_path`: Path to client runtime file
 - `vite_output_dir`: Build output (defaults to `compiled/dist/assets`)
 - `vite_minify`: Enable/disable minification
+
+### HTML Meta Data Configuration
+
+The Jac Client provides a comprehensive **HTML meta data configuration system** that allows developers to customize SEO, social media, and browser metadata for their client applications through `jac.toml`.
+
+#### Meta Data Configuration in jac.toml
+
+Meta data is configured in the `[plugin.client.app_meta_data]` section of `jac.toml`:
+
+```toml
+[plugin.client.app_meta_data]
+charset = "UTF-8"
+title = "My Awesome App"
+viewport = "width=device-width, initial-scale=1"
+description = "A powerful application built with Jac"
+robots = "index, follow"
+canonical = "https://example.com/app"
+
+# OpenGraph metadata for social media
+og_type = "website"
+og_title = "My Awesome App"
+og_description = "A powerful application built with Jac"
+og_url = "https://example.com/app"
+og_image = "https://example.com/og-image.png"
+
+# Browser/PWA metadata
+theme_color = "#4a90e2"
+icon = "/assets/favicon.ico"
+```
+
+#### Meta Data Processing Flow
+
+The meta data system follows a structured processing pipeline:
+
+```
+1. Load configuration from jac.toml
+   ↓
+2. Extract [plugin.client.app_meta_data] section
+   ↓
+3. Merge with default values (see meta_defaults)
+   ↓
+4. Apply HEAD_SCHEMA to structure tags
+   ↓
+5. Generate HTML head content with build_head()
+   ↓
+6. Inject into page template with CSS links
+   ↓
+7. Serve rendered HTML with proper meta tags
+```

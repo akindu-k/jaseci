@@ -23,7 +23,7 @@ cl {
         </div>;
     }
 
-    def app() -> any {
+    def:pub app() -> any {
         return <div>
             <h1>My Todos</h1>
             <TodoItem />
@@ -49,7 +49,7 @@ cl {
         </div>;
     }
 
-    def app() -> any {
+    def:pub app() -> any {
         return <div>
             <h1>My Todos</h1>
             <TodoItem text="Learn Jac basics" done={false} />
@@ -104,7 +104,7 @@ cl {
     }
 
     # Main app - combines all components
-    def app() -> any {
+    def:pub app() -> any {
         return <div>
             <h1>My Todos</h1>
             <TodoInput />
@@ -217,8 +217,8 @@ def X() -> any { ... }
 
 # Receiving props (in the component)
 def TodoItem(props: any) -> any {
-    let text = props.text;      # "Learn Jac"
-    let done = props.done;      # false
+    text = props.text;      # "Learn Jac"
+    done = props.done;      # false
     return <div>{text}</div>;
 }
 ```
@@ -228,8 +228,8 @@ def TodoItem(props: any) -> any {
 ```jac
 #  Correct way
 def TodoItem(props: any) -> any {
-    let text = props.text;
-    let done = props.done;
+    text = props.text;
+    done = props.done;
     # ...
 }
 
@@ -255,8 +255,8 @@ def TodoItem(props: any) -> any {
 
 ```jac
 def TodoItem(props: any) -> any {
-    let text = props.text;
-    let done = props.done;
+    text = props.text;
+    done = props.done;
     return <span>{text}</span>;
 }
 ```
@@ -265,8 +265,8 @@ def TodoItem(props: any) -> any {
 
 ```jac
 def TodoItem(props: any) -> any {
-    let text = props["text"];
-    let done = props["done"];
+    text = props["text"];
+    done = props["done"];
     return <span>{text}</span>;
 }
 ```
@@ -287,7 +287,7 @@ def TodoList() -> any {
 }
 
 # App uses TodoList
-def app() -> any {
+def:pub app() -> any {
     return <div>
         <h1>My Todos</h1>
         <TodoList />
@@ -319,7 +319,7 @@ You can pass any value as props:
 <TodoItem done={true} />
 
 # Variable
-let myText = "Learn Jac";
+myText = "Learn Jac";
 <TodoItem text={myText} />
 
 # Expression
@@ -362,7 +362,7 @@ def TodoItem(text: str, done: bool) -> any {
 
 #  Correct
 def TodoItem(props: any) -> any {
-    let text = props.text;
+    text = props.text;
     # ...
 }
 ```
@@ -400,7 +400,7 @@ def TodoStats(props: any) -> any {
 }
 
 # Use it in app
-def app() -> any {
+def:pub app() -> any {
     return <div>
         <h1>My Todos</h1>
         <TodoStats total={3} completed={1} />

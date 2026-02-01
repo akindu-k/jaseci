@@ -46,15 +46,16 @@ def example_function(numbers: list[int]) -> int {
     # while loop
     while len(even_numbers) > 0 {
         # delete
-        del even_numbers[0] ;
+        del even_numbers[0];
     }
 
     print("All done!");
 }
 
 # testing the function
+
+# iteration for loop
 with entry {
-    # iteration for loop
     for i = 1 to i < 5 by i += 1 {
         for result in example_function([1, 2, 3, 4, 5, 21, 22, 23, 24]) {
             print(result);

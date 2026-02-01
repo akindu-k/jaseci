@@ -2,7 +2,7 @@ import from byllm { Model, Image }
 import from typing { List, Dict, Any }
 import os;
 
-def clear_terminal()  -> None {
+def clear_terminal -> None {
     # For Windows
     if os.name == "nt" {
         os.system("cls");  # For macOS / Linux
@@ -14,25 +14,25 @@ def clear_terminal()  -> None {
 glob llm = Model(model_name="gpt-4.1");
 
 obj Response {
-    has follow_up_questions: str;
-    has summary: str;
-    has when: str;
-    has who: List[str];
-    has what: str;
-    has where: List[str];
-    has terminate_conversation: bool;
-    has show_summary: bool;
+    has follow_up_questions: str,
+        summary: str,
+        when: str,
+        who: List[str],
+        what: str,
+        where: List[str],
+        terminate_conversation: bool,
+        show_summary: bool;
 }
 
-sem Response= "Memory details refined using the user's input and prior context.";
-sem Response. follow_up_questions= "Ask one follow-up question to continue the conversation. If all required details are present, ask to terminate the conversation.";
-sem Response. summary= "A concise summary of the memory.";
-sem Response. when= "The date of the memory in YYYY-MM-DD format.";
-sem Response. who= "Exact names of people in the memory (e.g., [John, Kate]); return [] if none.";
-sem Response. where= "List of places relevant to the memory.";
-sem Response. what= "What the memory is about.";
-sem Response. show_summary= "True if all required details are present and the summary should be shown.";
-sem Response. terminate_conversation= "True if the user asked to terminate the conversation; otherwise false.";
+sem Response = "Memory details refined using the user's input and prior context.";
+sem Response.follow_up_questions = "Ask one follow-up question to continue the conversation. If all required details are present, ask to terminate the conversation.";
+sem Response.summary = "A concise summary of the memory.";
+sem Response.when = "The date of the memory in YYYY-MM-DD format.";
+sem Response.who = "Exact names of people in the memory (e.g., [John, Kate]); return [] if none.";
+sem Response.where = "List of places relevant to the memory.";
+sem Response.what = "What the memory is about.";
+sem Response.show_summary = "True if all required details are present and the summary should be shown.";
+sem Response.terminate_conversation = "True if the user asked to terminate the conversation; otherwise false.";
 
 """ Update and extract memory details based on user input and context."""
 def update_memory_details(
@@ -49,20 +49,20 @@ def update_memory_details(
 ) -> Response by llm();
 
 node session {
-    has summary: str = "";
-    has when: str = "";
-    has who: list = [];
-    has where: list = [];
-    has what: str = "";
-    has conversation: list = [];
-    has image_url: str = "";
-    has show_summary: bool = False;
-    has terminate_conversation: bool = False;
+    has summary: str = "",
+        when: str = "",
+        who: list = [],
+        where: list = [],
+        what: str = "",
+        conversation: list = [],
+        image_url: str = "",
+        show_summary: bool = False,
+        terminate_conversation: bool = False;
 }
 
 walker update_session {
-    has image_url: str;
-    has utterance: str = "";
+    has image_url: str,
+        utterance: str = "";
 
     can visit_session with `root entry {
         visit [-->](`?session) else {
@@ -124,7 +124,7 @@ walker update_session {
             "follow_up_questions": response.follow_up_questions,
             "conversation": here.conversation,
             "image_url": here.image_url
-        } ;
+        };
     }
 }
 # with entry {

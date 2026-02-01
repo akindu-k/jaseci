@@ -81,8 +81,10 @@ export default {
 
 ```jac
 # Pages
-cl import from react {useState, useEffect}
+cl import from react { useEffect }
 cl import from .styles { default as styles }
+
+# Note: useState is auto-injected when using `has` variables
 
 cl {
     def app() -> any {
@@ -112,7 +114,7 @@ return <div style={styles.container}>
 Select styles based on state:
 
 ```jac
-let countStyle = styles.countDisplayZero if count == 0 else (styles.countDisplayPositive if count > 0 else styles.countDisplayNegative);
+countStyle = styles.countDisplayZero if count == 0 else (styles.countDisplayPositive if count > 0 else styles.countDisplayNegative);
 
 return <div style={countStyle}>{count}</div>;
 ```
@@ -266,7 +268,7 @@ export const getButtonStyle = (variant) => ({
 Use in Jac:
 
 ```jac
-let buttonStyle = getButtonStyle("primary");
+buttonStyle = getButtonStyle("primary");
 
 return <button style={buttonStyle}>Click Me</button>;
 ```
@@ -346,7 +348,7 @@ cl import from .styles { button, card, container }
 You can combine multiple style objects:
 
 ```jac
-let combinedStyle = {
+combinedStyle = {
     ...styles.base,
     ...styles.button,
     ...(isActive ? styles.active : {})
@@ -358,8 +360,8 @@ return <button style={combinedStyle}>Click Me</button>;
 ## Next Steps
 
 - Explore [Styled Components](./styled-components.md) for CSS-in-JS with more features
-- Check out [Emotion](./emotion.md) for similar CSS-in-JS approach (coming soon)
-- Learn about [CSS Modules](./css-modules.md) for scoped CSS (coming soon)
+- Check out Emotion for similar CSS-in-JS approach (coming soon)
+- Learn about CSS Modules for scoped CSS (coming soon)
 - See [Pure CSS](./pure-css.md) for traditional CSS approach
 
 ## Resources

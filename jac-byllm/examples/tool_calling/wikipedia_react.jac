@@ -1,7 +1,7 @@
 import from byllm.lib { Model }
 import wikipedia;
 
-glob llm = Model(verbose=True, model_name="gpt-4o-mini");
+glob llm = Model(model_name="gpt-4o-mini", config={"verbose": True});
 
 def get_wikipedia_summary(title: str) -> str {
     try {
@@ -14,12 +14,13 @@ def get_wikipedia_summary(title: str) -> str {
     }
 }
 
-sem get_wikipedia_summary= """Get the summary of the related article from Wikipedia.""";
+sem get_wikipedia_summary = """Get the summary of the related article from Wikipedia.""";
 
 def get_answer(question: str) -> str by llm(tools=[get_wikipedia_summary]);
 
+glob question = "Who is Jason Mars?",
+     answer = get_answer(question);
+
 with entry {
-    question = "Who is Jason Mars?";
-    answer = get_answer(question);
     print(answer);
 }

@@ -6,65 +6,65 @@ node Profile {
 
     can update with update_profile entry {
         self.username = visitor.new_username;
-        report self ;
+        report self;
     }
 
     can get with get_profile entry {
         follwers = [
             {"id": jid(i), "username": i.username} for i in [self-->(`?Profile)]
         ];
-        report {"user": self, "followers": follwers} ;
+        report {"user": self, "followers": follwers};
     }
 
     can follow with follow_request entry {
         current_profile = [root-->(`?Profile)];
         current_profile[0] +>: Follow() :+> self;
-        report self ;
+        report self;
     }
 
     can un_follow with un_follow_request entry {
         current_profile = [root-->(`?Profile)];
         follow_edge = [edge current_profile[0]->:Follow:->self];
-        del follow_edge[0] ;
-        report self ;
+        del follow_edge[0];
+        report self;
     }
 }
 
 obj TweetInfo {
-    has username: str;
-    has id: str;
-    has content: str;
-    has embedding: list;
-    has likes: list;
-    has comments: list;
+    has username: str,
+        id: str,
+        content: str,
+        embedding: list,
+        likes: list,
+        comments: list;
 }
 
 node Tweet {
-    has content: str;
-    has embedding: list;
-    has created_at: str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S");
+    has content: str,
+        embedding: list,
+        created_at: str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S");
 
     can update with update_tweet exit {
         self.content = visitor.updated_content;
-        report self ;
+        report self;
     }
 
     can delete with remove_tweet exit {
-        del self ;
+        del self;
         disengage;
     }
 
     can like_tweet with like_tweet entry {
         current_profile = [root-->(`?Profile)];
         self +>: Like() :+> current_profile[0];
-        report self ;
+        report self;
     }
 
     can remove_like with remove_like entry {
         current_profile = [root-->(`?Profile)];
         like_edge = [edge self->:Like:->current_profile[0]];
-        del like_edge[0] ;
-        report self ;
+        del like_edge[0];
+        report self;
     }
 
     can comment with comment_tweet entry {
@@ -74,10 +74,10 @@ node Tweet {
         );
         grant(comment_node[0], level=ConnectPerm);
         self ++> comment_node[0];
-        report comment_node[0] ;
+        report comment_node[0];
     }
 
-    def get_info()  -> TweetInfo {
+    def get_info -> TweetInfo {
         return TweetInfo(
             username=[self<-:Post:<-][0].username,
             id=jid(self),
@@ -105,11 +105,11 @@ node Comment {
 
     can update with update_comment entry {
         self.content = visitor.updated_content;
-        report self ;
+        report self;
     }
 
     can delete with remove_comment entry {
-        del self ;
+        del self;
         disengage;
     }
 }
@@ -144,7 +144,7 @@ walker load_user_profiles {
     }
 
     can report_profiles with exit {
-        report self.profiles ;
+        report self.profiles;
     }
 }
 
@@ -157,7 +157,7 @@ walker create_tweet(visit_profile) {
     can tweet with Profile entry {
         tweet_node = here +>: Post() :+> Tweet(content=self.content, embedding=[]);
         grant(tweet_node[0], level=ConnectPerm);
-        report tweet_node ;
+        report tweet_node;
     }
 }
 
@@ -180,8 +180,8 @@ walker update_comment {
 walker remove_comment {}
 
 walker load_feed(visit_profile) {
-    has search_query: str = "";
-    has results: list = [];
+    has search_query: str = "",
+        results: list = [];
 
     can load with Profile entry {
         visit [-->(`?Tweet)];
@@ -191,7 +191,7 @@ walker load_feed(visit_profile) {
     }
 
     can report_feed with exit {
-        report self.results ;
+        report self.results;
     }
 }
 
@@ -199,6 +199,6 @@ walker load_feed(visit_profile) {
 # ===================================================================
 
 # Main SPA entry point - simplified with reactive routing
-cl def littlex_app()  -> any {
+cl def littlex_app -> any {
     return App();
 }

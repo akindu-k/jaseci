@@ -1,5 +1,19 @@
 # Imports in Jac: Working with Modules and Libraries
 
+> **️ Version Compatibility Warning**
+>
+> **For jac-client < 0.2.4:**
+>
+> - All `def` functions are **automatically exported** - no `:pub` needed
+> - You **cannot export variables** (globals) - only functions can be imported
+> - When importing functions, they don't need to be marked with `:pub` in the source file
+>
+> **For jac-client >= 0.2.4:**
+>
+> - Functions and variables **must be explicitly exported** with `:pub` to be importable
+> - Only functions/variables marked with `:pub` can be imported
+> - This documentation assumes version 0.2.4 or later
+
 Learn how to import third-party libraries, other Jac files, and JavaScript modules in your Jac applications.
 
 ---
@@ -18,12 +32,12 @@ Learn how to import third-party libraries, other Jac files, and JavaScript modul
 
 ## Importing Jac-Client Utilities
 
-Jac-Client provides built-in utilities for authentication, backend communication, and routing through the `@jac-client/utils` package.
+Jac-Client provides built-in utilities for authentication, backend communication, and routing through the `@jac/runtime` package.
 
 ### Available Utilities
 
 ```jac
-cl import from '@jac-client/utils' {
+cl import from '@jac/runtime' {
     jacSpawn,      # Call backend walkers
     jacLogin,        # Login user
     jacSignup,       # Register new user
@@ -42,7 +56,9 @@ The `jacSpawn` function lets you call backend walkers from the frontend:
 
 ```jac
 cl import from react { useState, useEffect }
-cl import from '@jac-client/utils' { jacSpawn }
+cl import from '@jac/runtime' { jacSpawn }
+
+# Note: When using `has` variables, useState is auto-injected
 
 cl {
     def TodoApp() -> any {
@@ -83,16 +99,16 @@ jacSpawn(walker_name: str, node_id: str, params: dict) -> any
 #### `jacLogin` - User Login
 
 ```jac
-cl import from '@jac-client/utils' { jacLogin, navigate }
+cl import from '@jac/runtime' { jacLogin, navigate }
 
 cl {
     def LoginForm() -> any {
         async def handleLogin(e: any) -> None {
             e.preventDefault();
-            email = document.getElementById("email").value;
+            username = document.getElementById("username").value;
             password = document.getElementById("password").value;
 
-            success = await jacLogin(email, password);
+            success = await jacLogin(username, password);
 
             if success {
                 navigate("/dashboard");
@@ -102,7 +118,7 @@ cl {
         }
 
         return <form onSubmit={handleLogin}>
-            <input id="email" type="email" placeholder="Email" />
+            <input id="username" type="text" placeholder="Username" />
             <input id="password" type="password" placeholder="Password" />
             <button type="submit">Login</button>
         </form>;
@@ -113,16 +129,16 @@ cl {
 #### `jacSignup` - User Registration
 
 ```jac
-cl import from '@jac-client/utils' { jacSignup, navigate }
+cl import from '@jac/runtime' { jacSignup, navigate }
 
 cl {
     def SignupForm() -> any {
         async def handleSignup(e: any) -> None {
             e.preventDefault();
-            email = document.getElementById("email").value;
+            username = document.getElementById("username").value;
             password = document.getElementById("password").value;
 
-            result = await jacSignup(email, password);
+            result = await jacSignup(username, password);
 
             if result.success {
                 alert("Account created successfully!");
@@ -133,7 +149,7 @@ cl {
         }
 
         return <form onSubmit={handleSignup}>
-            <input id="email" type="email" placeholder="Email" />
+            <input id="username" type="text" placeholder="Username" />
             <input id="password" type="password" placeholder="Password" />
             <button type="submit">Sign Up</button>
         </form>;
@@ -144,7 +160,7 @@ cl {
 #### `jacLogout` - User Logout
 
 ```jac
-cl import from '@jac-client/utils' { jacLogout, navigate }
+cl import from '@jac/runtime' { jacLogout, navigate }
 
 cl {
     def Header() -> any {
@@ -163,7 +179,7 @@ cl {
 #### `jacIsLoggedIn` - Check Authentication Status
 
 ```jac
-cl import from '@jac-client/utils' { jacIsLoggedIn, navigate }
+cl import from '@jac/runtime' { jacIsLoggedIn, navigate }
 
 cl {
     def ProtectedPage() -> any {
@@ -185,7 +201,7 @@ cl {
 #### `navigate` - Programmatic Navigation
 
 ```jac
-cl import from '@jac-client/utils' { navigate }
+cl import from '@jac/runtime' { navigate }
 
 cl {
     def MyComponent() -> any {
@@ -208,7 +224,7 @@ cl {
 #### `Link` - Declarative Navigation
 
 ```jac
-cl import from '@jac-client/utils' { Link }
+cl import from '@jac/runtime' { Link }
 
 cl {
     def Navigation() -> any {
@@ -224,7 +240,7 @@ cl {
 #### `initRouter` - Initialize Router
 
 ```jac
-cl import from '@jac-client/utils' { initRouter, jacIsLoggedIn }
+cl import from '@jac/runtime' { initRouter, jacIsLoggedIn }
 
 cl {
     def App() -> any {
@@ -262,7 +278,7 @@ cl {
 
 ```jac
 cl import from react { useState }
-cl import from '@jac-client/utils' {
+cl import from '@jac/runtime' {
     jacLogin,
     jacSignup,
     jacLogout,
@@ -272,16 +288,18 @@ cl import from '@jac-client/utils' {
     initRouter
 }
 
+# Note: When using `has` variables, useState is auto-injected
+
 cl {
     def LoginPage() -> any {
         [error, setError] = useState("");
 
         async def handleLogin(e: any) -> None {
             e.preventDefault();
-            email = document.getElementById("email").value;
+            username = document.getElementById("username").value;
             password = document.getElementById("password").value;
 
-            success = await jacLogin(email, password);
+            success = await jacLogin(username, password);
 
             if success {
                 navigate("/dashboard");
@@ -295,9 +313,9 @@ cl {
             {error and <p style={{"color": "red"}}>{error}</p>}
             <form onSubmit={handleLogin}>
                 <input
-                    id="email"
-                    type="email"
-                    placeholder="Email"
+                    id="username"
+                    type="text"
+                    placeholder="Username"
                     style={{"width": "100%", "padding": "10px", "marginBottom": "10px"}}
                 />
                 <input
@@ -355,7 +373,9 @@ cl {
 
 ```jac
 cl import from react { useState, useEffect }
-cl import from '@jac-client/utils' { jacIsLoggedIn, jacSpawn, navigate }
+cl import from '@jac/runtime' { jacIsLoggedIn, jacSpawn, navigate }
+
+# Note: When using `has` variables, useState is auto-injected
 
 cl {
     def ProtectedDashboard() -> any {
@@ -389,7 +409,9 @@ cl {
 
 ```jac
 cl import from react { useState }
-cl import from '@jac-client/utils' { jacSpawn }
+cl import from '@jac/runtime' { jacSpawn }
+
+# Note: When using `has` variables, useState is auto-injected
 
 cl {
     def CreateTodoForm() -> any {
@@ -430,7 +452,7 @@ cl {
 #### Pattern 3: Navigation with Auth Check
 
 ```jac
-cl import from '@jac-client/utils' { Link, jacIsLoggedIn, jacLogout, navigate }
+cl import from '@jac/runtime' { Link, jacIsLoggedIn, jacLogout, navigate }
 
 cl {
     def Navigation() -> any {
@@ -470,8 +492,10 @@ Jac supports importing any npm package that's compatible with ES modules. This i
 Before importing third-party libraries, you need:
 
 1. **Node.js** installed (for npm)
-2. **package.json** in your project root
-3. **Vite** configured in your project (automatically set up with `jac create_jac_app`)
+2. **package.json** in your project root (automatically generated from `jac.toml`)
+3. **Vite** configured in your project (automatically set up with `jac create --use client`)
+
+> **Recommended**: Use `jac add --npm <package>` to add packages. This automatically updates `jac.toml` and regenerates `package.json`.
 
 ### Why Third-Party Libraries?
 
@@ -608,12 +632,14 @@ npm install react
 ```jac
 """Using React hooks in Jac."""
 
-cl import from react { useState, useEffect }
+cl import from react { useEffect }
+
+# Note: useState is auto-injected when using `has` variables
 
 cl {
-    def Counter() -> any {
-        [count, setCount] = useState(0);
+    has count: int = 0;  # Automatically creates React state
 
+    def Counter() -> any {
         useEffect(lambda -> None {
             console.log("Count: ", count);
         }, [count]);
@@ -790,7 +816,7 @@ cl import from .module_name {
 ```jac
 """Button component."""
 
-cl def CustomButton(props: dict) -> any {
+cl def:pub CustomButton(props: dict) -> any {
     return <button
         style={{
             "padding": "10px 20px",
@@ -806,7 +832,7 @@ cl def CustomButton(props: dict) -> any {
     </button>;
 }
 
-cl def PrimaryButton(props: dict) -> any {
+cl def:pub PrimaryButton(props: dict) -> any {
     return <button
         style={{
             "padding": "10px 20px",
@@ -833,7 +859,7 @@ cl import from .button {
     PrimaryButton
 }
 
-cl def App() -> any {
+cl def:pub App() -> any {
     return <div>
         <CustomButton onClick={lambda -> None { console.log("Clicked!"); }}>
             Custom Button
@@ -844,7 +870,7 @@ cl def App() -> any {
     </div>;
 }
 
-cl def jac_app() -> any {
+cl def:pub jac_app() -> any {
     return App();
 }
 ```
@@ -903,7 +929,7 @@ cl import from .utils {
     MessageFormatter
 }
 
-cl def JsImportTest() -> any {
+cl def:pub JsImportTest() -> any {
     greeting = formatMessage("Jac");
     sum = calculateSum(5, 3);
     formatter = MessageFormatter("JS");
@@ -918,7 +944,7 @@ cl def JsImportTest() -> any {
     </div>;
 }
 
-cl def jac_app() -> any {
+cl def:pub jac_app() -> any {
     return JsImportTest();
 }
 ```
@@ -966,7 +992,7 @@ cl def ValidationForm() -> any {
 
     return <form>
         <input
-            type="email"
+            type="text"
             onBlur={lambda e: any -> None {
                 if not emailValidator.validate(e.target.value) {
                     alert("Invalid email");
@@ -1150,5 +1176,9 @@ Type errors with imported functions
 - **Jac Files**: Import with `cl import from .module_name`
 - **JavaScript Files**: Import with `cl import from .filename`
 - **Best Practices**: Organize imports, import only what you need, document exports
+
+## Related Documentation
+
+- [Exporting Functions and Variables](exporting-functions-and-variables.md) - Learn how to export functions and variables for import
 
 Imports in Jac make it easy to use third-party libraries and organize your code!

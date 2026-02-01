@@ -1,9 +1,9 @@
 # basic-full-stack
 
-make sure node modules are installed:
+Make sure packages are installed:
 
 ```bash
-npm install
+bun install
 ```
 
 ## Running Jac Code
@@ -11,7 +11,7 @@ npm install
 To run your Jac code, use the Jac CLI:
 
 ```bash
-jac serve app.jac
+jac start app.jac
 ```
 
 Happy coding with Jac!

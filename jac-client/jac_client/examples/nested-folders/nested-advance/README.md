@@ -64,13 +64,13 @@ cl import from ..ButtonSecondL { ButtonSecondL }
 Make sure node modules are installed:
 
 ```bash
-npm install
+bun install
 ```
 
 To run your Jac code, use the Jac CLI:
 
 ```bash
-jac serve app.jac
+jac start app.jac
 ```
 
 ## Key Concepts

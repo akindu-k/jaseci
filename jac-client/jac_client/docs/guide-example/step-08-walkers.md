@@ -21,7 +21,8 @@ node Todo {
 
 # Backend - We'll add walkers here soon
 
-cl import from react {useState, useEffect}
+# Note: useState is auto-injected, only useEffect needs explicit import
+cl import from react {useEffect}
 
 cl {
     # ... your frontend code
@@ -122,7 +123,8 @@ walker toggle_todo {
 }
 
 # Frontend (keep all your existing code)
-cl import from react {useState, useEffect}
+# Note: useState is auto-injected, only useEffect needs explicit import
+cl import from react {useEffect}
 
 cl {
     # ... all your frontend components
@@ -134,7 +136,7 @@ cl {
 Update your `useEffect` to load todos from the backend:
 
 ```jac
-def app() -> any {
+def:pub app() -> any {
     [todos, setTodos] = useState([]);
     [input, setInput] = useState("");
     [filter, setFilter] = useState("all");
@@ -386,7 +388,7 @@ walker create_todo {
 
 # Frontend (runs in browser)
 cl {
-    def app() -> any {
+    def:pub app() -> any {
         # This code runs in the browser
         result = root spawn create_todo(text="Todo");
     }

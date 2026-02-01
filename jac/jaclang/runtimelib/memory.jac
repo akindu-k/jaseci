@@ -1,277 +1,243 @@
-"""Core constructs for Jac Language."""
-import from __future__ { annotations }
+"""Memory Hierarchy for Jac Language.
+
+This module defines the complete memory hierarchy:
+
+Abstract Interfaces:
+- Memory: Base interface for all memory operations
+- CacheMemory: Extends Memory with ephemeral cache operations (L2)
+- PersistentMemory: Extends Memory with durable storage operations (L3)
+
+Concrete Implementations:
+- VolatileMemory: Simple dict-based, no persistence (L1)
+- LocalCacheMemory: In-process cache with TTL support (L2)
+- SqliteMemory: SQLite-based persistent memory with proper concurrency (L3)
+- TieredMemory: Composes L1 + L2 + L3 with write-through semantics
+
+jac-scale extends this to override L2 (Redis) and L3 (database).
+"""
+
+import logging;
+import sqlite3;
 import from collections.abc { Callable, Generator, Iterable }
-import from dataclasses { dataclass, field }
-import from pickle { dumps }
-import from shelve { Shelf, open }
-import from typing { Any, Generic, TypeVar, cast }
+import from pickle { dumps, loads }
 import from uuid { UUID }
-import from .archetype { TANCH, Anchor, NodeAnchor, Root }
-with entry {
-    ID = TypeVar('ID');
-}
 
-"""Generic Memory Handler."""
-@dataclass
-class Memory(Generic[(ID, TANCH)]) {
-    with entry {
-        __mem__: <>dict[((ID | UUID), TANCH)] = field(default_factory=<>dict);
-        __gc__: <>set[TANCH] = field(default_factory=<>set);
-    }
+import from jaclang.pycore.archetype { Anchor, NodeAnchor, Root }
 
-    """Close memory handler."""
-    def close(self: Memory) -> None {
-        self.__mem__.clear();
-        self.__gc__.clear();
-    }
+glob logger = logging.getLogger(__name__),
+     __all__ = [
+         'Memory',
+         'CacheMemory',
+         'PersistentMemory',
+         'VolatileMemory',
+         'LocalCacheMemory',
+         'SqliteMemory',
+         'TieredMemory'
+     ];
 
-    """Check if id if already cached."""
-    def is_cached(self: Memory, id: ID) -> bool {
-        return (id in self.__mem__);
-    }
+# =============================================================================
+# Abstract Interfaces
+# =============================================================================
+"""Base Memory Interface.
 
-    """Find anchors from memory with filter."""
+All memory implementations (volatile, cache, persistent, tiered) implement this interface.
+This enables ExecutionContext to work with any memory type transparently.
+"""
+obj Memory {
+    """Check if the memory is available and operational."""
+    def is_available -> bool abs;
+
+    """Retrieve an anchor by its UUID."""
+    def get(id: UUID) -> (Anchor | None) abs;
+
+    """Store an anchor."""
+    def put(anchor: Anchor) -> None abs;
+
+    """Remove an anchor by ID."""
+    def delete(id: UUID) -> None abs;
+
+    """Close the memory and release resources."""
+    def close -> None abs;
+
+    """Check if an anchor is currently in memory."""
+    def has(id: UUID) -> bool abs;
+
+    """Query all anchors with optional filter."""
     def query(
-        self: Memory, filter: (Callable[([TANCH], bool)] | None) = None
-    ) -> Generator[TANCH] {
-        return (
-            anchor
-            for anchor in self.__mem__.values()
-            if (not filter or filter(anchor))
-        );
-    }
+        filter: (Callable[[Anchor], bool] | None) = None
+    ) -> Generator[Anchor, None, None] abs;
 
-    """Get all the roots."""
-    def all_root(self: Memory) -> Generator[Root] {
-        for anchor in self.query(
-            lambda  anchor: Any: isinstance(anchor.archetype, Root)
-        ) {
-            yield cast(Root, anchor.archetype);
-            ;
-        }
-    }
+    """Get all root anchors."""
+    def get_roots -> Generator[Root, None, None] abs;
 
-    """Find anchors from memory by ids with filter."""
+    """Find anchors by IDs with optional filter."""
     def find(
-        self: Memory,
-        ids: (ID | Iterable[ID]),
-        filter: (Callable[([TANCH], TANCH)] | None) = None
-    ) -> Generator[TANCH] {
-        if not isinstance(ids, Iterable) {
-            ids = [ids];
-        }
-        return (
-            anchor
-            for id in ids
-            if ((anchor := self.__mem__.get(id)) and (not filter or filter(anchor)))
-        );
-    }
-
-    """Find one anchor from memory by ids with filter."""
-    def find_one(
-        self: Memory,
-        ids: (ID | Iterable[ID]),
-        filter: (Callable[([TANCH], TANCH)] | None) = None
-    ) -> (TANCH | None) {
-        return next(self.find(ids, filter), None);
-    }
-
-    """Find one by id."""
-    def find_by_id(self: Memory, id: ID) -> (TANCH | None) {
-        return self.__mem__.get(id);
-    }
-
-    """Save anchor to memory."""
-    def <>set(self: Memory, data: TANCH) -> None {
-        self.__mem__[data.id] = data;
-    }
-
-    """Remove anchor/s from memory."""
-    def remove(self: Memory, ids: (ID | Iterable[ID])) -> None {
-        if not isinstance(ids, Iterable) {
-            ids = [ids];
-        }
-        for id in ids {
-            if (anchor := self.__mem__.pop(id, None)) {
-                self.__gc__.add(anchor);
-            }
-        }
-    }
-
-    """Commit all data from memory to datasource."""
-    def commit(self: Memory, anchor: (TANCH | None) = None) -> None { }
-
-    """Commit all data from memory to datasource."""
-    def get_gc(self: Memory) -> <>list {
-        return <>list(self.__gc__);
-    }
-
-    """Commit all data from memory to datasource."""
-    def remove_from_gc(self: Memory, anchor: TANCH) -> None {
-        self.__gc__.remove(anchor);
-    }
-
-    """Commit all data from memory to datasource."""
-    def get_mem(self: Memory) -> <>dict {
-        return self.__mem__;
-    }
-
-    """Commit all data from memory to datasource."""
-    def remove_from_mem(self: Memory, anchor: (ID | UUID)) -> None {
-        self.__mem__.pop(anchor);
-    }
-}
-
-"""Shelf Handler."""
-@dataclass
-class ShelfStorage(Memory[(UUID, Anchor)]) {
-    with entry {
-        __shelf__: (Shelf[Anchor] | None) = None;
-    }
-
-    """Initialize memory handler."""
-    def __init__(self: ShelfStorage, session: (str | None) = None) -> None {
-        super.init();
-        self.__shelf__ = open(session) if session else None;
-    }
-
-    """Commit all data from memory to datasource."""
-    def commit(self: ShelfStorage, anchor: (Anchor | None) = None) -> None {
-        if isinstance(self.__shelf__, Shelf) {
-            if anchor {
-                if (anchor in self.__gc__) {
-                    self.__shelf__.pop(str(anchor.id), None);
-                    self.__mem__.pop(anchor.id, None);
-                    self.__gc__.remove(anchor);
-                } else {
-                    self.sync_mem_to_db([anchor.id]);
-                }
-                return;
-            }
-            for anc in self.__gc__ {
-                self.__shelf__.pop(str(anc.id), None);
-                self.__mem__.pop(anc.id, None);
-            }
-            keys = <>set(self.__mem__.keys());
-            self.sync_mem_to_db(keys);
-            self.sync_mem_to_db(<>set((self.__mem__.keys() - keys)));
-        }
-    }
-
-    """Close memory handler."""
-    def close(self: ShelfStorage) -> None {
-        self.commit();
-        if isinstance(self.__shelf__, Shelf) {
-            self.__shelf__.close();
-        }
-        super.close();
-    }
-
-    """Manually sync memory to db."""
-    def sync_mem_to_db(self: ShelfStorage, keys: Iterable[UUID]) -> None {
-        import from jaclang.runtimelib.runtime { JacRuntimeInterface as Jac }
-        if isinstance(self.__shelf__, Shelf) {
-            for key in keys {
-                if (
-                    (d := self.__mem__.get(key))
-                    and d.persistent
-                    and (d.hash != hash(dumps(d)))
-                ) {
-                    _id = str(d.id);
-                    if (p_d := self.__shelf__.get(_id)) {
-                        if (
-                            isinstance(p_d, NodeAnchor)
-                            and isinstance(d, NodeAnchor)
-                            and (p_d.edges != d.edges)
-                            and Jac.check_connect_access(d)
-                        ) {
-                            if (not d.edges and not isinstance(d.archetype, Root)) {
-                                self.__shelf__.pop(_id, None);
-                                continue;
-                            }
-                            p_d.edges = d.edges;
-                        }
-                        if Jac.check_write_access(d) {
-                            if (hash(dumps(p_d.access)) != hash(dumps(d.access))) {
-                                p_d.access = d.access;
-                            }
-                            if (hash(dumps(p_d.archetype)) != hash(dumps(d.archetype))) {
-                                p_d.archetype = d.archetype;
-                            }
-                        }
-                        self.__shelf__[_id] = p_d;
-                    } elif not (
-                        isinstance(d, NodeAnchor)
-                        and not isinstance(d.archetype, Root)
-                        and not d.edges
-                    ) {
-                        self.__shelf__[_id] = d;
-                    }
-                }
-            }
-        }
-    }
-
-    """Find anchors from memory with filter."""
-    def query(
-        self: ShelfStorage, filter: (Callable[([Anchor], bool)] | None) = None
-    ) -> Generator[Any] {
-        if isinstance(self.__shelf__, Shelf) {
-            for anchor in self.__shelf__.values() {
-                if (not filter or filter(anchor)) {
-                    if (anchor.id not in self.__mem__) {
-                        self.__mem__[anchor.id] = anchor;
-                    }
-                    yield anchor;
-                    ;
-                }
-            }
-        } else {
-            yield from super.query(filter);
-            ;
-        }
-    }
-
-    """Find anchors from datasource by ids with filter."""
-    def find(
-        self: ShelfStorage,
         ids: (UUID | Iterable[UUID]),
-        filter: (Callable[([Anchor], Anchor)] | None) = None
-    ) -> Generator[Anchor] {
-        if not isinstance(ids, Iterable) {
-            ids = [ids];
-        }
-        if isinstance(self.__shelf__, Shelf) {
-            for id in ids {
-                anchor = self.__mem__.get(id);
-                if (
-                    not anchor
-                    and (id not in self.__gc__)
-                    and (_anchor := self.__shelf__.get(str(id)))
-                ) {
-                    self.__mem__[id] = anchor=_anchor;
-                }
-                if (anchor and (not filter or filter(anchor))) {
-                    yield anchor;
-                    ;
-                }
-            }
-        } else {
-            yield from super.find(ids, filter);
-            ;
-        }
-    }
+        filter: (Callable[[Anchor], Anchor] | None) = None
+    ) -> Generator[Anchor, None, None] abs;
 
-    """Find one by id."""
-    def find_by_id(self: ShelfStorage, id: UUID) -> (Anchor | None) {
-        data = super.find_by_id(id);
-        if (
-            not data
-            and isinstance(self.__shelf__, Shelf)
-            and (data := self.__shelf__.get(str(id)))
-        ) {
-            self.__mem__[id] = data;
-        }
-        return data;
-    }
+    """Find one anchor by ID(s) with optional filter."""
+    def find_one(
+        ids: (UUID | Iterable[UUID]),
+        filter: (Callable[[Anchor], Anchor] | None) = None
+    ) -> (Anchor | None) abs;
+
+    """Commit/sync pending changes. For write-through this flushes to durable storage."""
+    def commit(anchor: (Anchor | None) = None) -> None abs;
+}
+
+"""Cache Memory Interface.
+
+Extends Memory with operations specific to ephemeral caching.
+Cache backends are expected to be fast but data loss is acceptable.
+Used for L2 (local or distributed cache like Redis) in the tiered hierarchy.
+"""
+obj CacheMemory(Memory) {
+    """Check if a key exists in the cache without loading the value."""
+    def exists(id: UUID) -> bool abs;
+
+    """Store an anchor only if it already exists in the cache."""
+    def put_if_exists(anchor: Anchor) -> bool abs;
+
+    """Invalidate a cache entry by ID."""
+    def invalidate(id: UUID) -> None abs;
+}
+
+"""Persistent Memory Interface.
+
+Extends Memory with operations specific to durable storage.
+Implementations must guarantee data durability after sync().
+"""
+obj PersistentMemory(Memory) {
+    """Flush pending writes to durable storage."""
+    def sync -> None abs;
+
+    """Bulk store multiple anchors efficiently."""
+    def bulk_put(anchors: Iterable[Anchor]) -> None abs;
+}
+
+# =============================================================================
+# Concrete Implementations
+# =============================================================================
+"""Volatile Memory - Simple in-memory storage with no persistence.
+
+This is the L1 tier in a tiered memory hierarchy. All data is lost when
+the process exits. Used as the fast cache layer in TieredMemory.
+"""
+obj VolatileMemory(Memory) {
+    has __mem__: dict[UUID, Anchor] by postinit,
+        __gc__: set[Anchor] by postinit;
+
+    def postinit -> None;
+    def is_available -> bool;
+    def get(id: UUID) -> (Anchor | None);
+    def put(anchor: Anchor) -> None;
+    def delete(id: UUID) -> None;
+    def close -> None;
+    def has(id: UUID) -> bool;
+    def query(
+        filter: (Callable[[Anchor], bool] | None) = None
+    ) -> Generator[Anchor, None, None];
+
+    def get_roots -> Generator[Root, None, None];
+    def find(
+        ids: (UUID | Iterable[UUID]),
+        filter: (Callable[[Anchor], Anchor] | None) = None
+    ) -> Generator[Anchor, None, None];
+
+    def find_one(
+        ids: (UUID | Iterable[UUID]),
+        filter: (Callable[[Anchor], Anchor] | None) = None
+    ) -> (Anchor | None);
+
+    def commit(anchor: (Anchor | None) = None) -> None;
+    # Additional methods for garbage collection tracking
+    def get_gc -> list[Anchor];
+    def remove_from_gc(anchor: Anchor) -> None;
+    def get_mem -> dict[UUID, Anchor];
+}
+
+"""Local Cache Memory - In-process cache implementing CacheMemory interface.
+
+Extends VolatileMemory with cache-specific methods (exists, put_if_exists, invalidate).
+This is the default L2 tier. jac-scale overrides with Redis-based distributed cache.
+"""
+obj LocalCacheMemory(VolatileMemory, CacheMemory) {
+    # CacheMemory interface
+    def exists(id: UUID) -> bool;
+    def put_if_exists(anchor: Anchor) -> bool;
+    def invalidate(id: UUID) -> None;
+}
+
+"""SQLite-based Persistent Memory.
+
+Uses SQLite with WAL mode for concurrent reads and proper transaction support.
+Maintains an in-memory cache for fast reads with write-through to database.
+"""
+obj SqliteMemory(PersistentMemory) {
+    has path: str,
+        __mem__: dict[UUID, Anchor] by postinit,
+        __gc__: set[Anchor] by postinit,
+        __conn__: (sqlite3.Connection | None) by postinit;
+
+    def postinit -> None;
+    # Lazy connection initialization - DB only created when data is written
+    def _ensure_connection -> None;
+    # Memory interface
+    def is_available -> bool;
+    def get(id: UUID) -> (Anchor | None);
+    def put(anchor: Anchor) -> None;
+    def delete(id: UUID) -> None;
+    def close -> None;
+    def has(id: UUID) -> bool;
+    def query(
+        filter: (Callable[[Anchor], bool] | None) = None
+    ) -> Generator[Anchor, None, None];
+
+    def get_roots -> Generator[Root, None, None];
+    def find(
+        ids: (UUID | Iterable[UUID]),
+        filter: (Callable[[Anchor], Anchor] | None) = None
+    ) -> Generator[Anchor, None, None];
+
+    def find_one(
+        ids: (UUID | Iterable[UUID]),
+        filter: (Callable[[Anchor], Anchor] | None) = None
+    ) -> (Anchor | None);
+
+    def commit(anchor: (Anchor | None) = None) -> None;
+    # PersistentMemory interface
+    def sync -> None;
+    def bulk_put(anchors: Iterable[Anchor]) -> None;
+    # Additional methods
+    def get_gc -> list[Anchor];
+    def remove_from_gc(anchor: Anchor) -> None;
+    def get_mem -> dict[UUID, Anchor];
+}
+
+"""Tiered Memory - Extends VolatileMemory with L2 cache + L3 persistent tiers.
+
+This is the main memory abstraction used by ExecutionContext. It provides:
+- Fast reads via inherited L1 (VolatileMemory) with L2/L3 fallback and automatic promotion
+- Write-through to all tiers with access control
+- Configurable tiers (L2 and L3 are optional)
+- Automatic L3 initialization when base_path is provided
+
+TieredMemory IS the L1 tier (inherits __mem__, __gc__ from VolatileMemory).
+jac-scale extends this by providing Redis-based L2 and database L3.
+"""
+obj TieredMemory(VolatileMemory) {
+    has base_path: (str | None) = None,
+        l2: (CacheMemory | None) by postinit,
+        l3: (PersistentMemory | None) by postinit,
+        use_cache: bool = False;
+
+    def postinit -> None;
+    # Override only methods that need tiering logic
+    def get(id: UUID) -> (Anchor | None);
+    def put(anchor: Anchor) -> None;
+    def delete(id: UUID) -> None;
+    def close -> None;
+    def has(id: UUID) -> bool;
+    def commit(anchor: (Anchor | None) = None) -> None;
 }

@@ -1,430 +1,410 @@
 # Custom Configuration
 
-Customize your Jac Client build process through a simple JSON-based configuration system.
+Customize your Jac Client build process through the `jac.toml` configuration file.
 
 ## Overview
 
-The Jac Client uses a **JSON-based configuration system** that allows you to customize the Vite build process, add plugins, and override build options without manually editing generated configuration files. All customizations are made through a `config.json` file in your project root.
+Jac Client uses `jac.toml` (the standard Jac project configuration) to customize the Vite build process, add plugins, and override build options. Client-specific configuration goes under `[plugins.client]`.
 
 ## Quick Start
 
-### Creating the Config File
+### Configuration Location
 
-Use the CLI command to create a default `config.json`:
+Vite configuration is placed under `[plugins.client.vite]` in your `jac.toml`:
 
-```bash
-jac generate_client_config
-```
+```toml
+[project]
+name = "my-app"
+version = "1.0.0"
+entry-point = "main.jac"
 
-This creates a `config.json` file with the proper structure:
+[plugins.client.vite]
+plugins = []
+lib_imports = []
 
-```json
-{
-  "vite": {
-    "plugins": [],
-    "lib_imports": [],
-    "build": {},
-    "server": {},
-    "resolve": {}
-  },
-  "ts": {}
-}
+[plugins.client.vite.build]
+# Build options
+
+[plugins.client.vite.server]
+# Dev server options
 ```
 
 ### Basic Example: Adding Tailwind CSS
 
-```json
-{
-  "vite": {
-    "plugins": [
-      "tailwindcss()"
-    ],
-    "lib_imports": [
-      "import tailwindcss from '@tailwindcss/vite'"
-    ]
-  }
-}
+```toml
+[plugins.client.vite]
+plugins = ["tailwindcss()"]
+lib_imports = ["import tailwindcss from '@tailwindcss/vite'"]
 ```
 
 ## Configuration Structure
 
-### Top-Level Keys
+### Client Plugin Sections
 
-- **`vite`**: Vite-specific configuration (plugins, build options, server, resolve)
-- **`ts`**: TypeScript configuration (reserved for future use)
+- **`[plugins.client.vite]`**: Vite-specific configuration (plugins, build options, server, resolve)
+- **`[plugins.client.ts]`**: TypeScript compiler options for `tsconfig.json`
+- **`[plugins.client.configs]`**: Generic config file generation (postcss, tailwind, eslint, etc.)
+- **`[dependencies.npm]`**: npm runtime dependencies
+- **`[dependencies.npm.dev]`**: npm dev dependencies
+
+> **Note**: For package management, see [Package Management](./package-management.md).
 
 ### Vite Configuration Keys
 
 #### `plugins` (Array of Strings)
 
-Add Vite plugins by providing function calls as strings. These are directly injected into the generated `vite.config.js`.
+Add Vite plugins by providing function calls as strings:
 
-**Format**: Array of plugin function call strings
-
-**Examples**:
-
-```json
-{
-  "vite": {
-    "plugins": [
-      "tailwindcss()",
-      "react()",
-      "myPlugin({ option: 'value' })"
-    ]
-  }
-}
+```toml
+[plugins.client.vite]
+plugins = [
+    "tailwindcss()",
+    "react()",
+    "myPlugin({ option: 'value' })"
+]
 ```
-
-**Note**: Plugin function calls are injected as-is. For complex options, use JavaScript object syntax in the string.
 
 #### `lib_imports` (Array of Strings)
 
-Import statements required for the plugins. These are added to the top of the generated `vite.config.js`.
+Import statements required for the plugins:
 
-**Format**: Array of import statement strings
-
-**Examples**:
-
-```json
-{
-  "vite": {
-    "lib_imports": [
-      "import tailwindcss from '@tailwindcss/vite'",
-      "import react from '@vitejs/plugin-react'",
-      "import myPlugin from 'my-vite-plugin'"
-    ]
-  }
-}
+```toml
+[plugins.client.vite]
+lib_imports = [
+    "import tailwindcss from '@tailwindcss/vite'",
+    "import react from '@vitejs/plugin-react'",
+    "import myPlugin from 'my-vite-plugin'"
+]
 ```
 
-**Note**: Each plugin in `plugins` should have a corresponding import in `lib_imports`.
+#### `[plugins.client.vite.build]`
 
-#### `build` (Object)
+Override Vite build options:
 
-Override Vite build options. This object is merged with the default build configuration.
+```toml
+[plugins.client.vite.build]
+sourcemap = true
+minify = "esbuild"
 
-**Format**: JavaScript object (will be converted to JS in generated config)
+[plugins.client.vite.build.rollupOptions.output]
+# Rollup output options
+```
 
 **Common Options**:
 
-- `sourcemap`: Enable source maps (`true` | `false` | `"inline"` | `"hidden"`)
-- `minify`: Minification method (`"esbuild"` | `"terser"` | `false`)
-- `rollupOptions`: Rollup-specific options
-- `outDir`: Output directory (default: `compiled/dist/assets`)
-- `emptyOutDir`: Clear output directory before build
+- `sourcemap`: Enable source maps (`true`, `false`, `"inline"`, `"hidden"`)
+- `minify`: Minification method (`"esbuild"`, `"terser"`, `false`)
+- `outDir`: Output directory
 
-**Example**:
+#### `[plugins.client.vite.server]`
+
+Configure the Vite development server:
+
+```toml
+[plugins.client.vite.server]
+port = 3000
+open = true
+host = "0.0.0.0"
+cors = true
+```
+
+#### `[plugins.client.vite.resolve]`
+
+Override module resolution options:
+
+```toml
+[plugins.client.vite.resolve.alias]
+"@components" = "./src/components"
+"@utils" = "./src/utils"
+
+[plugins.client.vite.resolve]
+dedupe = ["react", "react-dom"]
+```
+
+**Default aliases** (automatically included):
+
+- `@jac/runtime` → `compiled/client_runtime.js`
+- `@jac-client/assets` → `compiled/assets`
+
+### TypeScript Configuration
+
+#### `[plugins.client.ts]`
+
+Customize the generated `tsconfig.json` by overriding compiler options:
+
+```toml
+[plugins.client.ts.compilerOptions]
+target = "ES2022"
+strict = false
+noUnusedLocals = false
+noUnusedParameters = false
+
+[plugins.client.ts]
+include = ["components/**/*", "lib/**/*"]
+exclude = ["node_modules", "dist", "tests"]
+```
+
+#### How TypeScript Configuration Works
+
+1. **Default tsconfig.json** is generated with sensible defaults
+2. **User overrides** from `[plugins.client.ts]` are merged in
+3. **compilerOptions**: User values override defaults
+4. **include/exclude**: User values replace defaults entirely (if provided)
+5. **Custom tsconfig.json**: If you provide your own `tsconfig.json` file, it's used as-is
+
+#### Default Compiler Options
+
+The following defaults are used (can be overridden):
 
 ```json
 {
-  "vite": {
-    "build": {
-      "sourcemap": true,
-      "minify": "esbuild",
-      "rollupOptions": {
-        "output": {
-          "manualChunks": {
-            "vendor": ["react", "react-dom"]
-          }
-        }
+  "target": "ES2020",
+  "module": "ESNext",
+  "jsx": "react-jsx",
+  "strict": true,
+  "moduleResolution": "bundler",
+  "noUnusedLocals": true,
+  "noUnusedParameters": true
+}
+```
+
+#### Example: Relaxed TypeScript Settings
+
+```toml
+[plugins.client.ts.compilerOptions]
+strict = false
+noUnusedLocals = false
+noUnusedParameters = false
+```
+
+#### Example: Custom Include Paths
+
+```toml
+[plugins.client.ts]
+include = ["components/**/*", "lib/**/*", "types/**/*"]
+```
+
+### Generic Config Files
+
+#### `[plugins.client.configs]`
+
+Generate JavaScript config files for npm packages directly from `jac.toml`. Each key under `[plugins.client.configs]` becomes a `<name>.config.js` file in `.jac/client/configs/`.
+
+This is useful for tools that expect a `*.config.js` file, such as:
+
+- PostCSS (`postcss.config.js`)
+- Tailwind CSS v3 (`tailwind.config.js`)
+- ESLint (`eslint.config.js`)
+- Prettier (`prettier.config.js`)
+- Any npm package using the `*.config.js` convention
+
+#### Example: PostCSS + Tailwind v3
+
+```toml
+[plugins.client.configs.postcss]
+plugins = ["tailwindcss", "autoprefixer"]
+
+[plugins.client.configs.tailwind]
+content = ["./**/*.jac", "./**/*.cl.jac", "./.jac/client/**/*.{js,jsx,ts,tsx}"]
+plugins = []
+
+[plugins.client.configs.tailwind.theme.extend.fontFamily]
+sans = ["Inter", "system-ui", "-apple-system", "sans-serif"]
+
+[plugins.client.configs.tailwind.theme.extend.colors]
+primary = "#3490dc"
+```
+
+This generates:
+
+**`.jac/client/configs/postcss.config.js`**:
+
+```javascript
+module.exports = {
+  "plugins": ["tailwindcss", "autoprefixer"]
+};
+```
+
+**`.jac/client/configs/tailwind.config.js`**:
+
+```javascript
+module.exports = {
+  "content": ["./**/*.jac", "./**/*.cl.jac", "./.jac/client/**/*.{js,jsx,ts,tsx}"],
+  "plugins": [],
+  "theme": {
+    "extend": {
+      "fontFamily": {
+        "sans": ["Inter", "system-ui", "-apple-system", "sans-serif"]
+      },
+      "colors": {
+        "primary": "#3490dc"
       }
     }
   }
-}
+};
 ```
 
-#### `server` (Object)
+#### How It Works
 
-Configure the Vite development server.
+1. TOML config under `[plugins.client.configs.<name>]` is parsed
+2. The config data is converted to JSON format
+3. A `<name>.config.js` file is generated with `module.exports = <json>`
+4. Generated files are placed in `.jac/client/configs/`
 
-**Format**: JavaScript object
+#### When to Use
 
-**Common Options**:
+Use `[plugins.client.configs]` for:
 
-- `port`: Server port (default: `5173`)
-- `open`: Open browser automatically (`true` | `false`)
-- `host`: Server host (`true` | `"0.0.0.0"` | specific host)
-- `cors`: Enable CORS (`true` | `false`)
+- **PostCSS plugins** (Tailwind v3, autoprefixer, etc.)
+- **Tailwind v3** configuration (for projects not using Tailwind v4's native Vite plugin)
+- **Any npm tool** that uses `*.config.js` files
 
-**Example**:
+Use `[plugins.client.vite]` for:
 
-```json
-{
-  "vite": {
-    "server": {
-      "port": 3000,
-      "open": true,
-      "host": "0.0.0.0"
-    }
-  }
-}
+- **Vite plugins** that integrate directly with the Vite build process
+- **Tailwind v4** via `@tailwindcss/vite` plugin
+
+### Response Configuration
+
+#### Configure Custom Headers
+
+Custom headers can be added by using an enviornmental variable and mentioning the custom headers.
+
+```toml
+[environments.response.headers]
+"Cross-Origin-Opener-Policy" = "same-origin"
+"Cross-Origin-Embedder-Policy" = "require-corp"
 ```
-
-#### `resolve` (Object)
-
-Override module resolution options.
-
-**Format**: JavaScript object
-
-**Common Options**:
-
-- `alias`: Path aliases (object mapping aliases to paths)
-- `extensions`: File extensions to resolve (array of strings)
-- `dedupe`: Deduplicate packages (array of package names)
-
-**Example**:
-
-```json
-{
-  "vite": {
-    "resolve": {
-      "alias": {
-        "@components": "./src/components",
-        "@utils": "./src/utils"
-      },
-      "dedupe": ["react", "react-dom"]
-    }
-  }
-}
-```
-
-**Note**: The default configuration already includes:
-
-- `@jac-client/utils` → `compiled/client_runtime.js`
-- `@jac-client/assets` → `compiled/assets`
-- Extensions: `[".mjs", ".js", ".mts", ".ts", ".jsx", ".tsx", ".json"]`
 
 ## How It Works
-
-### Configuration Loading
-
-1. **Default Configuration**: The system starts with default settings that include:
-   - Base Vite configuration
-   - Required aliases (`@jac-client/utils`, `@jac-client/assets`)
-   - TypeScript extensions (if TypeScript is enabled)
-   - React plugin (if TypeScript is enabled)
-
-2. **User Configuration**: Your `config.json` is loaded and merged with defaults using deep merge.
-
-3. **Config Generation**: The merged configuration is used to generate `vite.config.js` in `.jac-client.configs/` directory.
-
-4. **Build Execution**: Vite uses the generated config file for bundling.
 
 ### Configuration Workflow
 
 ```
-1. Developer edits config.json in project root
+1. Developer edits jac.toml
    ↓
-2. Build process loads config.json via JacClientConfig
+2. Build process loads jac.toml via JacClientConfig
    ↓
 3. Config merged with defaults (deep merge)
    ↓
-4. ViteBundler generates vite.config.js in .jac-client.configs/
+4. ViteBundler generates vite.config.js in .jac/client/configs/
    ↓
 5. Vite uses generated config for bundling
    ↓
-6. Generated config is gitignored (config.json is committed)
+6. Generated config is gitignored (jac.toml is committed)
 ```
 
 ### Generated Config Location
 
-The generated `vite.config.js` is created in `.jac-client.configs/vite.config.js`. This directory is automatically added to `.gitignore`, so you don't commit generated files. Only `config.json` should be committed to version control.
+The generated `vite.config.js` is created in `.jac/client/configs/vite.config.js`. The `.jac/` directory is gitignored - only `jac.toml` should be committed.
 
 ## Examples
 
 ### Example 1: Tailwind CSS
 
-```json
-{
-  "vite": {
-    "plugins": [
-      "tailwindcss()"
-    ],
-    "lib_imports": [
-      "import tailwindcss from '@tailwindcss/vite'"
-    ]
-  }
-}
-```
+```toml
+[plugins.client.vite]
+plugins = ["tailwindcss()"]
+lib_imports = ["import tailwindcss from '@tailwindcss/vite'"]
 
-**Required package.json dependencies**:
-
-```json
-{
-  "dependencies": {
-    "@tailwindcss/vite": "^4.1.17",
-    "tailwindcss": "^4.1.17"
-  }
-}
+[dependencies.npm.dev]
+"@tailwindcss/vite" = "^4.1.17"
+tailwindcss = "^4.1.17"
 ```
 
 ### Example 2: Multiple Plugins
 
-```json
-{
-  "vite": {
-    "plugins": [
-      "react()",
-      "tailwindcss()",
-      "myCustomPlugin({ option: 'value' })"
-    ],
-    "lib_imports": [
-      "import react from '@vitejs/plugin-react'",
-      "import tailwindcss from '@tailwindcss/vite'",
-      "import myCustomPlugin from 'my-vite-plugin'"
-    ]
-  }
-}
+```toml
+[plugins.client.vite]
+plugins = [
+    "react()",
+    "tailwindcss()",
+    "myCustomPlugin({ option: 'value' })"
+]
+lib_imports = [
+    "import react from '@vitejs/plugin-react'",
+    "import tailwindcss from '@tailwindcss/vite'",
+    "import myCustomPlugin from 'my-vite-plugin'"
+]
 ```
 
 ### Example 3: Custom Build Options
 
-```json
-{
-  "vite": {
-    "build": {
-      "sourcemap": true,
-      "minify": "esbuild",
-      "rollupOptions": {
-        "output": {
-          "manualChunks": {
-            "react-vendor": ["react", "react-dom"],
-            "router": ["react-router-dom"]
-          }
-        }
-      }
-    }
-  }
-}
+```toml
+[plugins.client.vite.build]
+sourcemap = true
+minify = "esbuild"
+
+[plugins.client.vite.build.rollupOptions.output.manualChunks]
+react-vendor = ["react", "react-dom"]
+router = ["react-router-dom"]
 ```
 
 ### Example 4: Development Server Configuration
 
-```json
-{
-  "vite": {
-    "server": {
-      "port": 3000,
-      "open": true,
-      "host": "0.0.0.0",
-      "cors": true
-    }
-  }
-}
+```toml
+[plugins.client.vite.server]
+port = 3000
+open = true
+host = "0.0.0.0"
+cors = true
 ```
 
 ### Example 5: Custom Path Aliases
 
-```json
-{
-  "vite": {
-    "resolve": {
-      "alias": {
-        "@components": "./src/components",
-        "@utils": "./src/utils",
-        "@styles": "./src/styles"
-      }
-    }
-  }
-}
+```toml
+[plugins.client.vite.resolve.alias]
+"@components" = "./src/components"
+"@utils" = "./src/utils"
+"@styles" = "./src/styles"
 ```
-
-**Note**: When using custom aliases, you'll need to use relative paths in the config since `path.resolve()` is handled in the generated config. The system automatically resolves paths relative to the project root.
 
 ## Best Practices
 
 ### 1. Only Override What You Need
 
-The default configuration handles most use cases. Only add customizations when necessary:
+The default configuration handles most use cases:
 
-```json
-{
-  "vite": {
-    "plugins": [
-      "tailwindcss()"
-    ],
-    "lib_imports": [
-      "import tailwindcss from '@tailwindcss/vite'"
-    ]
-  }
-}
+```toml
+[plugins.client.vite]
+plugins = ["tailwindcss()"]
+lib_imports = ["import tailwindcss from '@tailwindcss/vite'"]
 ```
-
- **Good**: Only adds Tailwind plugin
- **Bad**: Copying entire default config unnecessarily
 
 ### 2. Keep Plugins and Imports in Sync
 
-For each plugin in `plugins`, ensure there's a corresponding import in `lib_imports`:
+For each plugin, ensure there's a corresponding import:
 
-```json
-{
-  "vite": {
-    "plugins": ["myPlugin()"],
-    "lib_imports": ["import myPlugin from 'my-plugin'"]
-  }
-}
+```toml
+[plugins.client.vite]
+plugins = ["myPlugin()"]
+lib_imports = ["import myPlugin from 'my-plugin'"]
 ```
 
-### 3. Use Object Format for Complex Options
+### 3. Version Control
 
-For `build`, `server`, and `resolve`, use object format:
+- **Commit**: `jac.toml` (your customizations)
+- **Don't commit**: `.jac/` (all generated build artifacts)
 
-```json
-{
-  "vite": {
-    "build": {
-      "sourcemap": true
-    }
-  }
-}
-```
+### 4. Test After Changes
 
- **Good**: Object format
- **Bad**: String format for these keys
-
-### 4. Version Control
-
-- **Commit**: `config.json` (your customizations)
-- **Don't commit**: `.jac-client.configs/` (generated files)
-
-The `.gitignore` automatically excludes generated configs.
-
-### 5. Test After Changes
-
-After modifying `config.json`, test your build:
+After modifying `jac.toml`, test your build:
 
 ```bash
-npm run build
+jac start main.jac
 ```
-
-## CLI Command
-
-### Generate Default Config
-
-Create a default `config.json` file:
-
-```bash
-jac generate_client_config
-```
-
-**Behavior**:
-
-- Creates `config.json` if it doesn't exist
-- Fails if `config.json` already exists (prevents overwriting)
-- Provides helpful output with examples
 
 ## Troubleshooting
 
 ### Config Not Applied
 
-**Problem**: Changes to `config.json` aren't reflected in the build.
+**Problem**: Changes aren't reflected in the build.
 
 **Solution**:
 
-- Ensure `config.json` is in the project root
-- Check JSON syntax is valid
-- Verify the build process regenerates the config (it should automatically)
+- Ensure `jac.toml` is in the project root
+- Check TOML syntax is valid
+- The build process should automatically regenerate
 
 ### Plugin Not Working
 
@@ -432,69 +412,23 @@ jac generate_client_config
 
 **Solution**:
 
-- Verify the plugin is installed in `package.json`
+- Verify the plugin is installed: `jac add --npm --dev <plugin-package>`
 - Check that the import statement matches the plugin package name
-- Ensure the plugin function call syntax is correct
-- Check the generated `vite.config.js` in `.jac-client.configs/` to see if it was injected correctly
+- Check the generated `vite.config.js` in `.jac/client/configs/`
 
-### Build Options Not Applied
+### TOML Syntax Errors
 
-**Problem**: Build options in `config.json` aren't being used.
-
-**Solution**:
-
-- Ensure options are in object format (not strings)
-- Check that the option names match Vite's API
-- Verify the generated config in `.jac-client.configs/vite.config.js`
-
-### JSON Syntax Errors
-
-**Problem**: Invalid JSON in `config.json`.
+**Problem**: Invalid TOML syntax.
 
 **Solution**:
 
-- Use a JSON validator
-- Check for trailing commas
-- Ensure all strings are properly quoted
-- Verify object/array brackets are balanced
-
-## Advanced Usage
-
-### Conditional Configuration
-
-You can structure your config to work with different environments by using comments (though JSON doesn't support comments, you can use a build script to process the config):
-
-```json
-{
-  "vite": {
-    "build": {
-      "sourcemap": true
-    },
-    "server": {
-      "port": 3000
-    }
-  }
-}
-```
-
-### Merging with Defaults
-
-The system uses deep merge, so you only need to specify the keys you want to override:
-
-```json
-{
-  "vite": {
-    "build": {
-      "sourcemap": true
-    }
-  }
-}
-```
-
-This merges with defaults, so other build options remain unchanged.
+- Use a TOML validator
+- Strings with special chars need quotes: `"@types/react"`
+- Arrays use `[ ]` notation
 
 ## Related Documentation
 
-- [Architecture Overview](../../../architecture.md) - Detailed system architecture
-- [Tailwind CSS](../styling/tailwind.md) - Example of using config.json for Tailwind
+- [Package Management](./package-management.md) - Manage npm dependencies
+- [Configuration Overview](./configuration-overview.md) - Complete configuration guide
+- [Tailwind CSS](../styling/tailwind.md) - Tailwind CSS setup
 - [Vite Documentation](https://vitejs.dev/config/) - Full Vite configuration reference

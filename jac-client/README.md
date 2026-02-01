@@ -10,7 +10,7 @@ Jac Client enables you to write React-like components, manage state, and build i
 
 - **Single Language**: Write frontend and backend in Jac
 - **No HTTP Client**: Use `jacSpawn()` instead of fetch/axios
-- **React Hooks**: Use standard React `useState` and `useEffect` hooks
+- **React Hooks**: Use standard React `useState` and `useEffect` hooks (useState is auto-injected when using `has` variables)
 - **Component-Based**: Build reusable UI components with JSX
 - **Graph Database**: Built-in graph data model eliminates need for SQL/NoSQL
 - **Type Safety**: Type checking across frontend and backend
@@ -29,12 +29,16 @@ pip install jac-client
 ### Create a New App
 
 ```bash
-jac create_jac_app my-app
+jac create --use client my-app
 cd my-app
-jac serve app.jac
+jac start src/app.jac
 ```
 
-Visit `http://localhost:8000/page/app` to see your app!
+Visit `http://localhost:8000` to see your app! (The `app` component is served at the root by default.)
+
+You can also access the app at `http://localhost:8000/cl/app`.
+
+> **Note**: The `--use client` flag creates a client-side project with an organized folder structure. Without it, `jac create` creates a standard Jac project.
 
 ---
 
@@ -55,11 +59,14 @@ For detailed guides and tutorials, see the **[docs folder](jac_client/docs/)**:
 ### Simple Counter with React Hooks
 
 ```jac
-cl import from react { useState, useEffect }
+# Note: useState is auto-injected when using has variables in cl blocks
+# Only useEffect needs explicit import
+cl import from react { useEffect }
 
 cl {
     def Counter() -> any {
-        let [count, setCount] = useState(0);
+        # useState is automatically available - no import needed!
+        [count, setCount] = useState(0);
 
         useEffect(lambda -> None {
             console.log("Count changed:", count);
@@ -81,11 +88,14 @@ cl {
 }
 ```
 
+> **Note:** When using `has` variables in `cl {}` blocks or `.cl.jac` files, the `useState` import is automatically injected. You only need to explicitly import other hooks like `useEffect`.
+
 ### Full-Stack Todo App
 
 ```jac
-cl import from react { useState, useEffect }
-cl import from '@jac-client/utils' { jacSpawn }
+# useState is auto-injected, only import useEffect
+cl import from react { useEffect }
+cl import from '@jac/runtime' { jacSpawn }
 
 # Backend: Jac nodes and walkers
 node Todo {
@@ -110,7 +120,8 @@ walker read_todos {
 # Frontend: React component
 cl {
     def app() -> any {
-        let [todos, setTodos] = useState([]);
+        # useState is automatically available - no import needed!
+        [todos, setTodos] = useState([]);
 
         useEffect(lambda -> None {
             async def loadTodos() -> None {
@@ -135,7 +146,7 @@ cl {
 ## Requirements
 
 - Python: 3.12+
-- Node.js: For npm and Vite
+- Bun: For package management and Vite bundling ([install](https://bun.sh))
 - Jac Language: `jaclang` (installed automatically)
 
 ---

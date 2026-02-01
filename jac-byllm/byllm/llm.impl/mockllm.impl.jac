@@ -1,11 +1,21 @@
-impl MockLLM.init(model_name: str, **kwargs: object) -> None {
+"""Post-initialization hook for MockLLM.
+
+Configures logging to stdout.
+"""
+impl MockLLM.postinit -> None {
     logger.remove();  # remove default stderr sink
     logger.add(sys.stdout);
-    super.init(model_name, **kwargs);
 }
 
-impl MockLLM.dispatch_no_streaming(mtir: MTIR) -> CompletionResult {
-    params = self.make_model_params(mtir);
+"""Dispatch the mock LLM call without streaming.
+
+Pops the next output from the configured 'outputs' list and returns it.
+Supports both regular outputs and MockToolCall objects.
+"""
+impl MockLLM.dispatch_no_streaming(mt_run: MTRuntime) -> CompletionResult {
+    params = self.make_model_params(mt_run);
+    message = "{'role': 'assistant', 'content': {'text': 'Mock response'}}";
+    mt_run.add_message(message);
     output = self.config["outputs"].pop(0);  # type: ignore
     if isinstance(output, MockToolCall) {
         self.log_info(
@@ -24,9 +34,13 @@ impl MockLLM.dispatch_no_streaming(mtir: MTIR) -> CompletionResult {
     return CompletionResult(output=output, tool_calls=[],);
 }
 
-impl MockLLM.dispatch_streaming(mtir: MTIR) -> Generator[str, None, None] {
+"""Dispatch the mock LLM call with streaming.
+
+Simulates streaming by yielding random-sized chunks with artificial delays.
+"""
+impl MockLLM.dispatch_streaming(mt_run: MTRuntime) -> Generator[str, None, None] {
     output = self.config["outputs"].pop(0);  # type: ignore
-    if mtir.stream {
+    if mt_run.stream {
         while output {
             chunk_len = random.randint(3, 10);
             yield output[:chunk_len];  # Simulate token chunk

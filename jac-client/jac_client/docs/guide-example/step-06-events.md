@@ -13,7 +13,7 @@ In this step, you'll learn how to handle user interactions like clicks, typing, 
 Let's make the input field track what you type:
 
 ```jac
-cl import from react {useState}
+# No useState import needed - it's auto-injected!
 
 cl {
     def TodoInput(props: any) -> any {
@@ -49,7 +49,7 @@ cl {
         </div>;
     }
 
-    def app() -> any {
+    def:pub app() -> any {
         [input, setInput] = useState("");
 
         return <div style={{
@@ -72,7 +72,7 @@ cl {
 Now let's make the "Add" button work:
 
 ```jac
-cl import from react {useState}
+# No useState import needed - it's auto-injected!
 
 cl {
     def TodoInput(props: any) -> any {
@@ -113,7 +113,7 @@ cl {
         </div>;
     }
 
-    def app() -> any {
+    def:pub app() -> any {
         [todos, setTodos] = useState([]);
         [input, setInput] = useState("");
 
@@ -164,7 +164,7 @@ cl {
 Let's add the ability to press Enter to add a todo:
 
 ```jac
-cl import from react {useState}
+# No useState import needed - it's auto-injected!
 
 cl {
     def TodoInput(props: any) -> any {
@@ -221,7 +221,7 @@ cl {
 Let's add the complete functionality:
 
 ```jac
-cl import from react {useState}
+# No useState import needed - it's auto-injected!
 
 cl {
     # ... (keep TodoInput and TodoFilters)
@@ -268,7 +268,7 @@ cl {
         </div>;
     }
 
-    def app() -> any {
+    def:pub app() -> any {
         [todos, setTodos] = useState([]);
         [input, setInput] = useState("");
 
@@ -349,7 +349,7 @@ cl {
 Final step - make the filter buttons work:
 
 ```jac
-cl import from react {useState}
+# No useState import needed - it's auto-injected!
 
 cl {
     def TodoFilters(props: any) -> any {
@@ -406,7 +406,7 @@ cl {
         </div>;
     }
 
-    def app() -> any {
+    def:pub app() -> any {
         [todos, setTodos] = useState([]);
         [input, setInput] = useState("");
         [filter, setFilter] = useState("all");
@@ -539,7 +539,7 @@ This lets children trigger parent behavior!
 ### Updating State in Event Handlers
 
 ```jac
-def app() -> any {
+def:pub app() -> any {
     [count, setCount] = useState(0);
 
     def increment() -> None {

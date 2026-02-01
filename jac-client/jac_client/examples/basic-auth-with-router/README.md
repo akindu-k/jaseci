@@ -25,7 +25,7 @@ A complete authentication example using Jac with React Router for client-side ro
 Install dependencies:
 
 ```bash
-npm install
+bun install
 ```
 
 ## Running the App
@@ -33,7 +33,7 @@ npm install
 Start the development server:
 
 ```bash
-jac serve app.jac
+jac start app.jac
 ```
 
 Then open your browser to `http://localhost:8000`

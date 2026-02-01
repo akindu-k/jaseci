@@ -10,6 +10,8 @@ This document provides a comprehensive checklist of all import patterns needed i
 - ️ **Generates Invalid** - Generates code but produces invalid JavaScript
 - **Proposed** - Design proposed, not yet implemented
 
+> **Note on useState:** When using `has` variables in Jac client code, `useState` is automatically injected. You only need to explicitly import `useState` from React when using the hooks pattern directly (e.g., `[value, setValue] = useState(initial)`).
+
 ---
 
 ## Category 1: JavaScript Module Imports
@@ -18,7 +20,7 @@ This document provides a comprehensive checklist of all import patterns needed i
 
 | JavaScript Pattern | Jac Pattern | Status | Generated JavaScript | Notes |
 |-------------------|-------------|--------|---------------------|-------|
-| `import { useState } from 'react'` | `cl import from react { useState }` |  Working | `import { useState } from "react";` | Single named import |
+| `import { useState } from 'react'` | `cl import from react { useState }` |  Working | `import { useState } from "react";` | Single named import (auto-injected for `has` vars) |
 | `import { map, filter } from 'lodash'` | `cl import from lodash { map, filter }` |  Working | `import { map, filter } from "lodash";` | Multiple named imports |
 | `import { get as httpGet } from 'axios'` | `cl import from axios { get as httpGet }` |  Working | `import { get as httpGet } from "axios";` | Named with alias |
 | `import { createApp, ref as reactive } from 'vue'` | `cl import from vue { createApp, ref as reactive }` |  Working | `import { createApp, ref as reactive } from "vue";` | Mixed named + aliases |
@@ -128,16 +130,16 @@ This document provides a comprehensive checklist of all import patterns needed i
 
 | JavaScript Pattern | Jac Pattern | Status | Generated JavaScript | Notes |
 |-------------------|-------------|--------|---------------------|-------|
-| `const mod = await import('./module')` |  `let mod = await cl.import(".module")` |  Not Implemented | `const mod = await import("./module");` | Async dynamic import |
+| `const mod = await import('./module')` |  `mod = await cl.import(".module")` |  Not Implemented | `const mod = await import("./module");` | Async dynamic import |
 | `import('./lazy').then(m => m.default)` |  `cl.import(".lazy").then((m) => m.default)` |  Not Implemented | `import("./lazy").then(m => m.default);` | Promise-based import |
-| `const { Component } = await import('./Comp')` |  `let { Component } = await cl.import(".Comp")` |  Not Implemented | `const { Component } = await import("./Comp");` | Destructured dynamic import |
+| `const { Component } = await import('./Comp')` |  `{ Component } = await cl.import(".Comp")` |  Not Implemented | `const { Component } = await import("./Comp");` | Destructured dynamic import |
 
 ### 4.2 Conditional Imports
 
 | JavaScript Pattern | Jac Pattern | Status | Generated JavaScript | Notes |
 |-------------------|-------------|--------|---------------------|-------|
 | `if (dev) { await import('./devTools') }` |  `if dev { await cl.import(".devTools") }` |  Not Implemented | `if (dev) { await import("./devTools"); }` | Conditional dynamic import |
-| `const mod = await import(isDev ? './dev' : './prod')` |  `let mod = await cl.import(isDev ? ".dev" : ".prod")` |  Not Implemented | `const mod = await import(isDev ? "./dev" : "./prod");` | Ternary dynamic import |
+| `const mod = await import(isDev ? './dev' : './prod')` |  `mod = await cl.import(isDev ? ".dev" : ".prod")` |  Not Implemented | `const mod = await import(isDev ? "./dev" : "./prod");` | Ternary dynamic import |
 
 ---
 

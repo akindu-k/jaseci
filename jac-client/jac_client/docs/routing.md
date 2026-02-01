@@ -1,5 +1,16 @@
 # Routing in Jac: Building Multi-Page Applications
 
+> **️ Version Compatibility Warning**
+>
+> **For jac-client < 0.2.4:**
+>
+> - All `def` functions are **automatically exported** - no `:pub` needed
+>
+> **For jac-client >= 0.2.4:**
+>
+> - Functions **must be explicitly exported** with `:pub` to be importable
+> - This documentation assumes version 0.2.4 or later
+
 Learn how to create multi-page applications with client-side routing using Jac's declarative routing API.
 
 ---
@@ -30,17 +41,17 @@ Routing allows you to create multi-page applications where different URLs displa
 - **Declarative Syntax**: Define routes using JSX components
 - **URL Parameters**: Dynamic routes with params like `/user/:id`
 - **Browser History**: Back/forward buttons work automatically
-- **Hash-based URLs**: Uses `#/path` for maximum compatibility
+- **Clean URLs**: Uses standard paths like `/about`, `/user/123`
 - **Battle-tested**: Built on industry-standard routing technology
 
 ---
 
 ## Getting Started
 
-Import routing components from `@jac-client/utils`:
+Import routing components from `@jac/runtime`:
 
 ```jac
-cl import from "@jac-client/utils" {
+cl import from "@jac/runtime" {
     Router,
     Routes,
     Route,
@@ -73,8 +84,10 @@ cl import from "@jac-client/utils" {
 ### Simple Three-Page App
 
 ```jac
-cl import from react { useState, useEffect }
-cl import from "@jac-client/utils" { Router, Routes, Route, Link }
+cl import from react { useEffect }
+cl import from "@jac/runtime" { Router, Routes, Route, Link }
+
+# Note: useState is auto-injected when using `has` variables
 
 cl {
     # Page Components
@@ -127,13 +140,13 @@ cl {
 2. **`<Routes>`** contains all your route definitions
 3. **`<Route>`** maps a URL path to an element (note: `element={<Component />}`)
 4. **`<Link>`** creates clickable navigation links
-5. URLs will be hash-based: `#/`, `#/about`, `#/contact`
+5. URLs use clean paths: `/`, `/about`, `/contact`
 
 **Key Points:**
 
 - Use `element={<Home />}` to render components
 - No configuration needed - just wrap and go
-- Hash-based URLs work everywhere
+- Clean URLs with browser history support
 
 ---
 
@@ -151,10 +164,10 @@ The `<Router>` component is the top-level container for your app:
 
 **Features:**
 
-- Hash-based URLs (e.g., `#/about`, `#/contact`)
+- Clean URLs (e.g., `/about`, `/contact`)
 - No props needed - it just works!
 - Manages routing state automatically
-- Works in any environment
+- Server-side catch-all serves the SPA for direct navigation and page refreshes
 
 ### Routes Component
 
@@ -214,7 +227,7 @@ The `<Link>` component creates clickable navigation links:
 ### Basic Navigation
 
 ```jac
-cl import from "@jac-client/utils" { Router, Routes, Route, Link }
+cl import from "@jac/runtime" { Router, Routes, Route, Link }
 
 cl {
     def Navigation() -> any {
@@ -232,7 +245,7 @@ cl {
 ### Active Link Styling with useLocation
 
 ```jac
-cl import from "@jac-client/utils" { Link, useLocation }
+cl import from "@jac/runtime" { Link, useLocation }
 
 cl {
     def Navigation() -> any {
@@ -274,17 +287,17 @@ cl {
 For programmatic navigation (e.g., after form submission), use the `useNavigate()` hook:
 
 ```jac
-cl import from "@jac-client/utils" { useNavigate }
+cl import from "@jac/runtime" { useNavigate }
 
 cl {
     def LoginForm() -> any {
-        [email, setEmail] = useState("");
+        [username, setUsername] = useState("");
         [password, setPassword] = useState("");
         navigate = useNavigate();
 
     async def handleLogin(e: any) -> None {
         e.preventDefault();
-        success = await jacLogin(email, password);
+        success = await jacLogin(username, password);
         if success {
             navigate("/dashboard");  # Navigate after successful login
         } else {
@@ -294,10 +307,10 @@ cl {
 
         return <form onSubmit={handleLogin}>
             <input
-                type="email"
-                value={email}
-                onChange={lambda e: any -> None { setEmail(e.target.value); }}
-                placeholder="Email"
+                type="text"
+                value={username}
+                onChange={lambda e: any -> None { setUsername(e.target.value); }}
+                placeholder="Username"
             />
             <input
                 type="password"
@@ -332,7 +345,7 @@ cl {
 Access dynamic URL parameters using the `useParams()` hook:
 
 ```jac
-cl import from "@jac-client/utils" { useParams, Link }
+cl import from "@jac/runtime" { useParams, Link }
 
 cl {
     def UserProfile() -> any {
@@ -370,7 +383,7 @@ cl {
 Access the current location object using `useLocation()`:
 
 ```jac
-cl import from "@jac-client/utils" { useLocation }
+cl import from "@jac/runtime" { useLocation }
 
 cl {
     def CurrentPath() -> any {
@@ -399,7 +412,7 @@ cl {
 Use the `<Navigate>` component to protect routes that require authentication:
 
 ```jac
-cl import from "@jac-client/utils" { Navigate, useNavigate }
+cl import from "@jac/runtime" { Navigate, useNavigate }
 
 cl {
     def Dashboard() -> any {
@@ -420,9 +433,9 @@ cl {
 
         async def handleLogin(e: any) -> None {
             e.preventDefault();
-            email = document.getElementById("email").value;
+            username = document.getElementById("username").value;
             password = document.getElementById("password").value;
-            success = await jacLogin(email, password);
+            success = await jacLogin(username, password);
             if success {
                 navigate("/dashboard");
             }
@@ -430,7 +443,7 @@ cl {
 
         return <form onSubmit={handleLogin}>
             <h2>Login</h2>
-            <input id="email" type="email" placeholder="Email" />
+            <input id="username" type="text" placeholder="Username" />
             <input id="password" type="password" placeholder="Password" />
             <button type="submit">Login</button>
         </form>;
@@ -462,8 +475,10 @@ cl {
 ### Example 1: Simple Multi-Page App
 
 ```jac
-cl import from react { useState, useEffect }
-cl import from "@jac-client/utils" { Router, Routes, Route, Link, useLocation }
+cl import from react { useEffect }
+cl import from "@jac/runtime" { Router, Routes, Route, Link, useLocation }
+
+# Note: useState is auto-injected when using `has` variables
 
 cl {
     def Navigation() -> any {
@@ -529,7 +544,7 @@ cl {
 ### Example 2: App with URL Parameters
 
 ```jac
-cl import from "@jac-client/utils" { Router, Routes, Route, Link, useParams }
+cl import from "@jac/runtime" { Router, Routes, Route, Link, useParams }
 
 cl {
     def UserList() -> any {
@@ -584,7 +599,7 @@ cl {
 ### 2. **Import All Needed Components**
 
 ```jac
-cl import from "@jac-client/utils" {
+cl import from "@jac/runtime" {
     Router,
     Routes,
     Route,
@@ -671,7 +686,7 @@ def Navigation() -> any {
 ## Summary
 
 - **Simple & Declarative**: Use `<Router>`, `<Routes>`, `<Route>` components
-- **Hash-based URLs**: Uses `#/path` for maximum compatibility
+- **Clean URLs**: Uses standard paths like `/about`, `/user/123`
 - **Modern Hooks**: `useNavigate()`, `useLocation()`, `useParams()`
 - **Protected Routes**: Use `<Navigate>` component for redirects
 - **URL Parameters**: Dynamic routes with `:param` syntax
@@ -679,3 +694,11 @@ def Navigation() -> any {
 - **Production-ready**: Battle-tested routing for real applications
 
 Routing in Jac is simple, powerful, and production-ready!
+
+> **Note for static deployments**: When deploying a Jac app as a static site (via `jac build --target web`), your hosting provider must be configured to serve `index.html` for all paths (SPA fallback). For example:
+>
+> - **Netlify**: Add a `_redirects` file with `/* /index.html 200`
+> - **Vercel**: Add a `rewrites` rule in `vercel.json`
+> - **Nginx**: Use `try_files $uri /index.html`
+>
+> When using `jac start`, the server handles this automatically.

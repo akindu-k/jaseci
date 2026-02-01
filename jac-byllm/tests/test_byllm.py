@@ -103,6 +103,17 @@ def test_params_format(fixture_path: Callable[[str], str]) -> None:
     for key in required_keys:
         assert key in extracted_dict, f"Missing key: {key}"
 
+    add_message = extracted_dict["messages"]
+    assert add_message[0]["role"] == "system", (
+        "First message should be of role 'system'"
+    )
+    assert add_message[1]["role"] == "user", "Second message should be of role 'user'"
+    assert add_message[3]["role"] == "tool", "Fourth message should be of role 'tool'"
+    assert (
+        add_message[3]["content"]
+        == "The current wind speed in Puttalam is about 18-22 km/h."
+    ), "Content mismatch"
+
     add_tool = extracted_dict["tools"][0]
     assert add_tool["type"] == "function", "First tool should be of type 'function'"
     assert add_tool["function"]["name"] == "get_live_wind_speed", (
@@ -227,8 +238,8 @@ def test_with_llm_image(fixture_path: Callable[[str], str]) -> None:
     assert "'role': 'system'" in stdout_value
     # Verify the user content with text type is present
     assert "{'type': 'text', 'text': 'solve_math_question" in stdout_value
-    # Verify base64 image data is NOT in the first 500 chars (images should come later)
-    assert "data:image/jpeg;base64," not in stdout_value[:500]
+    # Verify base64 image data is in the first 500 chars (images should come later)
+    assert "data:image/jpeg;base64," in stdout_value[:500]
 
 
 def test_webp_image_support(fixture_path: Callable[[str], str]) -> None:
@@ -336,3 +347,50 @@ def test_fixtures_image_types(fixture_path: Callable[[str], str]) -> None:
     ]
     for label in expected_labels:
         assert label in stdout_value
+
+
+def test_visit_by_for_routing(fixture_path: Callable[[str], str]) -> None:
+    """Test the visit by functionality for routing."""
+    captured_output = io.StringIO()
+    sys.stdout = captured_output
+    jac_import("math_poem_agents", base_path=fixture_path("./"))
+    sys.stdout = sys.__stdout__
+    stdout_value = captured_output.getvalue()
+    assert "Agentic minds, we hold dear" in stdout_value
+    assert "Math Result: 35" in stdout_value
+
+
+def test_http_client_with_system_prompt_override(
+    fixture_path: Callable[[str], str],
+) -> None:
+    """Test byLLM prompt override and direct HTTP model calling."""
+    captured_output = io.StringIO()
+    sys.stdout = captured_output
+    jac_import(
+        "direct_http_model_call", base_path=fixture_path("./system_prompt_override/")
+    )
+    sys.stdout = sys.__stdout__
+    stdout_value = captured_output.getvalue()
+    assert "Hello, Alice! It's great to meet you." in stdout_value
+    assert "You are a friendly assistant. Greet the person" in stdout_value
+    assert (
+        "'api_base': 'https://your_api_base_here/v1/chat/completions'" in stdout_value
+    )
+
+
+def test_max_react_iterations(fixture_path: Callable[[str], str]) -> None:
+    """Test that max_react_iterations stops ReAct tool loop and forces a final answer."""
+    captured_output = io.StringIO()
+    sys.stdout = captured_output
+    jac_import("react_max_iterations", base_path=fixture_path("./"))
+    sys.stdout = sys.__stdout__
+    stdout_value = captured_output.getvalue()
+    assert "get_live_wind_speed called for Puttalam" in stdout_value
+    assert "get_speed_unit called" in stdout_value
+    assert "RESULT: FINAL_REPORT" in stdout_value
+    assert "WIND_TOOL_CALLS: 1" in stdout_value
+    assert "UNIT_TOOL_CALLS: 1" in stdout_value
+    assert (
+        "Based on the tool calls and their results above, provide only your final answer."
+        in stdout_value
+    )

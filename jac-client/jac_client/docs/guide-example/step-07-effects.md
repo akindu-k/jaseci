@@ -19,27 +19,30 @@ We'll use `useEffect` to handle this!
 
 ### Step 7.2: Add useEffect Import
 
-First, import `useEffect`:
+First, import `useEffect` (note: `useState` is auto-injected when using `has` variables, so you only need to import `useEffect`):
 
 ```jac
-cl import from react {useState, useEffect}
+cl import from react {useEffect}
 
 cl {
     # ... your components
+    # useState is automatically available - no import needed!
 }
 ```
+
+> **Note:** The `useState` import is automatically injected when you use `has` variables in `cl {}` blocks or `.cl.jac` files. You only need to explicitly import other hooks like `useEffect`.
 
 ### Step 7.3: Run Code When App Loads
 
 Let's log a message when the app starts:
 
 ```jac
-cl import from react {useState, useEffect}
+cl import from react {useEffect}
 
 cl {
     # ... (keep all your components from step 6)
 
-    def app() -> any {
+    def:pub app() -> any {
         [todos, setTodos] = useState([]);
         [input, setInput] = useState("");
         [filter, setFilter] = useState("all");
@@ -61,12 +64,12 @@ cl {
 Let's persist todos using localStorage:
 
 ```jac
-cl import from react {useState, useEffect}
+cl import from react {useEffect}
 
 cl {
     # ... (keep all components)
 
-    def app() -> any {
+    def:pub app() -> any {
         [todos, setTodos] = useState([]);
         [input, setInput] = useState("");
         [filter, setFilter] = useState("all");
@@ -99,12 +102,12 @@ cl {
 Let's add a loading indicator:
 
 ```jac
-cl import from react {useState, useEffect}
+cl import from react {useEffect}
 
 cl {
     # ... (keep all components)
 
-    def app() -> any {
+    def:pub app() -> any {
         [todos, setTodos] = useState([]);
         [input, setInput] = useState("");
         [filter, setFilter] = useState("all");
@@ -182,7 +185,7 @@ class TodoApp:
         self.load_from_database()  # Side effect: reads from DB
 
 # Jac
-def app() -> any {
+def:pub app() -> any {
     useEffect(lambda -> None {
         # Load data
     }, []);
@@ -233,7 +236,7 @@ useEffect(lambda -> None {
 You can use multiple `useEffect` hooks for different purposes:
 
 ```jac
-def app() -> any {
+def:pub app() -> any {
     [todos, setTodos] = useState([]);
 
     # Effect 1: Load data once

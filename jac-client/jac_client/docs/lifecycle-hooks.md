@@ -46,6 +46,8 @@ Lifecycle hooks are functions that let you run code at specific points in a comp
 
 The `useState` hook lets you add state to your components.
 
+> **Note:** When using `has` variables in Jac, `useState` is automatically injected. You only need to explicitly import `useState` when using the React hooks pattern directly.
+
 #### Basic Usage
 
 ```jac
@@ -187,7 +189,7 @@ The most common use case is loading data when a component mounts:
 
 ```jac
 cl import from react { useState, useEffect }
-cl import from '@jac-client/utils' { jacSpawn }
+cl import from '@jac/runtime' { jacSpawn }
 
 cl {
     def TodoApp() -> any {
@@ -263,7 +265,7 @@ Load user-specific data when a component mounts:
 
 ```jac
 cl import from react { useState, useEffect }
-cl import from '@jac-client/utils' { jacSpawn }
+cl import from '@jac/runtime' { jacSpawn }
 
 cl {
     def ProfileView() -> any {
@@ -295,7 +297,7 @@ cl {
 
         return <div>
             <h1>{profile.username}</h1>
-            <p>{profile.email}</p>
+            <p>{profile.bio}</p>
         </div>;
     }
 }
@@ -363,7 +365,7 @@ cl {
 
 ```jac
 cl import from react { useState, useEffect }
-cl import from '@jac-client/utils' { jacSpawn }
+cl import from '@jac/runtime' { jacSpawn }
 
 cl {
     def app() -> any {
@@ -477,7 +479,7 @@ cl {
 
 ```jac
 cl import from react { useState, useEffect }
-cl import from '@jac-client/utils' { jacSpawn }
+cl import from '@jac/runtime' { jacSpawn }
 
 cl {
     def Dashboard() -> any {

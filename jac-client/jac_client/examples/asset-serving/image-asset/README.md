@@ -26,19 +26,19 @@ image-asset/
 1. Make sure node modules are installed:
 
 ```bash
-npm install
+bun install
 ```
 
 1. Run the Jac server:
 
 ```bash
-jac serve app.jac
+jac start app.jac
 ```
 
 1. Open your browser and navigate to:
 
 ```
-http://localhost:8000/page/app
+http://localhost:8000/cl/app
 ```
 
 ## How It Works
@@ -90,7 +90,7 @@ Both directories are checked when serving `/static/*` requests.
 **Dynamic Asset Paths:**
 
 ```jac
-let imagePath = `/static/assets/${imageName}.png`;
+imagePath = `/static/assets/${imageName}.png`;
 <img src={imagePath} />
 ```
 

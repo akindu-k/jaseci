@@ -2,7 +2,7 @@
 
 ## Overview
 
-`jac scale` is a comprehensive deployment and scaling solution for JAC applications that provides three powerful capabilities:
+`jac start --scale` is a comprehensive deployment and scaling solution for JAC applications that provides three powerful capabilities:
 
 ### 1. Multi-Layer Memory Architecture
 
@@ -23,15 +23,22 @@
 - **Database Auto-Provisioning**: Automatically spawns and configures Redis and MongoDB instances
 - **Production-Ready**: Built-in health checks, persistent storage, and service discovery
 
-Whether you're developing locally with `jac serve` or deploying to production with `jac scale`, you get the same powerful features with the flexibility to choose your deployment strategy.
+Whether you're developing locally with `jac start` or deploying to production with `jac start --scale`, you get the same powerful features with the flexibility to choose your deployment strategy.
+
+### 4. Single Sign-On (SSO) Support
+
+- **Google SSO**: Built-in support for Google Sign-In out of the box
+- **Extensible Architecture**: Easily add other providers (GitHub, Microsoft, etc.)
+- **Secure Authentication**: Integrated with JWT for secure session management
+- **User Management**: Automatic account creation and linking
 
 ## Prerequisites
 
-- kubenetes(K8) installed
+- kubenetes(K8s) installed
   - [Minikube Kubernetes](https://minikube.sigs.k8s.io/docs/start/?arch=%2Fwindows%2Fx86-64%2Fstable%2F.exe+download/) (for Windows/Linux)
   - [Docker Desktop with Kubernetes](https://www.docker.com/resources/kubernetes-and-docker/) (alternative for Windows - easier setup)
 
-**Note:** Kubernetes is only needed if you are planning to use the `jac scale` command. If you only want to use `jac serve`, Kubernetes is not required.
+**Note:** Kubernetes is only needed if you are planning to use `jac start --scale`. If you only want to use `jac start`, Kubernetes is not required.
 
 ## Quick Start: Running the Travel Planner Demo Application
 
@@ -43,8 +50,8 @@ First, clone the main Jaseci repository which contains JAC and JAC-Scale:
 
 ```bash
 git clone https://github.com/jaseci-labs/jaseci.git
-git submodule update --init --recursive
 cd jaseci
+git submodule update --init --recursive
 ```
 
 ### 2. Create Python Virtual Environment
@@ -156,12 +163,12 @@ OPENAI_API_KEY=your-openai-api-key-here
 pip install byllm python-dotenv
 ```
 
-### 8. Run the Application with JAC Serve
+### 8. Run the Application with JAC Start
 
 To run your application using FastAPI with ShelfStorage (no Kubernetes required):
 
 ```bash
-jac serve main.jac
+jac start main.jac
 ```
 
 **What this does:**
@@ -178,11 +185,11 @@ jac serve main.jac
 
 ### 9. Set Up Kubernetes (For JAC Scale)
 
-To use `jac scale`, you need Kubernetes installed on your machine.
+To use `jac start --scale`, you need Kubernetes installed on your machine.
 
-**Option A: MicroK8 (Windows/Linux/Mac)**
+**Option A: MicroK8s (Windows/Linux/Mac)**
 
-- [Official MicroK8 installation guide](https://microk8s.io/)
+- [Official MicroK8s installation guide](https://microk8s.io/)
 - [ubunutu installation guide](https://www.digitalocean.com/community/tutorials/how-to-setup-a-microk8s-kubernetes-cluster-on-ubuntu-22-04)
 
 **Option B: Docker Desktop with Kubernetes (Windows - Recommended)**
@@ -199,7 +206,7 @@ Once Kubernetes is running, you have two deployment methods:
 Deploy your application to Kubernetes without building a Docker image:
 
 ```bash
-jac scale main.jac
+jac start main.jac --scale
 ```
 
 **What this does:**
@@ -238,7 +245,7 @@ DOCKER_PASSWORD=your-dockerhub-password-or-token
 **Deploy with build:**
 
 ```bash
-jac scale main.jac -b
+jac start main.jac --scale --build
 ```
 
 **What this does:**
@@ -284,8 +291,8 @@ First, clone the main Jaseci repository which contains JAC and JAC-Scale:
 
 ```bash
 git clone https://github.com/jaseci-labs/jaseci.git
-git submodule update --init --recursive
 cd jaseci
+git submodule update --init --recursive
 ```
 
 ### 2. Create Python Virtual Environment
@@ -333,26 +340,26 @@ cp jac-scale/examples/todo/app.jac todo/app.jac
 cd todo
 ```
 
-### 8. Run the Application with JAC Scale
+### 8. Run the Application Locally
 
 To run your application run the following command
 
 ```bash
-jac serve app.jac
+jac start app.jac
 ```
 
 **Access your application:**
 
-- Frontend: http://localhost:8000/page/app
+- Frontend: http://localhost:8000/cl/app
 - Backend: http://localhost:8000
 - Swagger Documentation: http://localhost:8000/docs
 
 you can add new todo tasks
- from the frontend at http://localhost:8000/page/app
+ from the frontend at http://localhost:8000/cl/app
 
 ### 9. Set Up Kubernetes (For JAC Scale)
 
-To use `jac scale`, you need Kubernetes installed on your machine.
+To use `jac start --scale`, you need Kubernetes installed on your machine.
 
 **Option A: MicroK8 (Windows/Linux/Mac)**
 
@@ -373,12 +380,12 @@ Once Kubernetes is running, you have two deployment methods:
 Deploy your application to Kubernetes without building a Docker image:
 
 ```bash
-jac scale app.jac
+jac start app.jac --scale
 ```
 
 **Access your application:**
 
-- Frontend: http://localhost:30001/page/app
+- Frontend: http://localhost:30001/cl/app
 - Backend: http://localhost:30001
 - Swagger Documentation: http://localhost:30001/docs
 
@@ -393,12 +400,12 @@ jac scale app.jac
 To Build your application as a Docker container and deploy it you can run
 
 ```bash
-jac scale app.jac -b
+jac start app.jac --scale --build
 ```
 
 **Access your application:**
 
-- Frontend: http://localhost:30001/page/app
+- Frontend: http://localhost:30001/cl/app
 - Backend: http://localhost:30001
 - Swagger Documentation: http://localhost:30001/docs
 
@@ -423,6 +430,24 @@ jac destroy app.jac
 - Removes persistent volumes and claims
 - Cleans up the namespace (if custom namespace was used)
 
+## Async Walkers
+
+JAC Scale supports async walkers for non-blocking operations like external API calls, database queries, and file I/O.
+
+```
+import asyncio;
+
+async walker FetchData {
+    has url: str;
+
+    async can fetch with `root entry {
+        report {"status": "fetching"};
+        await asyncio.sleep(0.1);  # Simulate API call
+        report {"status": "completed", "data": "result"};
+    }
+}
+```
+
 ## Configuration Options
 
 ### Optional Environment Variables
@@ -432,12 +457,27 @@ jac destroy app.jac
 | `APP_NAME` | Name of your JAC application | `jaseci` |
 | `DOCKER_USERNAME` | DockerHub username for pushing the image | - |
 | `DOCKER_PASSWORD` | DockerHub password or access token | - |
-| `K8_NAMESPACE` | Kubernetes namespace to deploy the application | `default` |
-| `K8_NODE_PORT` | Port in which your local kubernetes application will run on| `30001` |
-| `K8_MONGODB` | Whether MongoDB is needed (`True`/`False`) | `True` |
-| `K8_REDIS` | Whether Redis is needed (`True`/`False`) | `True` |
+| `K8s_NAMESPACE` | Kubernetes namespace to deploy the application | `default` |
+| `K8s_NODE_PORT` | Port in which your local kubernetes application will run on| `30001` |
+| `K8s_CPU_REQUEST` | CPU request for the application container | - |
+| `K8s_CPU_LIMIT` | CPU limit for the application container | - |
+| `K8s_MEMORY_REQUEST` | Memory request for the application container | - |
+| `K8s_MEMORY_LIMIT` | Memory limit for the application container | - |
+| `K8s_READINESS_INITIAL_DELAY` | Seconds before readiness probe first checks the pod | `10` |
+| `K8s_READINESS_PERIOD` | Seconds between readiness probe checks | `20` |
+| `K8s_LIVENESS_INITIAL_DELAY` | Seconds before liveness probe first checks the pod | `10` |
+| `K8s_LIVENESS_PERIOD` | Seconds between liveness probe checks | `20` |
+| `K8s_LIVENESS_FAILURE_THRESHOLD` | Consecutive liveness probe failures before restart | `80` |
+| `K8s_MONGODB` | Whether MongoDB is needed (`True`/`False`) | `True` |
+| `K8s_REDIS` | Whether Redis is needed (`True`/`False`) | `True` |
 | `MONGODB_URI` | URL of MongoDB database | - |
 | `REDIS_URL` | URL of Redis database | - |
+| `JWT_EXP_DELTA_DAYS` | Number of days until JWT token expires | `7` |
+| `JWT_SECRET` | Secret key used for JWT token signing and verification | `'supersecretkey_for_testing_only!'` |
+| `JWT_ALGORITHM` | Algorithm used for JWT token encoding/decoding | `'HS256'` |
+| `SSO_HOST` | SSO host URL | `'http://localhost:8000/sso'` |
+| `SSO_GOOGLE_CLIENT_ID` | Google OAuth client ID | - |
+| `SSO_GOOGLE_CLIENT_SECRET` | Google OAuth client secret | - |
 
 ## Deployment Modes
 
@@ -446,7 +486,7 @@ jac destroy app.jac
 Deploys your JAC application to Kubernetes without building a Docker image.
 
 ```bash
-jac scale main.jac
+jac start main.jac --scale
 ```
 
 **Use this when:**
@@ -460,7 +500,7 @@ jac scale main.jac
 Builds a new Docker image, pushes it to DockerHub, then deploys to Kubernetes.
 
 ```bash
-jac scale main.jac -b
+jac start main.jac --scale --build
 ```
 
 **Requirements for Build Mode:**
@@ -480,14 +520,14 @@ jac scale main.jac -b
 
 ### Implementation
 
-- The entire `jac scale` plugin is implemented using **Python and Kubernetes Python client libraries**
+- The jac-scale plugin is implemented using **Python and Kubernetes Python client libraries**
 - **No custom Kubernetes controllers** are used → easier to deploy and maintain
 
 ### Database Provisioning
 
 - Databases are created as **StatefulSets** with persistent storage
 - Databases are **only created on the first run**
-- Subsequent `jac scale` calls only update application deployments
+- Subsequent `jac start --scale` calls only update application deployments
 - This ensures persistent storage and avoids recreating databases unnecessarily
 
 ### Performance
@@ -499,7 +539,7 @@ jac scale main.jac -b
 
 ## Deployment Process
 
-When you run `jac scale`, the following steps are executed:
+When you run `jac start --scale`, the following steps are executed:
 
 ### 1. Create JAC Application Docker Image
 
@@ -521,9 +561,9 @@ When you run `jac scale`, the following steps are executed:
 
 ## Architecture
 
-### k8 pods structure
+### K8s pods structure
 
-![k8 pod structure](assets/jac-scale-architecture.svg)
+![K8s pod structure](assets/jac-scale-architecture.svg)
 
 ## Troubleshooting
 
@@ -594,14 +634,14 @@ You can find more working examples in the examples directory:
 - [asset-serving/import-alias](../jac-client/jac_client/examples/asset-serving/import-alias/) - Import alias example
 <!-- - [little-x](../jac-client/jac_client/examples/little-x/) - Little X application example -->
 
-Each example includes complete source code and can be run `jac serve`.
+Each example includes complete source code and can be run with `jac start`.
 
 ## Next Steps
 
 After successfully running the demo:
 
-- **For JAC Serve**: Access your application at http://localhost:8000 and explore the Swagger documentation at http://localhost:8000/docs
-- **For JAC Scale**: Access your application at http://localhost:30001 and explore the Swagger documentation at http://localhost:30001/docs
+- **For local development (`jac start`)**: Access your application at http://localhost:8000 and explore the Swagger documentation at http://localhost:8000/docs
+- **For Kubernetes (`jac start --scale`)**: Access your application at http://localhost:30001 and explore the Swagger documentation at http://localhost:30001/docs
 - Modify the JAC application and redeploy
 - Experiment with different configuration options
 - Try deploying to a production Kubernetes cluster

@@ -4,13 +4,13 @@ import time;
 glob llm = Model(model_name="gpt-4o");
 
 node Task {
-    has task: str = "";
-    has date: str = "";
-    has time: str = "";
+    has task: str = "",
+        date: str = "",
+        time: str = "";
 }
 
 node TaskHandling {
-    def get_current_time()  -> str {
+    def get_current_time -> str {
         return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime());
     }
 
@@ -38,7 +38,7 @@ node TaskHandling {
             "utterance": visitor.cur_task.task,
             "response": response,
             "node_type": self.__class__.__name__
-        } ;
+        };
     }
 }
 
@@ -56,7 +56,7 @@ node EmailHandling {
             "utterance": visitor.cur_task.task,
             "response": response,
             "node_type": self.__class__.__name__
-        } ;
+        };
     }
 }
 
@@ -70,28 +70,28 @@ node GeneralChat {
             "utterance": visitor.cur_task.task,
             "response": response,
             "node_type": self.__class__.__name__
-        } ;
+        };
     }
 }
 
 enum RoutingNodes { TASK_HANDLING, EMAIL_HANDLING, GENERAL_CHAT }
 
-sem RoutingNodes. TASK_HANDLING= "Creating/deleting/updating/summarizing tasks to TODO";
-sem RoutingNodes. EMAIL_HANDLING= "EmailHandling node for composing and managing emails";
-sem RoutingNodes. GENERAL_CHAT= "Get intelligent answers, productivity advice, and general AI assistance across various topics.";
+sem RoutingNodes.TASK_HANDLING = "Creating/deleting/updating/summarizing tasks to TODO";
+sem RoutingNodes.EMAIL_HANDLING = "EmailHandling node for composing and managing emails";
+sem RoutingNodes.GENERAL_CHAT = "Get intelligent answers, productivity advice, and general AI assistance across various topics.";
 
 obj TaskPartition {
-    has task: str;
-    has agent_type: RoutingNodes;
+    has task: str,
+        agent_type: RoutingNodes;
 }
 
-sem TaskPartition= "Distinct Tasks within Main Task (Can be the main task itself)";
-sem TaskPartition. task= "Description of the Task to be performed";
-sem TaskPartition. agent_type= "Type of the agent that should handle this Task";
+sem TaskPartition = "Distinct Tasks within Main Task (Can be the main task itself)";
+sem TaskPartition.task = "Description of the Task to be performed";
+sem TaskPartition.agent_type = "Type of the agent that should handle this Task";
 
 walker task_manager {
-    has utterance: str = "";
-    has cur_task: TaskPartition = None;
+    has utterance: str = "",
+        cur_task: TaskPartition = None;
 
     def route_to_node(utterance: str) -> RoutingNodes by llm();
     def plan_tasks(main_task: str) -> list[TaskPartition] by llm();

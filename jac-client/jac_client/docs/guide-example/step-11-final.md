@@ -18,7 +18,7 @@ cl import from react {
     useState,
     useEffect
 }
-cl import from "@jac-client/utils" {
+cl import from "@jac/runtime" {
     Router,
     Routes,
     Route,
@@ -153,7 +153,7 @@ cl {
 
     # Login Page
     def LoginPage()  -> any {
-        [email, setEmail] = useState("");
+        [username, setUsername] = useState("");
         [password, setPassword] = useState("");
         [error, setError] = useState("");
         navigate = useNavigate();
@@ -161,11 +161,11 @@ cl {
         async def handleLogin(e: any) -> None {
             e.preventDefault();
             setError("");
-            if not email or not password {
+            if not username or not password {
                 setError("Please fill in all fields");
                 return;
             }
-            success = await jacLogin(email, password);
+            success = await jacLogin(username, password);
             if success {
                 navigate("/todos");
             } else {
@@ -173,8 +173,8 @@ cl {
             }
         }
 
-        def handleEmailChange(e: any) -> None {
-            setEmail(e.target.value);
+        def handleUsernameChange(e: any) -> None {
+            setUsername(e.target.value);
         }
 
         def handlePasswordChange(e: any) -> None {
@@ -218,9 +218,9 @@ cl {
                 >
                     <input
                         type="text"
-                        value={email}
-                        onChange={handleEmailChange}
-                        placeholder="Email"
+                        value={username}
+                        onChange={handleUsernameChange}
+                        placeholder="Username"
                         style={{
                             "width": "100%",
                             "padding": "8px",
@@ -279,7 +279,7 @@ cl {
 
     # Signup Page
     def SignupPage()  -> any {
-        [email, setEmail] = useState("");
+        [username, setUsername] = useState("");
         [password, setPassword] = useState("");
         [error, setError] = useState("");
         navigate = useNavigate();
@@ -287,11 +287,11 @@ cl {
         async def handleSignup(e: any) -> None {
             e.preventDefault();
             setError("");
-            if not email or not password {
+            if not username or not password {
                 setError("Please fill in all fields");
                 return;
             }
-            result = await jacSignup(email, password);
+            result = await jacSignup(username, password);
             if result["success"] {
                 navigate("/todos");
             } else {
@@ -299,8 +299,8 @@ cl {
             }
         }
 
-        def handleEmailChange(e: any) -> None {
-            setEmail(e.target.value);
+        def handleUsernameChange(e: any) -> None {
+            setUsername(e.target.value);
         }
 
         def handlePasswordChange(e: any) -> None {
@@ -344,9 +344,9 @@ cl {
                 >
                     <input
                         type="text"
-                        value={email}
-                        onChange={handleEmailChange}
-                        placeholder="Email"
+                        value={username}
+                        onChange={handleUsernameChange}
+                        placeholder="Username"
                         style={{
                             "width": "100%",
                             "padding": "8px",
@@ -657,7 +657,7 @@ cl {
     }
 
     # Main App with React Router
-    def app()  -> any {
+    def:pub app()  -> any {
         return <Router>
             <div
                 style={{"fontFamily": "system-ui, sans-serif"}}
@@ -689,18 +689,18 @@ cl {
 
 ### Running the App
 
-1. **Save the code** to `app.jac`
+1. **Save the code** to `main.jac`
 
 2. **Start the server:**
 
    ```bash
-   jac serve app.jac
+   jac start main.jac
    ```
 
 3. **Open in browser:**
 
    ```
-   http://localhost:8000/page/app
+   http://localhost:8000/cl/app
    ```
 
 4. **Test it out:**
@@ -861,23 +861,10 @@ You've completed the tutorial! Here are some ideas to continue learning:
 
 **Deployment options:**
 
-- Jac Cloud (easiest)
 - Vercel
 - Netlify
 - Digital Ocean
 - AWS
-
-**Steps:**
-
-```bash
-# Install Jac Cloud
-pip install jac-cloud
-
-# Deploy
-jac cloud deploy app.jac
-
-# Your app is now live!
-```
 
 ### 4. Learn Advanced Jac Features
 

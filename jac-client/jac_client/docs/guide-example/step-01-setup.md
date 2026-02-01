@@ -13,10 +13,10 @@ In this first step, you'll create your Jac project and understand the basic file
 Open your terminal and run:
 
 ```bash
-jac create_jac_app todo-app
+jac create --use client todo-app
 ```
 
-This creates a new directory called `todo-app` with everything you need.
+This creates a new directory called `todo-app` with an organized project structure.
 
 ### Step 1.2: Navigate to Your Project
 
@@ -30,21 +30,23 @@ Your project now has these files:
 
 ```
 todo-app/
-├── app.jac           # Your main application file (we'll work here!)
-├── package.json      # Node.js dependencies (auto-managed)
-├── vite.config.js    # Build configuration (you can ignore this)
-└── README.md         # Basic instructions
+├── jac.toml              # Project configuration
+├── main.jac              # Your main application file (we'll work here!)
+├── components/           # Reusable components
+│   └── Button.tsx        # Example TypeScript component
+├── assets/               # Static assets
+└── build/                # Build output (generated)
 ```
 
-**Important**: We'll write ALL our code in `app.jac` - that's it!
+**Important**: We'll write our main code in `main.jac`!
 
 ### Step 1.4: Create Your First App
 
-Open `app.jac` in your code editor and replace everything with this:
+Open `main.jac` in your code editor and replace everything with this:
 
 ```jac
 cl {
-    def app() -> any {
+    def:pub app() -> any {
         return <div>
             <h1>Hello, Jac!</h1>
             <p>My first full-stack app</p>
@@ -58,7 +60,7 @@ cl {
 In your terminal, run:
 
 ```bash
-jac serve app.jac
+jac start main.jac
 ```
 
 You'll see output like:
@@ -75,7 +77,7 @@ INFO:     Uvicorn running on http://127.0.0.1:8000
 Open your browser and go to:
 
 ```
-http://localhost:8000/page/app
+http://localhost:8000/cl/app
 ```
 
 You should see "Hello, Jac!" and "My first full-stack app"
@@ -108,7 +110,7 @@ Think of it like this:
 This is your **main entry point** - the function that Jac calls first.
 
 ```jac
-def app() -> any {
+def:pub app() -> any {
     return <div>...</div>;
 }
 ```
@@ -127,7 +129,7 @@ if __name__ == "__main__":
     run_app()
 
 # Jac
-def app() -> any {
+def:pub app() -> any {
     # Start here
 }
 ```
@@ -165,29 +167,49 @@ return <div>
 3. Use `{}` to insert Jac code
 
    ```jac
-   let name = "Alice";
+    name = "Alice";
    return <h1>Hello, {name}!</h1>;  # Shows: Hello, Alice!
    ```
 
-### How `jac serve` Works
+### How `jac start` Works
 
-When you run `jac serve app.jac`:
+When you run `jac start main.jac`:
 
 1. **Jac compiler** reads your `.jac` file
 2. **Frontend code** (inside `cl`) → Compiled to JavaScript
 3. **Backend code** (outside `cl`) → Stays as Python-like backend code
 4. **Single server** serves both on port 8000
-5. **Auto-reload** watches for file changes (coming soon...)
 
 It's like running a Flask/FastAPI server, but it ALSO compiles and serves your React frontend - all in one command!
 
+### Hot Module Replacement (HMR)
+
+For faster development, use `--dev` mode:
+
+```bash
+jac start main.jac --dev
+```
+
+With HMR enabled:
+
+- **File watcher** monitors `*.jac` files for changes
+- **Backend** automatically recompiles when you save
+- **Frontend** hot-reloads without full page refresh
+- **No more manual restarts!**
+
+**Note:** HMR requires the `watchdog` package. Install dev dependencies with:
+
+```bash
+jac install --dev
+```
+
 ### File Organization
 
-For now, everything goes in `app.jac`. As your app grows, you can split into multiple files:
+For now, everything goes in `main.jac`. As your app grows, you can split into multiple files:
 
 ```
 todo-app/
-├── app.jac           # Main app
+├── main.jac          # Main app
 ├── components.jac    # Reusable components
 └── walkers.jac       # Backend logic
 ```
@@ -203,7 +225,7 @@ But for this tutorial, we'll keep everything in one file for simplicity.
 - What `cl { }` means (client-side code)
 - The `def app()` entry point
 - JSX basics (HTML in code)
-- Running your app with `jac serve`
+- Running your app with `jac start`
 
 ---
 
@@ -222,25 +244,31 @@ pip install jac-client
 **Solution**: Use a different port:
 
 ```bash
-jac serve app.jac --port 8080
+jac start main.jac --port 8080
 ```
 
-Then visit `http://localhost:8080/page/app`
+Then visit `http://localhost:8080/cl/app`
 
 ### Issue: Blank page in browser
 
 **Check:**
 
-- Did you visit `/page/app` (not just `/`)?
+- Did you visit `/cl/app` (not just `/`)?
 - Check terminal for errors
 - Make sure `app()` has a `return` statement
 
 ### Issue: Changes not showing
 
-**Solution**:
+**Best solution**: Use HMR mode for automatic reloading:
+
+```bash
+jac start main.jac --dev
+```
+
+**Alternative** (if not using HMR):
 
 - Stop the server (Ctrl+C)
-- Restart: `jac serve app.jac`
+- Restart: `jac start main.jac`
 - Refresh browser
 
 ---
@@ -251,7 +279,7 @@ Before moving on, try changing the text:
 
 ```jac
 cl {
-    def app() -> any {
+    def:pub app() -> any {
         return <div>
             <h1>My Todo App</h1>
             <p>Built with Jac</p>

@@ -1,4 +1,4 @@
-cl import from jac:client_runtime {
+cl import from "@jac/runtime" {
     jacLogin,
     jacLogout,
     jacSignup,
@@ -17,58 +17,51 @@ cl {
 
     # Shared data model for client/server
     obj ClientTweet {
-        has username: str = "";
-        has id: str = "";
-        has content: str = "";
-        has likes: list = [];
-        has comments: list = [];
+        has username: str = "",
+            id: str = "",
+            content: str = "",
+            likes: list = [],
+            comments: list = [];
     }
 
     obj ClientProfile {
-        has username: str = "";
-        has id: str = "";
+        has username: str = "",
+            id: str = "";
     }
 
     # UI Components - Render a single tweet card
     def TweetCard(tweet: ClientTweet) -> any {
-        return <div
-            class="tweet-card"
-            style={{
-                "border": "1px solid #e1e8ed",
-                "padding": "15px",
-                "margin": "10px 0",
-                "borderRadius": "8px"
-            }}
-        >
+        return
             <div
-                class="tweet-header"
-                style={{"fontWeight": "bold", "marginBottom": "8px"}}
+                class="tweet-card"
+                style={{
+                    "border": "1px solid #e1e8ed",
+                    "padding": "15px",
+                    "margin": "10px 0",
+                    "borderRadius": "8px"
+                }}
             >
-                @{tweet.username}
-            </div>
-            <div
-                class="tweet-content"
-                style={{"marginBottom": "12px"}}
-            >
-                {tweet.content}
-            </div>
-            <div
-                class="tweet-actions"
-                style={{"display": "flex", "gap": "15px"}}
-            >
-                <button
-                    onclick={like_tweet_action(tweet.id)}
-                    style={{"padding": "5px 10px", "cursor": "pointer"}}
+                <div
+                    class="tweet-header"
+                    style={{"fontWeight": "bold", "marginBottom": "8px"}}
                 >
-                    Like ({tweet.likes.length})
-                </button>
-                <button
-                    style={{"padding": "5px 10px"}}
-                >
-                    Comment ({tweet.comments.length})
-                </button>
-            </div>
-        </div>;
+                    @{tweet.username}
+                </div>
+                <div class="tweet-content" style={{"marginBottom": "12px"}}>
+                    {tweet.content}
+                </div>
+                <div class="tweet-actions" style={{"display": "flex", "gap": "15px"}}>
+                    <button
+                        onclick={like_tweet_action(tweet.id)}
+                        style={{"padding": "5px 10px", "cursor": "pointer"}}
+                    >
+                        Like ({tweet.likes.length})
+                    </button>
+                    <button style={{"padding": "5px 10px"}}>
+                        Comment ({tweet.comments.length})
+                    </button>
+                </div>
+            </div>;
     }
 
     # Handle liking a tweet - calls server walker directly
@@ -86,110 +79,96 @@ cl {
 
     # Render the main feed view
     def FeedView(tweets: list) -> any {
-        return <div
-            class="feed-container"
-            style={{
-                "maxWidth": "600px",
-                "margin": "0 auto",
-                "fontFamily": "sans-serif"
-            }}
-        >
+        return
             <div
-                class="feed-header"
-                style={{"padding": "20px", "borderBottom": "1px solid #e1e8ed"}}
+                class="feed-container"
+                style={{
+                    "maxWidth": "600px",
+                    "margin": "0 auto",
+                    "fontFamily": "sans-serif"
+                }}
             >
-                <h1
-                    style={{"margin": "0"}}
+                <div
+                    class="feed-header"
+                    style={{"padding": "20px", "borderBottom": "1px solid #e1e8ed"}}
                 >
-                    LittleX Feed
-                </h1>
-            </div>
-            <div class="feed-content">
-                {[TweetCard(tweet) for tweet in tweets]}
-            </div>
-        </div>;
+                    <h1 style={{"margin": "0"}}>
+                        LittleX Feed
+                    </h1>
+                </div>
+                <div class="feed-content">
+                    {[TweetCard(tweet) for tweet in tweets]}
+                </div>
+            </div>;
     }
 
     # Render login form
-    def LoginForm()  -> any {
-        return <div
-            class="login-container"
-            style={{
-                "maxWidth": "400px",
-                "margin": "50px auto",
-                "padding": "20px",
-                "border": "1px solid #e1e8ed",
-                "borderRadius": "8px",
-                "fontFamily": "sans-serif"
-            }}
-        >
-            <h2
-                style={{"marginTop": "0"}}
-            >
-                Login to LittleX
-            </h2>
-            <form
-                onsubmit={handle_login}
-            >
-                <div
-                    style={{"marginBottom": "15px"}}
-                >
-                    <label
-                        style={{"display": "block", "marginBottom": "5px"}}
-                    >
-                        Username:
-                    </label>
-                    <input
-                        type="text"
-                        id="username"
-                        style={{
-                            "width": "100%",
-                            "padding": "8px",
-                            "boxSizing": "border-box"
-                        }}
-                    />
-                </div>
-                <div
-                    style={{"marginBottom": "15px"}}
-                >
-                    <label
-                        style={{"display": "block", "marginBottom": "5px"}}
-                    >
-                        Password:
-                    </label>
-                    <input
-                        type="password"
-                        id="password"
-                        style={{
-                            "width": "100%",
-                            "padding": "8px",
-                            "boxSizing": "border-box"
-                        }}
-                    />
-                </div>
-                <button
-                    type="submit"
-                    style={{
-                        "width": "100%",
-                        "padding": "10px",
-                        "backgroundColor": "#1da1f2",
-                        "color": "white",
-                        "border": "none",
-                        "borderRadius": "4px",
-                        "cursor": "pointer"
-                    }}
-                >
-                    Login
-                </button>
-            </form>
+    def LoginForm -> any {
+        return
             <div
-                style={{"marginTop": "15px", "textAlign": "center"}}
+                class="login-container"
+                style={{
+                    "maxWidth": "400px",
+                    "margin": "50px auto",
+                    "padding": "20px",
+                    "border": "1px solid #e1e8ed",
+                    "borderRadius": "8px",
+                    "fontFamily": "sans-serif"
+                }}
             >
-                <Link href="/signup">
-                    Don't have an account? Sign up
-                </Link>
-            </div>
-        </div>;
+                <h2 style={{"marginTop": "0"}}>
+                    Login to LittleX
+                </h2>
+                <form onsubmit={handle_login}>
+                    <div style={{"marginBottom": "15px"}}>
+                        <label style={{"display": "block", "marginBottom": "5px"}}>
+                            Username:
+                        </label>
+                        <input
+                            type="text"
+                            id="username"
+                            style={{
+                                "width": "100%",
+                                "padding": "8px",
+                                "boxSizing": "border-box"
+                            }}
+                        />
+                    </div>
+                    <div style={{"marginBottom": "15px"}}>
+                        <label style={{"display": "block", "marginBottom": "5px"}}>
+                            Password:
+                        </label>
+                        <input
+                            type="password"
+                            id="password"
+                            style={{
+                                "width": "100%",
+                                "padding": "8px",
+                                "boxSizing": "border-box"
+                            }}
+                        />
+                    </div>
+                    <button
+                        type="submit"
+                        style={{
+                            "width": "100%",
+                            "padding": "10px",
+                            "backgroundColor": "#1da1f2",
+                            "color": "white",
+                            "border": "none",
+                            "borderRadius": "4px",
+                            "cursor": "pointer"
+                        }}
+                    >
+                        Login
+                    </button>
+                </form>
+                <div style={{"marginTop": "15px", "textAlign": "center"}}>
+                    <Link href="/signup">
+                        Don't have an account? Sign up
+                    </Link>
+                </div>
+            </div>;
     }
 
     # Handle login form submission
@@ -206,106 +185,89 @@ cl {
     }
 
     # Render signup form
-    def SignupForm()  -> any {
-        return <div
-            class="signup-container"
-            style={{
-                "maxWidth": "400px",
-                "margin": "50px auto",
-                "padding": "20px",
-                "border": "1px solid #e1e8ed",
-                "borderRadius": "8px",
-                "fontFamily": "sans-serif"
-            }}
-        >
-            <h2
-                style={{"marginTop": "0"}}
-            >
-                Sign Up for LittleX
-            </h2>
-            <form
-                onsubmit={handle_signup}
-            >
-                <div
-                    style={{"marginBottom": "15px"}}
-                >
-                    <label
-                        style={{"display": "block", "marginBottom": "5px"}}
-                    >
-                        Username:
-                    </label>
-                    <input
-                        type="text"
-                        id="signup-username"
-                        required
-                        style={{
-                            "width": "100%",
-                            "padding": "8px",
-                            "boxSizing": "border-box"
-                        }}
-                    />
-                </div>
-                <div
-                    style={{"marginBottom": "15px"}}
-                >
-                    <label
-                        style={{"display": "block", "marginBottom": "5px"}}
-                    >
-                        Password:
-                    </label>
-                    <input
-                        type="password"
-                        id="signup-password"
-                        required
-                        style={{
-                            "width": "100%",
-                            "padding": "8px",
-                            "boxSizing": "border-box"
-                        }}
-                    />
-                </div>
-                <div
-                    style={{"marginBottom": "15px"}}
-                >
-                    <label
-                        style={{"display": "block", "marginBottom": "5px"}}
-                    >
-                        Confirm Password:
-                    </label>
-                    <input
-                        type="password"
-                        id="signup-password-confirm"
-                        required
-                        style={{
-                            "width": "100%",
-                            "padding": "8px",
-                            "boxSizing": "border-box"
-                        }}
-                    />
-                </div>
-                <button
-                    type="submit"
-                    style={{
-                        "width": "100%",
-                        "padding": "10px",
-                        "backgroundColor": "#1da1f2",
-                        "color": "white",
-                        "border": "none",
-                        "borderRadius": "4px",
-                        "cursor": "pointer"
-                    }}
-                >
-                    Sign Up
-                </button>
-            </form>
+    def SignupForm -> any {
+        return
             <div
-                style={{"marginTop": "15px", "textAlign": "center"}}
+                class="signup-container"
+                style={{
+                    "maxWidth": "400px",
+                    "margin": "50px auto",
+                    "padding": "20px",
+                    "border": "1px solid #e1e8ed",
+                    "borderRadius": "8px",
+                    "fontFamily": "sans-serif"
+                }}
             >
-                <Link href="/login">
-                    Already have an account? Login
-                </Link>
-            </div>
-        </div>;
+                <h2 style={{"marginTop": "0"}}>
+                    Sign Up for LittleX
+                </h2>
+                <form onsubmit={handle_signup}>
+                    <div style={{"marginBottom": "15px"}}>
+                        <label style={{"display": "block", "marginBottom": "5px"}}>
+                            Username:
+                        </label>
+                        <input
+                            type="text"
+                            id="signup-username"
+                            required
+                            style={{
+                                "width": "100%",
+                                "padding": "8px",
+                                "boxSizing": "border-box"
+                            }}
+                        />
+                    </div>
+                    <div style={{"marginBottom": "15px"}}>
+                        <label style={{"display": "block", "marginBottom": "5px"}}>
+                            Password:
+                        </label>
+                        <input
+                            type="password"
+                            id="signup-password"
+                            required
+                            style={{
+                                "width": "100%",
+                                "padding": "8px",
+                                "boxSizing": "border-box"
+                            }}
+                        />
+                    </div>
+                    <div style={{"marginBottom": "15px"}}>
+                        <label style={{"display": "block", "marginBottom": "5px"}}>
+                            Confirm Password:
+                        </label>
+                        <input
+                            type="password"
+                            id="signup-password-confirm"
+                            required
+                            style={{
+                                "width": "100%",
+                                "padding": "8px",
+                                "boxSizing": "border-box"
+                            }}
+                        />
+                    </div>
+                    <button
+                        type="submit"
+                        style={{
+                            "width": "100%",
+                            "padding": "10px",
+                            "backgroundColor": "#1da1f2",
+                            "color": "white",
+                            "border": "none",
+                            "borderRadius": "4px",
+                            "cursor": "pointer"
+                        }}
+                    >
+                        Sign Up
+                    </button>
+                </form>
+                <div style={{"marginTop": "15px", "textAlign": "center"}}>
+                    <Link href="/login">
+                        Already have an account? Login
+                    </Link>
+                </div>
+            </div>;
     }
 
     # Handle signup form submission
@@ -338,32 +300,32 @@ cl {
     }
 
     # Handle logout
-    def logout_action()  -> None {
+    def logout_action -> None {
         jacLogout();
         navigate("/login");
     }
 
     # Main App component with declarative router
-    def App()  -> any {
+    def App -> any {
         # Create routes array manually (workaround for JS compiler bug with named args)
         login_route = {
             "path": "/login",
-            "component": lambda   -> any{ return LoginForm(); } ,
+            "component": lambda -> any { return LoginForm(); },
             "guard": None
         };
         signup_route = {
             "path": "/signup",
-            "component": lambda   -> any{ return SignupForm(); } ,
+            "component": lambda -> any { return SignupForm(); },
             "guard": None
         };
         home_route = {
             "path": "/home",
-            "component": lambda   -> any{ return HomeView(); } ,
+            "component": lambda -> any { return HomeView(); },
             "guard": jacIsLoggedIn
         };
         profile_route = {
             "path": "/profile",
-            "component": lambda   -> any{ return ProfileView(); } ,
+            "component": lambda -> any { return ProfileView(); },
             "guard": jacIsLoggedIn
         };
 
@@ -373,128 +335,134 @@ cl {
         # Get current path for navbar
         currentPath = router.path();
 
-        return <div class="app-container">
-            {build_nav_bar(currentPath)}{router.render()}
-        </div>;
+        return
+            <div class="app-container">
+                {build_nav_bar(currentPath)}{router.render()}
+            </div>;
     }
 
     # Helper to build navigation bar
-    def build_nav_bar(route: str) -> any {
+    def build_nav_bar(route: str) -> Any {
         if not jacIsLoggedIn() or route == "/login" or route == "/signup" {
             return None;
         }
-        return <nav
-            style={{
-                "backgroundColor": "#1da1f2",
-                "padding": "15px",
-                "marginBottom": "20px"
-            }}
-        >
-            <div
+        return
+            <nav
                 style={{
-                    "maxWidth": "600px",
-                    "margin": "0 auto",
-                    "display": "flex",
-                    "gap": "20px",
-                    "alignItems": "center"
+                    "backgroundColor": "#1da1f2",
+                    "padding": "15px",
+                    "marginBottom": "20px"
                 }}
             >
-                <Link href="/home">
-                    <span
-                        style={{
-                            "color": "white",
-                            "textDecoration": "none",
-                            "fontWeight": "bold"
-                        }}
-                    >
-                        Home
-                    </span>
-                </Link>
-                <Link href="/profile">
-                    <span
-                        style={{
-                            "color": "white",
-                            "textDecoration": "none",
-                            "fontWeight": "bold"
-                        }}
-                    >
-                        Profile
-                    </span>
-                </Link>
-                <button
-                    onclick={logout_action}
+                <div
                     style={{
-                        "marginLeft": "auto",
-                        "padding": "5px 15px",
-                        "backgroundColor": "white",
-                        "color": "#1da1f2",
-                        "border": "none",
-                        "borderRadius": "4px",
-                        "cursor": "pointer",
-                        "fontWeight": "bold"
+                        "maxWidth": "600px",
+                        "margin": "0 auto",
+                        "display": "flex",
+                        "gap": "20px",
+                        "alignItems": "center"
                     }}
                 >
-                    Logout
-                </button>
-            </div>
-        </nav>;
+                    <Link href="/home">
+                        <span
+                            style={{
+                                "color": "white",
+                                "textDecoration": "none",
+                                "fontWeight": "bold"
+                            }}
+                        >
+                            Home
+                        </span>
+                    </Link>
+                    <Link href="/profile">
+                        <span
+                            style={{
+                                "color": "white",
+                                "textDecoration": "none",
+                                "fontWeight": "bold"
+                            }}
+                        >
+                            Profile
+                        </span>
+                    </Link>
+                    <button
+                        onclick={logout_action}
+                        style={{
+                            "marginLeft": "auto",
+                            "padding": "5px 15px",
+                            "backgroundColor": "white",
+                            "color": "#1da1f2",
+                            "border": "none",
+                            "borderRadius": "4px",
+                            "cursor": "pointer",
+                            "fontWeight": "bold"
+                        }}
+                    >
+                        Logout
+                    </button>
+                </div>
+            </nav>;
     }
 
     # Home view - simplified for testing reactive routing
-    def HomeView()  -> any {
+    def HomeView -> any {
         if not jacIsLoggedIn() {
             navigate("/login");
-            return <div></div>;
+            return
+                <div></div>;
         }
 
-        return <div
-            style={{
-                "textAlign": "center",
-                "padding": "50px",
-                "fontFamily": "sans-serif"
-            }}
-        >
-            <h1>
-                Home Feed
-            </h1>
-            <p>
-                Welcome to LittleX! This is the home page.
-            </p>
-            <p>
-                The reactive router is working!
-            </p>
-        </div>;
+        return
+            <div
+                style={{
+                    "textAlign": "center",
+                    "padding": "50px",
+                    "fontFamily": "sans-serif"
+                }}
+            >
+                <h1>
+                    Home Feed
+                </h1>
+                <p>
+                    Welcome to LittleX! This is the home page.
+                </p>
+                <p>
+                    The reactive router is working!
+                </p>
+            </div>;
     }
 
     # Profile view
-    def ProfileView()  -> any {
+    def ProfileView -> any {
         if not jacIsLoggedIn() {
             navigate("/login");
-            return <div></div>;
+            return
+                <div></div>;
         }
-        return <div
-            class="profile-container"
-            style={{
-                "maxWidth": "600px",
-                "margin": "20px auto",
-                "padding": "20px",
-                "fontFamily": "sans-serif"
-            }}
-        >
-            <h1>
-                Profile
-            </h1>
+        return
             <div
+                class="profile-container"
                 style={{
-                    "padding": "15px",
-                    "border": "1px solid #e1e8ed",
-                    "borderRadius": "8px"
+                    "maxWidth": "600px",
+                    "margin": "20px auto",
+                    "padding": "20px",
+                    "fontFamily": "sans-serif"
                 }}
             >
-                <p>
-                    Profile information will be displayed here.
-                </p>
-            </div>
-        </div>;
+                <h1>
+                    Profile
+                </h1>
+                <div
+                    style={{
+                        "padding": "15px",
+                        "border": "1px solid #e1e8ed",
+                        "borderRadius": "8px"
+                    }}
+                >
+                    <p>
+                        Profile information will be displayed here.
+                    </p>
+                </div>
+            </div>;
     }
 }

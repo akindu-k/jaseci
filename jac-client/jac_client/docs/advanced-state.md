@@ -29,6 +29,8 @@ Jac uses React hooks for all state management. The most common hooks are:
 
 ### Basic useState Example
 
+> **Note:** When using `has` variables in Jac, `useState` is automatically injected. You only need to explicitly import `useState` when using the React hooks pattern directly (e.g., `[value, setValue] = useState(initial)`).
+
 ```jac
 cl import from react { useState, useEffect }
 
@@ -127,7 +129,7 @@ cl {
         # Good: Related data in one object
         [user, setUser] = useState({
             "name": "",
-            "email": "",
+            "username": "",
             "avatar": ""
         });
 
@@ -275,7 +277,7 @@ Create reusable custom hooks for shared logic:
 
 ```jac
 cl import from react { useState, useEffect }
-cl import from '@jac-client/utils' { jacLogout }
+cl import from '@jac/runtime' { jacLogout }
 
 cl {
     # Custom hook: User management

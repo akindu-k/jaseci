@@ -7,8 +7,10 @@ db.sqlite3
 media
 migrations
 venv
-__jac_gen__/
+.jac/
 *.jir
+*.jbc
+_planning/
 
 # Distribution / packaging
 .Python
@@ -30,7 +32,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
-.venv
+.venv/
 
 # Others #
 .coverage
@@ -53,12 +55,12 @@ demo.jac
 
 # Mypy files #
 .mypy_cache*
-.jac_mypy_cache*
 
 
 # Jaclang session files
 *.session
 mydatabase/
+demo/
 
 # session files
 *.bak
@@ -68,3 +70,6 @@ mydatabase/
 .env
 
 node_modules
+
+# Claude Code local instructions
+CLAUDE.local.md
