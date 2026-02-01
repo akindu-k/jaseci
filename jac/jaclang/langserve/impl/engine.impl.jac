@@ -1,3 +1,5 @@
+import from jaclang.cli.console { console }
+
 impl JacLangServer.shutdown -> None {
     # Guard against double shutdown.
     if self._shutdown_called {
@@ -77,7 +79,7 @@ impl JacLangServer.get_references(
             lspt.Location(
                 uri=uris.from_fs_path(cur_node.loc.mod_path),
                 range=utils.create_range(cur_node.loc)
-            ) for cur_node in node_selected.sym.uses
+            ) for cur_node in [*node_selected.sym.defn, *node_selected.sym.uses]
         ];
         return list_of_references;
     }
@@ -387,7 +389,7 @@ impl JacLangServer.get_completion(
 }
 
 impl JacLangServer.debug(msg: str) -> None {
-    print(f"[Engine] {msg}", file=sys.stderr);
+    console.error(f"[Engine] {msg}");
 }
 
 impl JacLangServer.get_token_at_position(
