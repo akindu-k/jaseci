@@ -240,22 +240,49 @@ class JacScalePlugin {
         import from .factories.storage_factory { StorageFactory }
         return StorageFactory.get_default(base_path, create_dirs);
     }
+
+    @hookimpl
+    static def db(
+        db_name: str = 'jac_db', db_type: str = 'mongodb', uri: (str | None) = None
+    ) -> Db {
+        import from jac_scale.db { Db, get_mongo_client, get_redis_client }
+        import from jac_scale.factories.database_factory { DatabaseType }
+
+        # Convert string to enum
+        db_type_enum = DatabaseType(db_type);
+
+        # Get appropriate client based on db_type
+        if db_type_enum == DatabaseType.MONGODB {
+            client = get_mongo_client(uri=uri);
+        } elif db_type_enum == DatabaseType.REDIS {
+            client = get_redis_client(uri=uri);
+        } else {
+            raise ValueError(f"Unsupported database type: {db_type}") ;
+        }
+
+        return Db(client=client, db_name=db_name, db_type=db_type_enum);
+    }
 }
 
 # Pluggy's varnames() puts parameters with defaults into kwargnames, not argnames.
 # But _multicall only passes argnames to hook implementations.
 # JacRuntimeInterfaceImpl strips defaults via generate_plugin_helpers, so we must too.
 import inspect;
-glob func = JacScalePlugin.create_j_context,
-     sig = inspect.signature(func),
-     sig_nodef = sig.replace(
-         parameters=[
-             p.replace(default=inspect.Parameter.empty)
-             for p in sig.parameters.values()
-         ]
-     );
 
-with entry {
+def strip_defaults(func: Any) -> None {
+    sig = inspect.signature(func);
+    sig_nodef = sig.replace(
+        parameters=[
+            p.replace(default=inspect.Parameter.empty) for p in sig.parameters.values()
+        ]
+    );
     func.__signature__ = sig_nodef;
+}
+
+# Strip defaults from all hook methods that have parameters with defaults
+with entry {
+    strip_defaults(JacScalePlugin.create_j_context);
+    strip_defaults(JacScalePlugin.store);
+    strip_defaults(JacScalePlugin.db);
     plugin_manager.register(JacScalePlugin());
 }
