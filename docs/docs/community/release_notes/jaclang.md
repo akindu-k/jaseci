@@ -4,6 +4,10 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.9.16 (Unreleased)
 
+- **Native Compiler: Cross-Module Linking**: Native `.na.jac` modules can now import and call functions from other `.na.jac` modules. The compiler performs LLVM IR-level linking enabling modular native code organization with `import from module { func1, func2 }` syntax.
+- **LSP Debounced Type Checking**: The language server now waits for a brief pause in typing (300ms) before starting analysis, eliminating lag during rapid edits.
+- **`jac grammar` Command**: Added a `jac grammar` CLI command that extracts the Jac grammar directly from the recursive descent parser's AST and prints it in EBNF or Lark format. Use `jac grammar` for EBNF output, `jac grammar --lark` for Lark format, and `-o <file>` to write to a file. Powered by a new `GrammarExtractPass` compiler pass that analyzes `parse_*` method implementations to reconstruct grammar rules from token-consumption patterns and control-flow structures.
+
 ## jaclang 0.9.15 (Latest Release)
 
 - **Fix: Type Errors in Impl Files Now Show Correct Location**: Type errors in `.impl.jac` files now point to the actual error location instead of the declaration in the main file.
