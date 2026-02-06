@@ -175,7 +175,9 @@ class TestConnectionPooling:
         # Same URI should reuse the same client
         assert db1.client is db2.client
 
-    def test_different_uri_creates_new_connection(self, mongo_uri: str, redis_uri: str) -> None:
+    def test_different_uri_creates_new_connection(
+        self, mongo_uri: str, redis_uri: str
+    ) -> None:
         """Verify different URIs create different connections."""
         mongo_db = Jac.db(db_name="mongo", db_type="mongodb", uri=mongo_uri)
         redis_db = Jac.db(db_name="redis", db_type="redis", uri=redis_uri)
