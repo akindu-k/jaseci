@@ -31,13 +31,13 @@ def redis_container():
 
 
 @pytest.fixture
-def mongo_uri(mongodb_container):
+def mongo_uri(mongodb_container: MongoDbContainer) -> str:
     """Get MongoDB connection URI from container."""
     return mongodb_container.get_connection_url()
 
 
 @pytest.fixture
-def redis_uri(redis_container):
+def redis_uri(redis_container: RedisContainer) -> str:
     """Get Redis connection URI from container."""
     host = redis_container.get_container_host_ip()
     port = redis_container.get_exposed_port(6379)
@@ -45,7 +45,7 @@ def redis_uri(redis_container):
 
 
 @pytest.fixture(autouse=True)
-def cleanup_connections():
+def cleanup_connections() -> None:
     """Clean up all database connections after each test."""
     yield
     # Cleanup after test
@@ -60,7 +60,7 @@ def cleanup_connections():
 class TestMongoDBOperations:
     """Test core MongoDB CRUD operations."""
 
-    def test_insert_and_find_one(self, mongo_uri):
+    def test_insert_and_find_one(self, mongo_uri: str) -> None:
         """Test basic insert and find operations."""
         # Call via Jac runtime (as users would)
         db_instance = Jac.db(db_name="test_db", db_type="mongodb", uri=mongo_uri)
@@ -77,7 +77,7 @@ class TestMongoDBOperations:
         assert found["name"] == "Alice"
         assert found["age"] == 30
 
-    def test_update_and_delete(self, mongo_uri):
+    def test_update_and_delete(self, mongo_uri: str) -> None:
         """Test update and delete operations."""
         db_instance = Jac.db(db_name="test_db", db_type="mongodb", uri=mongo_uri)
 
@@ -104,7 +104,7 @@ class TestMongoDBOperations:
         found = db_instance.find_by_id("users", doc_id)
         assert found is None
 
-    def test_bulk_operations(self, mongo_uri):
+    def test_bulk_operations(self, mongo_uri: str) -> None:
         """Test bulk insert and update operations."""
         db_instance = Jac.db(db_name="test_db", db_type="mongodb", uri=mongo_uri)
 
@@ -127,7 +127,7 @@ class TestMongoDBOperations:
 class TestRedisOperations:
     """Test core Redis operations."""
 
-    def test_redis_insert_and_find(self, redis_uri):
+    def test_redis_insert_and_find(self, redis_uri: str) -> None:
         """Test Redis insert and find operations."""
         db_instance = Jac.db(db_name="cache", db_type="redis", uri=redis_uri)
 
@@ -142,7 +142,7 @@ class TestRedisOperations:
         assert found["session_id"] == "abc123"
         assert found["user"] == "alice"
 
-    def test_redis_update_and_delete(self, redis_uri):
+    def test_redis_update_and_delete(self, redis_uri: str) -> None:
         """Test Redis update and delete operations."""
         db_instance = Jac.db(db_name="cache", db_type="redis", uri=redis_uri)
 
@@ -167,7 +167,7 @@ class TestRedisOperations:
 class TestConnectionPooling:
     """Test connection pooling and reuse."""
 
-    def test_same_uri_reuses_connection(self, mongo_uri):
+    def test_same_uri_reuses_connection(self, mongo_uri: str) -> None:
         """Verify same URI reuses the same connection."""
         db1 = Jac.db(db_name="db1", db_type="mongodb", uri=mongo_uri)
         db2 = Jac.db(db_name="db2", db_type="mongodb", uri=mongo_uri)
@@ -175,7 +175,7 @@ class TestConnectionPooling:
         # Same URI should reuse the same client
         assert db1.client is db2.client
 
-    def test_different_uri_creates_new_connection(self, mongo_uri, redis_uri):
+    def test_different_uri_creates_new_connection(self, mongo_uri: str, redis_uri: str) -> None:
         """Verify different URIs create different connections."""
         mongo_db = Jac.db(db_name="mongo", db_type="mongodb", uri=mongo_uri)
         redis_db = Jac.db(db_name="redis", db_type="redis", uri=redis_uri)
@@ -183,7 +183,7 @@ class TestConnectionPooling:
         # Different databases should have different clients
         assert mongo_db.client is not redis_db.client
 
-    def test_multiple_mongodb_uris(self, mongodb_container):
+    def test_multiple_mongodb_uris(self, mongodb_container: MongoDbContainer) -> None:
         """Test multiple MongoDB URIs create separate connections."""
         uri1 = mongodb_container.get_connection_url()
         # Simulate different URI by adding query parameter
@@ -205,7 +205,7 @@ class TestConnectionPooling:
 class TestConfigurationFallback:
     """Test configuration fallback mechanism."""
 
-    def test_explicit_uri_overrides_config(self, mongo_uri):
+    def test_explicit_uri_overrides_config(self, mongo_uri: str) -> None:
         """Verify explicit URI parameter takes precedence."""
         # Set environment variable
         os.environ["MONGODB_URI"] = "mongodb://fake:27017"
@@ -224,7 +224,7 @@ class TestConfigurationFallback:
         finally:
             del os.environ["MONGODB_URI"]
 
-    def test_env_var_fallback(self, mongo_uri):
+    def test_env_var_fallback(self, mongo_uri: str) -> None:
         """Verify environment variable is used when URI not provided."""
         os.environ["MONGODB_URI"] = mongo_uri
 
@@ -238,7 +238,7 @@ class TestConfigurationFallback:
         finally:
             del os.environ["MONGODB_URI"]
 
-    def test_missing_config_raises_error(self):
+    def test_missing_config_raises_error(self) -> None:
         """Verify missing configuration raises ValueError."""
         # Ensure no config is set
         os.environ.pop("MONGODB_URI", None)
@@ -251,12 +251,12 @@ class TestConfigurationFallback:
 class TestErrorHandling:
     """Test error handling and edge cases."""
 
-    def test_invalid_db_type(self, mongo_uri):
+    def test_invalid_db_type(self, mongo_uri: str) -> None:
         """Verify invalid database type raises error."""
         with pytest.raises(ValueError, match="is not a valid DatabaseType"):
             Jac.db(db_name="test", db_type="invalid_db", uri=mongo_uri)
 
-    def test_invalid_mongodb_id(self, mongo_uri):
+    def test_invalid_mongodb_id(self, mongo_uri: str) -> None:
         """Verify invalid MongoDB ObjectId raises InvalidId exception."""
         from bson.errors import InvalidId
 
@@ -266,7 +266,7 @@ class TestErrorHandling:
         with pytest.raises(InvalidId):
             db_instance.find_by_id("users", "invalid_id")
 
-    def test_delete_nonexistent_document(self, mongo_uri):
+    def test_delete_nonexistent_document(self, mongo_uri: str) -> None:
         """Verify deleting non-existent document doesn't crash."""
         db_instance = Jac.db(db_name="test", db_type="mongodb", uri=mongo_uri)
 
@@ -274,7 +274,7 @@ class TestErrorHandling:
         result = db_instance.delete_one("users", {"_id": "nonexistent"})
         assert result.deleted_count == 0
 
-    def test_connection_cleanup(self, mongo_uri):
+    def test_connection_cleanup(self, mongo_uri: str) -> None:
         """Verify connections can be cleaned up."""
         from jac_scale.db import close_all_db_connections
 
@@ -294,7 +294,7 @@ class TestErrorHandling:
 class TestDatabaseIsolation:
     """Test database name isolation."""
 
-    def test_different_db_names_are_isolated(self, mongo_uri):
+    def test_different_db_names_are_isolated(self, mongo_uri: str) -> None:
         """Verify different database names maintain isolation."""
         db1 = Jac.db(db_name="db_one", db_type="mongodb", uri=mongo_uri)
         db2 = Jac.db(db_name="db_two", db_type="mongodb", uri=mongo_uri)
@@ -321,7 +321,7 @@ class TestDatabaseIsolation:
 class TestRealWorldUsage:
     """Test realistic usage patterns."""
 
-    def test_user_session_workflow(self, mongo_uri, redis_uri):
+    def test_user_session_workflow(self, mongo_uri: str, redis_uri: str) -> None:
         """Simulate a real user session workflow."""
         # MongoDB for persistent data
         user_db = Jac.db(db_name="app", db_type="mongodb", uri=mongo_uri)

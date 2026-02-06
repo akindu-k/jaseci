@@ -4,6 +4,12 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.1.7 (Unreleased)
 
+- **Direct Database Operations API**: Added `db()` builtin function for direct database operations without graph layer abstraction. Supports both MongoDB and Redis with a unified API for CRUD operations (`insert_one`, `find_by_id`, `update_by_id`, `delete_by_id`, `insert_many`, `update_many`, `delete_many`). Database selection via `db_type` parameter (`'mongodb'` or `'redis'`), with configuration fallback mechanism (explicit URI → environment variable → jac.toml).
+
+- **URI-Based Connection Pooling**: Implemented connection pooling for database clients using URI-keyed dictionaries. Same URI reuses existing connections while different URIs create separate connection pools. Added `close_mongo_client()`, `close_redis_client()`, and `close_all_db_connections()` cleanup functions for proper resource management.
+
+- **Database Factory Pattern**: Introduced `DatabaseProviderFactory` with `create_client()` method supporting `DatabaseType` enum (`MONGODB`, `REDIS`) for type-safe database client instantiation.
+
 ## jac-scale 0.1.6 (Latest Release)
 
 - **fix: Exclude `jac.local.toml` during K8s code sync**: The local dev override file (`jac.local.toml`) is now excluded when syncing application code to the Kubernetes PVC. Previously, this file could override deployment settings such as the serve port, causing health check failures.
