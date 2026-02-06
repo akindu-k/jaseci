@@ -1,7 +1,8 @@
 """Factory for creating database providers."""
-import from typing { Any }
+import from typing { Any, Optional, Dict, cast }
 import from jac_scale.abstractions.database_provider { DatabaseProvider }
 import from jac_scale.abstractions.deployment_target { DeploymentTarget }
+import from jac_scale.config_loader { get_scale_config }
 import from enum { StrEnum }
 import os;
 
@@ -73,7 +74,7 @@ class DatabaseProviderFactory {
             if (uri is None) {
                 raise ValueError('MongoDB URI not found in configuration');
             }
-            return MongoClient(cast(str, uri), **(config or {}));
+            return MongoClient(uri, **(config or {}));
         } elif (db_type == DatabaseType.REDIS) {
             import from redis { Redis }
             if (uri is None) {
@@ -84,7 +85,7 @@ class DatabaseProviderFactory {
             if (uri is None) {
                 raise ValueError('Redis URL not found in configuration');
             }
-            return Redis.from_url(cast(str, uri), **(config or {}));
+            return Redis.from_url(uri, **(config or {}));
         } else {
             raise ValueError(f"Unsupported database type: {db_type}");
         }
