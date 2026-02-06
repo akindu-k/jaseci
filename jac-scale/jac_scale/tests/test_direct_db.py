@@ -8,6 +8,7 @@ Tests cover:
 """
 
 import os
+from collections.abc import Generator
 
 import pytest
 from testcontainers.mongodb import MongoDbContainer
@@ -45,7 +46,7 @@ def redis_uri(redis_container: RedisContainer) -> str:
 
 
 @pytest.fixture(autouse=True)
-def cleanup_connections() -> None:
+def cleanup_connections() -> Generator[None, None, None]:
     """Clean up all database connections after each test."""
     yield
     # Cleanup after test
