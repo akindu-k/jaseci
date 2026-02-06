@@ -8,9 +8,11 @@ Tests cover:
 """
 
 import os
+
 import pytest
 from testcontainers.mongodb import MongoDbContainer
 from testcontainers.redis import RedisContainer
+
 from jaclang.pycore.runtime import JacRuntime as Jac
 
 
@@ -49,6 +51,7 @@ def cleanup_connections():
     # Cleanup after test
     try:
         from jac_scale.db import close_all_db_connections
+
         close_all_db_connections()
     except Exception:
         pass
@@ -60,11 +63,7 @@ class TestMongoDBOperations:
     def test_insert_and_find_one(self, mongo_uri):
         """Test basic insert and find operations."""
         # Call via Jac runtime (as users would)
-        db_instance = Jac.db(
-            db_name="test_db",
-            db_type="mongodb",
-            uri=mongo_uri
-        )
+        db_instance = Jac.db(db_name="test_db", db_type="mongodb", uri=mongo_uri)
 
         # Insert a document
         doc = {"name": "Alice", "age": 30, "role": "engineer"}
@@ -80,11 +79,7 @@ class TestMongoDBOperations:
 
     def test_update_and_delete(self, mongo_uri):
         """Test update and delete operations."""
-        db_instance = Jac.db(
-            db_name="test_db",
-            db_type="mongodb",
-            uri=mongo_uri
-        )
+        db_instance = Jac.db(db_name="test_db", db_type="mongodb", uri=mongo_uri)
 
         # Insert
         doc = {"name": "Bob", "status": "active"}
@@ -93,9 +88,7 @@ class TestMongoDBOperations:
 
         # Update
         update_result = db_instance.update_by_id(
-            "users",
-            doc_id,
-            {"$set": {"status": "inactive"}}
+            "users", doc_id, {"$set": {"status": "inactive"}}
         )
         assert update_result.modified_count == 1
 
@@ -113,26 +106,20 @@ class TestMongoDBOperations:
 
     def test_bulk_operations(self, mongo_uri):
         """Test bulk insert and update operations."""
-        db_instance = Jac.db(
-            db_name="test_db",
-            db_type="mongodb",
-            uri=mongo_uri
-        )
+        db_instance = Jac.db(db_name="test_db", db_type="mongodb", uri=mongo_uri)
 
         # Bulk insert
         docs = [
             {"name": "User1", "score": 100},
             {"name": "User2", "score": 200},
-            {"name": "User3", "score": 300}
+            {"name": "User3", "score": 300},
         ]
         result = db_instance.insert_many("scores", docs)
         assert len(result.inserted_ids) == 3
 
         # Bulk update
         update_result = db_instance.update_many(
-            "scores",
-            {"score": {"$gte": 200}},
-            {"$set": {"tier": "gold"}}
+            "scores", {"score": {"$gte": 200}}, {"$set": {"tier": "gold"}}
         )
         assert update_result.modified_count == 2
 
@@ -142,11 +129,7 @@ class TestRedisOperations:
 
     def test_redis_insert_and_find(self, redis_uri):
         """Test Redis insert and find operations."""
-        db_instance = Jac.db(
-            db_name="cache",
-            db_type="redis",
-            uri=redis_uri
-        )
+        db_instance = Jac.db(db_name="cache", db_type="redis", uri=redis_uri)
 
         # Insert
         doc = {"session_id": "abc123", "user": "alice"}
@@ -161,11 +144,7 @@ class TestRedisOperations:
 
     def test_redis_update_and_delete(self, redis_uri):
         """Test Redis update and delete operations."""
-        db_instance = Jac.db(
-            db_name="cache",
-            db_type="redis",
-            uri=redis_uri
-        )
+        db_instance = Jac.db(db_name="cache", db_type="redis", uri=redis_uri)
 
         # Insert
         doc = {"key": "value1"}
@@ -173,11 +152,7 @@ class TestRedisOperations:
         doc_id = result.inserted_id
 
         # Update
-        update_result = db_instance.update_by_id(
-            "data",
-            doc_id,
-            {"key": "value2"}
-        )
+        update_result = db_instance.update_by_id("data", doc_id, {"key": "value2"})
         assert update_result.modified_count == 1
 
         # Verify
@@ -212,7 +187,9 @@ class TestConnectionPooling:
         """Test multiple MongoDB URIs create separate connections."""
         uri1 = mongodb_container.get_connection_url()
         # Simulate different URI by adding query parameter
-        uri2 = uri1 + "?retryWrites=true" if "?" not in uri1 else uri1 + "&maxPoolSize=50"
+        uri2 = (
+            uri1 + "?retryWrites=true" if "?" not in uri1 else uri1 + "&maxPoolSize=50"
+        )
 
         db1 = Jac.db(db_name="db1", db_type="mongodb", uri=uri1)
         db2 = Jac.db(db_name="db2", db_type="mongodb", uri=uri1)  # Same URI
@@ -238,7 +215,7 @@ class TestConfigurationFallback:
             db_instance = Jac.db(
                 db_name="test",
                 db_type="mongodb",
-                uri=mongo_uri  # Explicit URI
+                uri=mongo_uri,  # Explicit URI
             )
 
             # Should successfully connect with explicit URI

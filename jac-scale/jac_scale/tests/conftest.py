@@ -36,6 +36,7 @@ def cleanup_db_connections():
     # Cleanup after test
     try:
         from jac_scale.db import close_all_db_connections
+
         close_all_db_connections()
     except Exception:
         pass
