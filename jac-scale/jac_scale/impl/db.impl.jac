@@ -67,7 +67,9 @@ impl Db.insert_one(col_name: str, document: dict) -> Any {
         class InsertResult {
             has inserted_id: str;
         }
-        return InsertResult(inserted_id=document['_id']);
+        result = InsertResult();
+        result.inserted_id = document['_id'];
+        return result;
     }
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
@@ -98,7 +100,10 @@ impl Db.update_one(
                     has matched_count: int,
                         modified_count: int;
                 }
-                return UpdateResult(matched_count=1, modified_count=1);
+                result = UpdateResult();
+                result.matched_count = 1;
+                result.modified_count = 1;
+                return result;
             } elif upsert_mode {
                 # Create new document
                 doc = filter.copy();
@@ -113,16 +118,21 @@ impl Db.update_one(
                         modified_count: int,
                         upserted_id: str;
                 }
-                return UpdateResult(
-                    matched_count=0, modified_count=0, upserted_id=filter['_id']
-                );
+                result = UpdateResult();
+                result.matched_count = 0;
+                result.modified_count = 0;
+                result.upserted_id = filter['_id'];
+                return result;
             }
         }
         class UpdateResult {
             has matched_count: int,
                 modified_count: int;
         }
-        return UpdateResult(matched_count=0, modified_count=0);
+        result = UpdateResult();
+        result.matched_count = 0;
+        result.modified_count = 0;
+        return result;
     }
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
@@ -140,12 +150,16 @@ impl Db.delete_one(col_name: str, filter: dict) -> Any {
             class DeleteResult {
                 has deleted_count: int;
             }
-            return DeleteResult(deleted_count=deleted);
+            result = DeleteResult();
+            result.deleted_count = deleted;
+            return result;
         }
         class DeleteResult {
             has deleted_count: int;
         }
-        return DeleteResult(deleted_count=0);
+        result = DeleteResult();
+        result.deleted_count = 0;
+        return result;
     }
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
@@ -215,7 +229,10 @@ impl Db.update_many(
             has matched_count: int,
                 modified_count: int;
         }
-        return UpdateResult(matched_count=matched, modified_count=modified);
+        result = UpdateResult();
+        result.matched_count = matched;
+        result.modified_count = modified;
+        return result;
     }
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
@@ -258,7 +275,10 @@ impl Db.update_by_id(
                 has matched_count: int,
                     modified_count: int;
             }
-            return UpdateResult(matched_count=1, modified_count=1);
+            result = UpdateResult();
+            result.matched_count = 1;
+            result.modified_count = 1;
+            return result;
         } elif upsert_mode {
             doc = {'_id': id};
             if '$set' in update_data {
@@ -272,13 +292,20 @@ impl Db.update_by_id(
                     modified_count: int,
                     upserted_id: str;
             }
-            return UpdateResult(matched_count=0, modified_count=0, upserted_id=id);
+            result = UpdateResult();
+            result.matched_count = 0;
+            result.modified_count = 0;
+            result.upserted_id = id;
+            return result;
         }
         class UpdateResult {
             has matched_count: int,
                 modified_count: int;
         }
-        return UpdateResult(matched_count=0, modified_count=0);
+        result = UpdateResult();
+        result.matched_count = 0;
+        result.modified_count = 0;
+        return result;
     }
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
@@ -294,7 +321,9 @@ impl Db.delete_by_id(col_name: str, id: str) -> Any {
         class DeleteResult {
             has deleted_count: int;
         }
-        return DeleteResult(deleted_count=deleted);
+        result = DeleteResult();
+        result.deleted_count = deleted;
+        return result;
     }
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }

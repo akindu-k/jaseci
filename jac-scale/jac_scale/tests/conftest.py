@@ -27,3 +27,15 @@ def pytest_sessionstart(session: pytest.Session) -> None:
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     """Clean up anchor_store.db files at the end of the test session."""
     _remove_anchor_store_files()
+
+
+@pytest.fixture(autouse=True)
+def cleanup_db_connections():
+    """Clean up all database connections after each test."""
+    yield
+    # Cleanup after test
+    try:
+        from jac_scale.db import close_all_db_connections
+        close_all_db_connections()
+    except Exception:
+        pass
