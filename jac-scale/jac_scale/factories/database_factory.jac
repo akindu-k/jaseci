@@ -60,7 +60,7 @@ class DatabaseProviderFactory {
             try {
                 db_type = DatabaseType(db_type);
             } except Exception {
-                raise ValueError(f"Invalid database type: {db_type}");
+                raise ValueError(f"Invalid database type: {db_type}") ;
             }
         }
         if (db_type == DatabaseType.MONGODB) {
@@ -70,9 +70,8 @@ class DatabaseProviderFactory {
                 db_config = scale_config.get_database_config();
                 uri = db_config.get('mongodb_uri');
             }
-
             if (uri is None) {
-                raise ValueError('MongoDB URI not found in configuration');
+                raise ValueError('MongoDB URI not found in configuration') ;
             }
             return MongoClient(uri, **(config or {}));
         } elif (db_type == DatabaseType.REDIS) {
@@ -83,11 +82,11 @@ class DatabaseProviderFactory {
                 uri = db_config.get('redis_url');
             }
             if (uri is None) {
-                raise ValueError('Redis URL not found in configuration');
+                raise ValueError('Redis URL not found in configuration') ;
             }
             return Redis.from_url(uri, **(config or {}));
         } else {
-            raise ValueError(f"Unsupported database type: {db_type}");
+            raise ValueError(f"Unsupported database type: {db_type}") ;
         }
     }
 }

@@ -133,7 +133,7 @@ def close_redis_client(uri: (str | None) = None) -> None {
 
     Useful for cleanup during application shutdown.
     """
-def close_all_db_connections() -> None {
+def close_all_db_connections -> None {
     global _mongo_clients,_redis_clients;
 
     # Close all MongoDB clients
