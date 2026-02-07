@@ -94,9 +94,9 @@ with entry {
 
     # Example 8: Upsert operation
     print("\n🔄 Example 8: Upsert (insert if not exists)...");
-    upsert_result = mongo_db.update_by_id(
+    upsert_result = mongo_db.update_one(
         'settings',
-        'app_config',
+        {'_id': 'app_config'},
         {'$set': {'theme': 'dark', 'notifications': True}},
         upsert_mode=True
     );

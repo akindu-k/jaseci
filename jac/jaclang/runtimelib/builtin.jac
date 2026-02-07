@@ -86,6 +86,6 @@ glob __all__ = [
          'ConnectPerm',
          'WritePerm',
          'restspec',
-         'db'
+         'db',
          'APIProtocol'
      ];
