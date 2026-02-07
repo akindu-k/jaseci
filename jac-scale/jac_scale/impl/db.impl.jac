@@ -174,14 +174,7 @@ impl Db.update_many(
             if data {
                 doc = json.loads(data);
                 # Simple filter matching (only exact matches for now)
-                matches = True;
-                for (k, v) in filter.items() {
-                    if doc.get(k) != v {
-                        matches = False;
-                        break;
-                    }
-                }
-                if matches {
+                if all(doc.get(k) == v for (k, v) in filter.items()) {
                     matched += 1;
                     if '$set' in update_data {
                         doc.update(update_data['$set']);
