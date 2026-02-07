@@ -13,6 +13,42 @@ class DatabaseType(StrEnum) {
     }
 }
 
+"""Resolve database URI from explicit parameter or configuration.
+
+    Args:
+        uri: Explicit URI provided by user (takes precedence).
+        db_type: Type of database (MONGODB or REDIS).
+
+    Returns:
+        Resolved URI string.
+
+    Raises:
+        ValueError: If URI cannot be resolved from config or unsupported db_type.
+    """
+def _resolve_uri(uri: (str | None), db_type: DatabaseType) -> str {
+    if uri is not None {
+        return uri;
+    }
+
+    db_config = get_scale_config().get_database_config();
+
+    if db_type == DatabaseType.MONGODB {
+        resolved = db_config.get('mongodb_uri');
+        if resolved is None {
+            raise ValueError('MongoDB URI not found in configuration');
+        }
+        return cast(str, resolved);
+    } elif db_type == DatabaseType.REDIS {
+        resolved = db_config.get('redis_url');
+        if resolved is None {
+            raise ValueError('Redis URL not found in configuration');
+        }
+        return cast(str, resolved);
+    } else {
+        raise ValueError(f'Unsupported database type: {db_type}');
+    }
+}
+
 """Factory for creating database provider instances."""
 class DatabaseProviderFactory {
     """Create a database provider based on type.
@@ -56,37 +92,30 @@ class DatabaseProviderFactory {
         uri: Optional[str] = None,
         config: Optional[Dict[(str, Any)]] = None
     ) -> Any {
+        # Convert string to DatabaseType enum
+        db_type_enum: DatabaseType;
         if (isinstance(db_type, str)) {
             try {
-                db_type = DatabaseType(db_type);
+                db_type_enum = DatabaseType(db_type);
             } except Exception {
                 raise ValueError(f"Invalid database type: {db_type}") ;
             }
-        }
-        if (db_type == DatabaseType.MONGODB) {
-            import from pymongo { MongoClient }
-            if (uri is None) {
-                scale_config = get_scale_config();
-                db_config = scale_config.get_database_config();
-                uri = db_config.get('mongodb_uri');
-            }
-            if (uri is None) {
-                raise ValueError('MongoDB URI not found in configuration') ;
-            }
-            return MongoClient(uri, **(config or {}));
-        } elif (db_type == DatabaseType.REDIS) {
-            import from redis { Redis }
-            if (uri is None) {
-                scale_config = get_scale_config();
-                db_config = scale_config.get_database_config();
-                uri = db_config.get('redis_url');
-            }
-            if (uri is None) {
-                raise ValueError('Redis URL not found in configuration') ;
-            }
-            return Redis.from_url(uri, **(config or {}));
         } else {
-            raise ValueError(f"Unsupported database type: {db_type}") ;
+            db_type_enum = cast(DatabaseType, db_type);
+        }
+
+        # Resolve URI from config if not provided
+        resolved_uri = _resolve_uri(uri, db_type_enum);
+
+        # Create appropriate client
+        if (db_type_enum == DatabaseType.MONGODB) {
+            import from pymongo { MongoClient }
+            return MongoClient(resolved_uri, **(config or {}));
+        } elif (db_type_enum == DatabaseType.REDIS) {
+            import from redis { Redis }
+            return Redis.from_url(resolved_uri, **(config or {}));
+        } else {
+            raise ValueError(f"Unsupported database type: {db_type_enum}") ;
         }
     }
 }

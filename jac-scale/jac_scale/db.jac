@@ -10,7 +10,8 @@ import from pymongo.cursor { Cursor }
 import from redis { Redis }
 import from jac_scale.factories.database_factory {
     DatabaseProviderFactory,
-    DatabaseType
+    DatabaseType,
+    _resolve_uri
 }
 import from bson { ObjectId }
 import from uuid { uuid4 }
@@ -18,44 +19,6 @@ import json;
 
 glob _mongo_clients: dict[str, MongoClient] = {},
      _redis_clients: dict[str, Redis] = {};
-
-# Private helper functions
-"""Resolve database URI from explicit parameter or configuration.
-
-    Args:
-        uri: Explicit URI provided by user (takes precedence).
-        db_type: Type of database (MONGODB or REDIS).
-
-    Returns:
-        Resolved URI string.
-
-    Raises:
-        ValueError: If URI cannot be resolved from config or unsupported db_type.
-    """
-def _resolve_uri(uri: (str | None), db_type: DatabaseType) -> str {
-    if uri is not None {
-        return uri;
-    }
-
-    import from jac_scale.config_loader { get_scale_config }
-    db_config = get_scale_config().get_database_config();
-
-    if db_type == DatabaseType.MONGODB {
-        resolved = db_config.get('mongodb_uri');
-        if resolved is None {
-            raise ValueError('MongoDB URI not found in configuration');
-        }
-        return resolved;
-    } elif db_type == DatabaseType.REDIS {
-        resolved = db_config.get('redis_url');
-        if resolved is None {
-            raise ValueError('Redis URL not found in configuration');
-        }
-        return resolved;
-    } else {
-        raise ValueError(f'Unsupported database type: {db_type}');
-    }
-}
 
 # Result classes for database operations
 class InsertResult {
