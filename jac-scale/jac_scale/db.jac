@@ -7,6 +7,7 @@ import from jac_scale.factories.database_factory {
     DatabaseType
 }
 import from bson { ObjectId }
+import from uuid { uuid4 }
 
 glob _mongo_clients: dict[str, MongoClient] = {},
      _redis_clients: dict[str, Redis] = {};

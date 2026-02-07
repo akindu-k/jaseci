@@ -5,7 +5,6 @@ based on the db_type (MongoDB or Redis).
 """
 import from jac_scale.factories.database_factory { DatabaseType }
 import from typing { Any }
-import from bson { ObjectId }
 import json;
 
 # Result classes for database operations
@@ -76,7 +75,6 @@ impl Db.insert_one(col_name: str, document: dict) -> Any {
         return col.insert_one(document);
     } elif self.db_type == DatabaseType.REDIS {
         # Generate an ID if not provided
-        import from uuid { uuid4 }
         if '_id' not in document {
             document['_id'] = str(uuid4());
         }
@@ -167,7 +165,6 @@ impl Db.insert_many(col_name: str, documents: list) -> Any {
         col = db[col_name];
         return col.insert_many(documents);
     } elif self.db_type == DatabaseType.REDIS {
-        import from uuid { uuid4 }
         inserted_ids = [];
         for doc in documents {
             if '_id' not in doc {
