@@ -8,6 +8,25 @@ import from typing { Any }
 import from bson { ObjectId }
 import json;
 
+# Result classes for database operations
+class InsertResult {
+    has inserted_id: str;
+}
+
+class InsertManyResult {
+    has inserted_ids: list;
+}
+
+class UpdateResult {
+    has matched_count: int,
+        modified_count: int,
+        upserted_id: str | None = None;
+}
+
+class DeleteResult {
+    has deleted_count: int;
+}
+
 # MongoDB implementations
 impl Db.find_one(col_name: str, filter: dict) -> dict | None {
     if self.db_type == DatabaseType.MONGODB {
@@ -64,9 +83,6 @@ impl Db.insert_one(col_name: str, document: dict) -> Any {
         key = f"{self.db_name}:{col_name}:{document['_id']}";
         self.client.set(key, json.dumps(document));
         # Return a result object similar to MongoDB
-        class InsertResult {
-            has inserted_id: str;
-        }
         result = InsertResult();
         result.inserted_id = document['_id'];
         return result;
@@ -96,10 +112,6 @@ impl Db.update_one(
                 }
                 self.client.set(key, json.dumps(doc));
                 # Return result similar to MongoDB
-                class UpdateResult {
-                    has matched_count: int,
-                        modified_count: int;
-                }
                 result = UpdateResult();
                 result.matched_count = 1;
                 result.modified_count = 1;
@@ -113,21 +125,12 @@ impl Db.update_one(
                     doc.update(update_data);
                 }
                 self.client.set(key, json.dumps(doc));
-                class UpdateResult {
-                    has matched_count: int,
-                        modified_count: int,
-                        upserted_id: str;
-                }
                 result = UpdateResult();
                 result.matched_count = 0;
                 result.modified_count = 0;
                 result.upserted_id = filter['_id'];
                 return result;
             }
-        }
-        class UpdateResult {
-            has matched_count: int,
-                modified_count: int;
         }
         result = UpdateResult();
         result.matched_count = 0;
@@ -147,15 +150,9 @@ impl Db.delete_one(col_name: str, filter: dict) -> Any {
             key = f"{self.db_name}:{col_name}:{filter['_id']}";
             deleted = self.client.delete(key);
             # Return result similar to MongoDB
-            class DeleteResult {
-                has deleted_count: int;
-            }
             result = DeleteResult();
             result.deleted_count = deleted;
             return result;
-        }
-        class DeleteResult {
-            has deleted_count: int;
         }
         result = DeleteResult();
         result.deleted_count = 0;
@@ -179,9 +176,6 @@ impl Db.insert_many(col_name: str, documents: list) -> Any {
             key = f"{self.db_name}:{col_name}:{doc['_id']}";
             self.client.set(key, json.dumps(doc));
             inserted_ids.append(doc['_id']);
-        }
-        class InsertManyResult {
-            has inserted_ids: list;
         }
         return InsertManyResult(inserted_ids=inserted_ids);
     }
@@ -225,10 +219,6 @@ impl Db.update_many(
                 }
             }
         }
-        class UpdateResult {
-            has matched_count: int,
-                modified_count: int;
-        }
         result = UpdateResult();
         result.matched_count = matched;
         result.modified_count = modified;
@@ -271,10 +261,6 @@ impl Db.update_by_id(
                 doc.update(update_data);
             }
             self.client.set(key, json.dumps(doc));
-            class UpdateResult {
-                has matched_count: int,
-                    modified_count: int;
-            }
             result = UpdateResult();
             result.matched_count = 1;
             result.modified_count = 1;
@@ -287,20 +273,11 @@ impl Db.update_by_id(
                 doc.update(update_data);
             }
             self.client.set(key, json.dumps(doc));
-            class UpdateResult {
-                has matched_count: int,
-                    modified_count: int,
-                    upserted_id: str;
-            }
             result = UpdateResult();
             result.matched_count = 0;
             result.modified_count = 0;
             result.upserted_id = id;
             return result;
-        }
-        class UpdateResult {
-            has matched_count: int,
-                modified_count: int;
         }
         result = UpdateResult();
         result.matched_count = 0;
@@ -318,9 +295,6 @@ impl Db.delete_by_id(col_name: str, id: str) -> Any {
     } elif self.db_type == DatabaseType.REDIS {
         key = f"{self.db_name}:{col_name}:{id}";
         deleted = self.client.delete(key);
-        class DeleteResult {
-            has deleted_count: int;
-        }
         result = DeleteResult();
         result.deleted_count = deleted;
         return result;
