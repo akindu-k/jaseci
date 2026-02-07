@@ -4,6 +4,14 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.9.16 (Unreleased)
 
+- **`db()` Builtin for Direct Database Access**: Added `db()` builtin function to the runtime interface as a hookable plugin point for database access. The base implementation raises `NotImplementedError` with guidance to install `jac-scale`. When jac-scale is installed, `db()` provides direct access to database operations without graph layer abstraction. This enables plugins to extend Jac with database capabilities while keeping the core language dependency-free.
+
+  **Usage** (requires jac-scale):
+  ```jac
+  mongo_db = db(db_name='my_app', db_type='mongodb');
+  redis_cache = db(db_name='cache', db_type='redis');
+  ```
+
 - **`APIProtocol` Builtin Enum**: Added `APIProtocol` enum (`HTTP`, `WEBHOOK`, `WEBSOCKET`) as a builtin, replacing the boolean `webhook` flag in `RestSpecs` with a typed `protocol` field. Use `@restspec(protocol=APIProtocol.WEBSOCKET)` directly without imports.
 - **Native Compiler: Cross-Module Linking**: Native `.na.jac` modules can now import and call functions from other `.na.jac` modules. The compiler performs LLVM IR-level linking enabling modular native code organization with `import from module { func1, func2 }` syntax.
 - **LSP Debounced Type Checking**: The language server now waits for a brief pause in typing (300ms) before starting analysis, eliminating lag during rapid edits.
