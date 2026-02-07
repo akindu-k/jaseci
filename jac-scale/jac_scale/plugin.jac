@@ -240,28 +240,6 @@ class JacScalePlugin {
         import from .factories.storage_factory { StorageFactory }
         return StorageFactory.get_default(base_path, create_dirs);
     }
-
-    @hookimpl
-    static def db(
-        db_name: str = 'jac_db', db_type: str = 'mongodb', uri: (str | None) = None
-    ) -> Db {
-        import from jac_scale.db { Db, get_mongo_client, get_redis_client }
-        import from jac_scale.factories.database_factory { DatabaseType }
-
-        # Convert string to enum
-        db_type_enum = DatabaseType(db_type);
-
-        # Get appropriate client based on db_type
-        if db_type_enum == DatabaseType.MONGODB {
-            client = get_mongo_client(uri=uri);
-        } elif db_type_enum == DatabaseType.REDIS {
-            client = get_redis_client(uri=uri);
-        } else {
-            raise ValueError(f"Unsupported database type: {db_type}") ;
-        }
-
-        return Db(client=client, db_name=db_name, db_type=db_type_enum);
-    }
 }
 
 # Pluggy's varnames() puts parameters with defaults into kwargnames, not argnames.
@@ -283,6 +261,5 @@ def strip_defaults(func: Any) -> None {
 with entry {
     strip_defaults(JacScalePlugin.create_j_context);
     strip_defaults(JacScalePlugin.store);
-    strip_defaults(JacScalePlugin.db);
     plugin_manager.register(JacScalePlugin());
 }

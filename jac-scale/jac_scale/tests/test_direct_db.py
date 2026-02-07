@@ -14,7 +14,7 @@ import pytest
 from testcontainers.mongodb import MongoDbContainer
 from testcontainers.redis import RedisContainer
 
-from jaclang.pycore.runtime import JacRuntime as Jac
+from jac_scale.lib import kvstore
 
 
 @pytest.fixture(scope="session")
@@ -63,8 +63,7 @@ class TestMongoDBOperations:
 
     def test_insert_and_find_one(self, mongo_uri: str) -> None:
         """Test basic insert and find operations."""
-        # Call via Jac runtime (as users would)
-        db_instance = Jac.db(db_name="test_db", db_type="mongodb", uri=mongo_uri)
+        db_instance = kvstore(db_name="test_db", db_type="mongodb", uri=mongo_uri)
 
         # Insert a document
         doc = {"name": "Alice", "age": 30, "role": "engineer"}
@@ -80,7 +79,7 @@ class TestMongoDBOperations:
 
     def test_update_and_delete(self, mongo_uri: str) -> None:
         """Test update and delete operations."""
-        db_instance = Jac.db(db_name="test_db", db_type="mongodb", uri=mongo_uri)
+        db_instance = kvstore(db_name="test_db", db_type="mongodb", uri=mongo_uri)
 
         # Insert
         doc = {"name": "Bob", "status": "active"}
@@ -107,7 +106,7 @@ class TestMongoDBOperations:
 
     def test_bulk_operations(self, mongo_uri: str) -> None:
         """Test bulk insert and update operations."""
-        db_instance = Jac.db(db_name="test_db", db_type="mongodb", uri=mongo_uri)
+        db_instance = kvstore(db_name="test_db", db_type="mongodb", uri=mongo_uri)
 
         # Bulk insert
         docs = [
@@ -130,7 +129,7 @@ class TestRedisOperations:
 
     def test_redis_insert_and_find(self, redis_uri: str) -> None:
         """Test Redis insert and find operations."""
-        db_instance = Jac.db(db_name="cache", db_type="redis", uri=redis_uri)
+        db_instance = kvstore(db_name="cache", db_type="redis", uri=redis_uri)
 
         # Insert
         doc = {"session_id": "abc123", "user": "alice"}
@@ -145,7 +144,7 @@ class TestRedisOperations:
 
     def test_redis_update_and_delete(self, redis_uri: str) -> None:
         """Test Redis update and delete operations."""
-        db_instance = Jac.db(db_name="cache", db_type="redis", uri=redis_uri)
+        db_instance = kvstore(db_name="cache", db_type="redis", uri=redis_uri)
 
         # Insert
         doc = {"key": "value1"}
@@ -170,8 +169,8 @@ class TestConnectionPooling:
 
     def test_same_uri_reuses_connection(self, mongo_uri: str) -> None:
         """Verify same URI reuses the same connection."""
-        db1 = Jac.db(db_name="db1", db_type="mongodb", uri=mongo_uri)
-        db2 = Jac.db(db_name="db2", db_type="mongodb", uri=mongo_uri)
+        db1 = kvstore(db_name="db1", db_type="mongodb", uri=mongo_uri)
+        db2 = kvstore(db_name="db2", db_type="mongodb", uri=mongo_uri)
 
         # Same URI should reuse the same client
         assert db1.client is db2.client
@@ -180,8 +179,8 @@ class TestConnectionPooling:
         self, mongo_uri: str, redis_uri: str
     ) -> None:
         """Verify different URIs create different connections."""
-        mongo_db = Jac.db(db_name="mongo", db_type="mongodb", uri=mongo_uri)
-        redis_db = Jac.db(db_name="redis", db_type="redis", uri=redis_uri)
+        mongo_db = kvstore(db_name="mongo", db_type="mongodb", uri=mongo_uri)
+        redis_db = kvstore(db_name="redis", db_type="redis", uri=redis_uri)
 
         # Different databases should have different clients
         assert mongo_db.client is not redis_db.client
@@ -194,9 +193,9 @@ class TestConnectionPooling:
             uri1 + "?retryWrites=true" if "?" not in uri1 else uri1 + "&maxPoolSize=50"
         )
 
-        db1 = Jac.db(db_name="db1", db_type="mongodb", uri=uri1)
-        db2 = Jac.db(db_name="db2", db_type="mongodb", uri=uri1)  # Same URI
-        db3 = Jac.db(db_name="db3", db_type="mongodb", uri=uri2)  # Different URI
+        db1 = kvstore(db_name="db1", db_type="mongodb", uri=uri1)
+        db2 = kvstore(db_name="db2", db_type="mongodb", uri=uri1)  # Same URI
+        db3 = kvstore(db_name="db3", db_type="mongodb", uri=uri2)  # Different URI
 
         # db1 and db2 should share client
         assert db1.client is db2.client
@@ -215,7 +214,7 @@ class TestConfigurationFallback:
 
         try:
             # Explicit URI should be used, not env var
-            db_instance = Jac.db(
+            db_instance = kvstore(
                 db_name="test",
                 db_type="mongodb",
                 uri=mongo_uri,  # Explicit URI
@@ -233,7 +232,7 @@ class TestConfigurationFallback:
 
         try:
             # No URI provided, should use env var
-            db_instance = Jac.db(db_name="test", db_type="mongodb")
+            db_instance = kvstore(db_name="test", db_type="mongodb")
 
             # Should connect successfully
             result = db_instance.insert_one("test", {"test": "data"})
@@ -248,7 +247,7 @@ class TestConfigurationFallback:
         os.environ.pop("REDIS_URL", None)
 
         with pytest.raises(ValueError, match="MongoDB URI not found"):
-            Jac.db(db_name="test", db_type="mongodb")  # No URI, no config
+            kvstore(db_name="test", db_type="mongodb")  # No URI, no config
 
 
 class TestErrorHandling:
@@ -257,13 +256,13 @@ class TestErrorHandling:
     def test_invalid_db_type(self, mongo_uri: str) -> None:
         """Verify invalid database type raises error."""
         with pytest.raises(ValueError, match="is not a valid DatabaseType"):
-            Jac.db(db_name="test", db_type="invalid_db", uri=mongo_uri)
+            kvstore(db_name="test", db_type="invalid_db", uri=mongo_uri)
 
     def test_invalid_mongodb_id(self, mongo_uri: str) -> None:
         """Verify invalid MongoDB ObjectId raises InvalidId exception."""
         from bson.errors import InvalidId
 
-        db_instance = Jac.db(db_name="test", db_type="mongodb", uri=mongo_uri)
+        db_instance = kvstore(db_name="test", db_type="mongodb", uri=mongo_uri)
 
         # Invalid ObjectId should raise InvalidId exception
         with pytest.raises(InvalidId):
@@ -271,7 +270,7 @@ class TestErrorHandling:
 
     def test_delete_nonexistent_document(self, mongo_uri: str) -> None:
         """Verify deleting non-existent document doesn't crash."""
-        db_instance = Jac.db(db_name="test", db_type="mongodb", uri=mongo_uri)
+        db_instance = kvstore(db_name="test", db_type="mongodb", uri=mongo_uri)
 
         # Should return deleted_count = 0, not crash
         result = db_instance.delete_one("users", {"_id": "nonexistent"})
@@ -282,14 +281,14 @@ class TestErrorHandling:
         from jac_scale.db import close_all_db_connections
 
         # Create connections
-        db1 = Jac.db(db_name="db1", db_type="mongodb", uri=mongo_uri)
+        db1 = kvstore(db_name="db1", db_type="mongodb", uri=mongo_uri)
         db1.insert_one("test", {"data": "test"})
 
         # Cleanup should not raise errors
         close_all_db_connections()
 
         # Creating new connection after cleanup should work
-        db2 = Jac.db(db_name="db2", db_type="mongodb", uri=mongo_uri)
+        db2 = kvstore(db_name="db2", db_type="mongodb", uri=mongo_uri)
         result = db2.insert_one("test", {"data": "test2"})
         assert result.inserted_id is not None
 
@@ -299,8 +298,8 @@ class TestDatabaseIsolation:
 
     def test_different_db_names_are_isolated(self, mongo_uri: str) -> None:
         """Verify different database names maintain isolation."""
-        db1 = Jac.db(db_name="db_one", db_type="mongodb", uri=mongo_uri)
-        db2 = Jac.db(db_name="db_two", db_type="mongodb", uri=mongo_uri)
+        db1 = kvstore(db_name="db_one", db_type="mongodb", uri=mongo_uri)
+        db2 = kvstore(db_name="db_two", db_type="mongodb", uri=mongo_uri)
 
         # Insert into db1
         doc1 = {"name": "test1"}
@@ -327,10 +326,10 @@ class TestRealWorldUsage:
     def test_user_session_workflow(self, mongo_uri: str, redis_uri: str) -> None:
         """Simulate a real user session workflow."""
         # MongoDB for persistent data
-        user_db = Jac.db(db_name="app", db_type="mongodb", uri=mongo_uri)
+        user_db = kvstore(db_name="app", db_type="mongodb", uri=mongo_uri)
 
         # Redis for session cache
-        cache_db = Jac.db(db_name="app", db_type="redis", uri=redis_uri)
+        cache_db = kvstore(db_name="app", db_type="redis", uri=redis_uri)
 
         # 1. Create user in MongoDB
         user = {"email": "user@example.com", "name": "Test User"}

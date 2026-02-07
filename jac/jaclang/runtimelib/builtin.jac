@@ -24,7 +24,6 @@ with entry {
         save: Callable[(..., Any)];
         commit: Callable[(..., Any)];
         store: Callable[(..., Any)];
-        db: Callable[(..., Any)];
         NoPerm: IntEnum;
         ReadPerm: IntEnum;
         ConnectPerm: IntEnum;

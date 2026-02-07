@@ -4,11 +4,19 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.1.7 (Unreleased)
 
-- **Direct Database Operations API**: Added `db()` builtin function for direct database operations without graph layer abstraction. Supports both MongoDB and Redis with a unified API for CRUD operations (`insert_one`, `find_by_id`, `update_by_id`, `delete_by_id`, `insert_many`, `update_many`, `delete_many`). Database selection via `db_type` parameter (`'mongodb'` or `'redis'`), with configuration fallback mechanism (explicit URI → environment variable → jac.toml).
+- **Key-Value Store API (`kvstore`)**: Added `kvstore()` function in `jac_scale.lib` for direct database operations without graph layer abstraction. Provides explicit import-based access (no global builtins). Supports both MongoDB and Redis with a unified API for CRUD operations (`insert_one`, `find_by_id`, `update_by_id`, `delete_by_id`, `insert_many`, `update_many`, `delete_many`). Database selection via `db_type` parameter (`'mongodb'` or `'redis'`), with configuration fallback mechanism (explicit URI → environment variable → jac.toml).
+
+  **Usage**:
+  ```jac
+  import from jac_scale.lib { kvstore }
+
+  mongo_db = kvstore(db_name='my_app', db_type='mongodb');
+  redis_cache = kvstore(db_name='cache', db_type='redis');
+  ```
 
 - **URI-Based Connection Pooling**: Implemented connection pooling for database clients using URI-keyed dictionaries. Same URI reuses existing connections while different URIs create separate connection pools. Added `close_mongo_client()`, `close_redis_client()`, and `close_all_db_connections()` cleanup functions for proper resource management.
 
-- **Database Factory Pattern**: Introduced `DatabaseProviderFactory` with `create_client()` method supporting `DatabaseType` enum (`MONGODB`, `REDIS`) for type-safe database client instantiation.
+- **Database Factory Pattern**: Introduced `DatabaseProviderFactory` with `create_client()` method and `_resolve_uri()` utility supporting `DatabaseType` enum (`MONGODB`, `REDIS`) for type-safe database client instantiation.
 
 ## jac-scale 0.1.6 (Latest Release)
 
