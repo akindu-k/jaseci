@@ -20,22 +20,22 @@ import json;
 glob _mongo_clients: dict[str, MongoClient] = {},
      _redis_clients: dict[str, Redis] = {};
 
-# Result classes for database operations
-class InsertResult {
+# Result objects for database operations
+obj InsertResult {
     has inserted_id: str;
 }
 
-class InsertManyResult {
+obj InsertManyResult {
     has inserted_ids: list;
 }
 
-class UpdateResult {
+obj UpdateResult {
     has matched_count: int,
         modified_count: int,
         upserted_id: str | None = None;
 }
 
-class DeleteResult {
+obj DeleteResult {
     has deleted_count: int;
 }
 

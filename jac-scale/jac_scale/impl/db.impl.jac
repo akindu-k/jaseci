@@ -41,8 +41,7 @@ impl Db.find_one(col_name: str, filter: dict) -> dict | None {
         # Simple implementation: if filter has '_id', use it as key
         if '_id' in filter {
             key = _redis_key(self.db_name, col_name, filter['_id']);
-            data = self.client.get(key);
-            if data {
+            if (data := self.client.get(key)) {
                 return json.loads(data);
             }
         }
@@ -62,8 +61,7 @@ impl Db.find(col_name: str, filter: dict) -> Cursor | list {
         keys = self.client.keys(pattern);
         results = [];
         for key in keys {
-            data = self.client.get(key);
-            if data {
+            if (data := self.client.get(key)) {
                 results.append(json.loads(data));
             }
         }
@@ -87,9 +85,7 @@ impl Db.insert_one(
         key = _redis_key(self.db_name, col_name, document['_id']);
         self.client.set(key, json.dumps(document));
         # Return a result object similar to MongoDB
-        result = InsertResult();
-        result.inserted_id = document['_id'];
-        return result;
+        return InsertResult(inserted_id=document['_id']);
     }
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
@@ -105,32 +101,21 @@ impl Db.update_one(
         # For Redis, find the document first, update it, and save
         if '_id' in filter {
             key = _redis_key(self.db_name, col_name, filter['_id']);
-            data = self.client.get(key);
-            if data {
+            if (data := self.client.get(key)) {
                 doc = json.loads(data);
                 _apply_update(doc, update_data);
                 self.client.set(key, json.dumps(doc));
                 # Return result similar to MongoDB
-                result = UpdateResult();
-                result.matched_count = 1;
-                result.modified_count = 1;
-                return result;
+                return UpdateResult(matched_count=1, modified_count=1);
             } elif upsert_mode {
                 # Create new document
                 doc = filter.copy();
                 _apply_update(doc, update_data);
                 self.client.set(key, json.dumps(doc));
-                result = UpdateResult();
-                result.matched_count = 0;
-                result.modified_count = 0;
-                result.upserted_id = filter['_id'];
-                return result;
+                return UpdateResult(matched_count=0, modified_count=0, upserted_id=filter['_id']);
             }
         }
-        result = UpdateResult();
-        result.matched_count = 0;
-        result.modified_count = 0;
-        return result;
+        return UpdateResult(matched_count=0, modified_count=0);
     }
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
@@ -145,13 +130,9 @@ impl Db.delete_one(col_name: str, filter: dict) -> PyMongoDeleteResult | DeleteR
             key = _redis_key(self.db_name, col_name, filter['_id']);
             deleted = self.client.delete(key);
             # Return result similar to MongoDB
-            result = DeleteResult();
-            result.deleted_count = deleted;
-            return result;
+            return DeleteResult(deleted_count=deleted);
         }
-        result = DeleteResult();
-        result.deleted_count = 0;
-        return result;
+        return DeleteResult(deleted_count=0);
     }
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
@@ -192,8 +173,7 @@ impl Db.update_many(
         matched = 0;
         modified = 0;
         for key in keys {
-            data = self.client.get(key);
-            if data {
+            if (data := self.client.get(key)) {
                 doc = json.loads(data);
                 # Simple filter matching (only exact matches for now)
                 if all(doc.get(k) == v for (k, v) in filter.items()) {
@@ -204,10 +184,7 @@ impl Db.update_many(
                 }
             }
         }
-        result = UpdateResult();
-        result.matched_count = matched;
-        result.modified_count = modified;
-        return result;
+        return UpdateResult(matched_count=matched, modified_count=modified);
     }
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
@@ -219,8 +196,7 @@ impl Db.find_by_id(col_name: str, id: str) -> dict | None {
         return col.find_one({'_id': ObjectId(id)});
     } elif self.db_type == DatabaseType.REDIS {
         key = _redis_key(self.db_name, col_name, id);
-        data = self.client.get(key);
-        if data {
+        if (data := self.client.get(key)) {
             return json.loads(data);
         }
         return None;
@@ -237,29 +213,18 @@ impl Db.update_by_id(
         return col.update_one({'_id': ObjectId(id)}, update_data, upsert=upsert_mode);
     } elif self.db_type == DatabaseType.REDIS {
         key = _redis_key(self.db_name, col_name, id);
-        data = self.client.get(key);
-        if data {
+        if (data := self.client.get(key)) {
             doc = json.loads(data);
             _apply_update(doc, update_data);
             self.client.set(key, json.dumps(doc));
-            result = UpdateResult();
-            result.matched_count = 1;
-            result.modified_count = 1;
-            return result;
+            return UpdateResult(matched_count=1, modified_count=1);
         } elif upsert_mode {
             doc = {'_id': id};
             _apply_update(doc, update_data);
             self.client.set(key, json.dumps(doc));
-            result = UpdateResult();
-            result.matched_count = 0;
-            result.modified_count = 0;
-            result.upserted_id = id;
-            return result;
+            return UpdateResult(matched_count=0, modified_count=0, upserted_id=id);
         }
-        result = UpdateResult();
-        result.matched_count = 0;
-        result.modified_count = 0;
-        return result;
+        return UpdateResult(matched_count=0, modified_count=0);
     }
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
@@ -272,9 +237,7 @@ impl Db.delete_by_id(col_name: str, id: str) -> PyMongoDeleteResult | DeleteResu
     } elif self.db_type == DatabaseType.REDIS {
         key = _redis_key(self.db_name, col_name, id);
         deleted = self.client.delete(key);
-        result = DeleteResult();
-        result.deleted_count = deleted;
-        return result;
+        return DeleteResult(deleted_count=deleted);
     }
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
