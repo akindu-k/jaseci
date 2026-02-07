@@ -168,7 +168,11 @@ class JacParser(Transform[uni.Source, uni.Module]):
 
         # Keep elements as direct module children (no ClientBlock wrapper)
         module.body = elements
-        module.normalize(deep=False)
+        new_kid: list[uni.UniNode] = []
+        if module.doc:
+            new_kid.append(module.doc)
+        new_kid.extend(module.body)
+        module.set_kids(nodes=new_kid if new_kid else [uni.EmptyToken()])
         cls._recalculate_parents(module)
 
     @classmethod
@@ -203,7 +207,11 @@ class JacParser(Transform[uni.Source, uni.Module]):
 
         # Keep elements as direct module children (no ServerBlock wrapper)
         module.body = elements
-        module.normalize(deep=False)
+        new_kid: list[uni.UniNode] = []
+        if module.doc:
+            new_kid.append(module.doc)
+        new_kid.extend(module.body)
+        module.set_kids(nodes=new_kid if new_kid else [uni.EmptyToken()])
         cls._recalculate_parents(module)
 
     @classmethod
@@ -237,7 +245,11 @@ class JacParser(Transform[uni.Source, uni.Module]):
 
         # Keep elements as direct module children (no NativeBlock wrapper)
         module.body = elements
-        module.normalize(deep=False)
+        new_kid: list[uni.UniNode] = []
+        if module.doc:
+            new_kid.append(module.doc)
+        new_kid.extend(module.body)
+        module.set_kids(nodes=new_kid if new_kid else [uni.EmptyToken()])
         cls._recalculate_parents(module)
 
     def __init__(
