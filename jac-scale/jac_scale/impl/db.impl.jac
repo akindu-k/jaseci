@@ -3,29 +3,6 @@
 This file dispatches database operations to the appropriate implementation
 based on the db_type (MongoDB or Redis).
 """
-import from jac_scale.factories.database_factory { DatabaseType }
-import from typing { Any }
-import json;
-
-# Result classes for database operations
-class InsertResult {
-    has inserted_id: str;
-}
-
-class InsertManyResult {
-    has inserted_ids: list;
-}
-
-class UpdateResult {
-    has matched_count: int,
-        modified_count: int,
-        upserted_id: str | None = None;
-}
-
-class DeleteResult {
-    has deleted_count: int;
-}
-
 # MongoDB implementations
 impl Db.find_one(col_name: str, filter: dict) -> dict | None {
     if self.db_type == DatabaseType.MONGODB {
@@ -47,7 +24,7 @@ impl Db.find_one(col_name: str, filter: dict) -> dict | None {
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
 
-impl Db.find(col_name: str, filter: dict) -> Any {
+impl Db.find(col_name: str, filter: dict) -> list | Any {
     if self.db_type == DatabaseType.MONGODB {
         db = self.client[self.db_name];
         col = db[col_name];
@@ -68,7 +45,7 @@ impl Db.find(col_name: str, filter: dict) -> Any {
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
 
-impl Db.insert_one(col_name: str, document: dict) -> Any {
+impl Db.insert_one(col_name: str, document: dict) -> InsertResult | Any {
     if self.db_type == DatabaseType.MONGODB {
         db = self.client[self.db_name];
         col = db[col_name];
@@ -90,7 +67,7 @@ impl Db.insert_one(col_name: str, document: dict) -> Any {
 
 impl Db.update_one(
     col_name: str, filter: dict, update_data: dict, upsert_mode: bool = False
-) -> Any {
+) -> UpdateResult | Any {
     if self.db_type == DatabaseType.MONGODB {
         db = self.client[self.db_name];
         col = db[col_name];
@@ -138,7 +115,7 @@ impl Db.update_one(
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
 
-impl Db.delete_one(col_name: str, filter: dict) -> Any {
+impl Db.delete_one(col_name: str, filter: dict) -> DeleteResult | Any {
     if self.db_type == DatabaseType.MONGODB {
         db = self.client[self.db_name];
         col = db[col_name];
@@ -159,7 +136,7 @@ impl Db.delete_one(col_name: str, filter: dict) -> Any {
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
 
-impl Db.insert_many(col_name: str, documents: list) -> Any {
+impl Db.insert_many(col_name: str, documents: list) -> InsertManyResult | Any {
     if self.db_type == DatabaseType.MONGODB {
         db = self.client[self.db_name];
         col = db[col_name];
@@ -181,7 +158,7 @@ impl Db.insert_many(col_name: str, documents: list) -> Any {
 
 impl Db.update_many(
     col_name: str, filter: dict, update_data: dict, upsert_mode: bool = False
-) -> Any {
+) -> UpdateResult | Any {
     if self.db_type == DatabaseType.MONGODB {
         db = self.client[self.db_name];
         col = db[col_name];
@@ -242,7 +219,7 @@ impl Db.find_by_id(col_name: str, id: str) -> dict | None {
 
 impl Db.update_by_id(
     col_name: str, id: str, update_data: dict, upsert_mode: bool = False
-) -> Any {
+) -> UpdateResult | Any {
     if self.db_type == DatabaseType.MONGODB {
         db = self.client[self.db_name];
         col = db[col_name];
@@ -284,7 +261,7 @@ impl Db.update_by_id(
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
 
-impl Db.delete_by_id(col_name: str, id: str) -> Any {
+impl Db.delete_by_id(col_name: str, id: str) -> DeleteResult | Any {
     if self.db_type == DatabaseType.MONGODB {
         db = self.client[self.db_name];
         col = db[col_name];

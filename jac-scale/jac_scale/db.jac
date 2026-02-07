@@ -1,16 +1,36 @@
 """Direct Database Access Module."""
 import from pymongo { MongoClient }
 import from redis { Redis }
-import from typing { Any }
 import from jac_scale.factories.database_factory {
     DatabaseProviderFactory,
     DatabaseType
 }
 import from bson { ObjectId }
+import from typing { Any }
 import from uuid { uuid4 }
+import json;
 
 glob _mongo_clients: dict[str, MongoClient] = {},
      _redis_clients: dict[str, Redis] = {};
+
+# Result classes for database operations
+class InsertResult {
+    has inserted_id: str;
+}
+
+class InsertManyResult {
+    has inserted_ids: list;
+}
+
+class UpdateResult {
+    has matched_count: int,
+        modified_count: int,
+        upserted_id: str | None = None;
+}
+
+class DeleteResult {
+    has deleted_count: int;
+}
 
 """Get or create a MongoDB client for the given URI.
 
@@ -160,24 +180,23 @@ obj Db {
         db_type: DatabaseType = DatabaseType.MONGODB;
 
     def find_one(col_name: str, filter: dict) -> dict | None;
-    def find(col_name: str, filter: dict) -> Any;
-    def insert_one(col_name: str, document: dict) -> Any;
+    def find(col_name: str, filter: dict) -> list | Any;
+    def insert_one(col_name: str, document: dict) -> InsertResult | Any;
     def update_one(
         col_name: str, filter: dict, update_data: dict, upsert_mode: bool = False
-    ) -> Any;
+    ) -> UpdateResult | Any;
+    def delete_one(col_name: str, filter: dict) -> DeleteResult | Any;
 
-    def delete_one(col_name: str, filter: dict) -> Any;
     # Bulk operations
-    def insert_many(col_name: str, documents: list) -> Any;
+    def insert_many(col_name: str, documents: list) -> InsertManyResult | Any;
     def update_many(
         col_name: str, filter: dict, update_data: dict, upsert_mode: bool = False
-    ) -> Any;
+    ) -> UpdateResult | Any;
 
     # ID-based convenience methods
     def find_by_id(col_name: str, id: str) -> dict | None;
     def update_by_id(
         col_name: str, id: str, update_data: dict, upsert_mode: bool = False
-    ) -> Any;
-
-    def delete_by_id(col_name: str, id: str) -> Any;
+    ) -> UpdateResult | Any;
+    def delete_by_id(col_name: str, id: str) -> DeleteResult | Any;
 }
