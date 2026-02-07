@@ -24,7 +24,7 @@ impl Db.find_one(col_name: str, filter: dict) -> dict | None {
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
 
-impl Db.find(col_name: str, filter: dict) -> list | Any {
+impl Db.find(col_name: str, filter: dict) -> Cursor | list {
     if self.db_type == DatabaseType.MONGODB {
         db = self.client[self.db_name];
         col = db[col_name];
@@ -45,7 +45,7 @@ impl Db.find(col_name: str, filter: dict) -> list | Any {
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
 
-impl Db.insert_one(col_name: str, document: dict) -> InsertResult | Any {
+impl Db.insert_one(col_name: str, document: dict) -> PyMongoInsertOneResult | InsertResult {
     if self.db_type == DatabaseType.MONGODB {
         db = self.client[self.db_name];
         col = db[col_name];
@@ -67,7 +67,7 @@ impl Db.insert_one(col_name: str, document: dict) -> InsertResult | Any {
 
 impl Db.update_one(
     col_name: str, filter: dict, update_data: dict, upsert_mode: bool = False
-) -> UpdateResult | Any {
+) -> PyMongoUpdateResult | UpdateResult {
     if self.db_type == DatabaseType.MONGODB {
         db = self.client[self.db_name];
         col = db[col_name];
@@ -115,7 +115,7 @@ impl Db.update_one(
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
 
-impl Db.delete_one(col_name: str, filter: dict) -> DeleteResult | Any {
+impl Db.delete_one(col_name: str, filter: dict) -> PyMongoDeleteResult | DeleteResult {
     if self.db_type == DatabaseType.MONGODB {
         db = self.client[self.db_name];
         col = db[col_name];
@@ -136,7 +136,7 @@ impl Db.delete_one(col_name: str, filter: dict) -> DeleteResult | Any {
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
 
-impl Db.insert_many(col_name: str, documents: list) -> InsertManyResult | Any {
+impl Db.insert_many(col_name: str, documents: list) -> PyMongoInsertManyResult | InsertManyResult {
     if self.db_type == DatabaseType.MONGODB {
         db = self.client[self.db_name];
         col = db[col_name];
@@ -158,7 +158,7 @@ impl Db.insert_many(col_name: str, documents: list) -> InsertManyResult | Any {
 
 impl Db.update_many(
     col_name: str, filter: dict, update_data: dict, upsert_mode: bool = False
-) -> UpdateResult | Any {
+) -> PyMongoUpdateResult | UpdateResult {
     if self.db_type == DatabaseType.MONGODB {
         db = self.client[self.db_name];
         col = db[col_name];
@@ -219,7 +219,7 @@ impl Db.find_by_id(col_name: str, id: str) -> dict | None {
 
 impl Db.update_by_id(
     col_name: str, id: str, update_data: dict, upsert_mode: bool = False
-) -> UpdateResult | Any {
+) -> PyMongoUpdateResult | UpdateResult {
     if self.db_type == DatabaseType.MONGODB {
         db = self.client[self.db_name];
         col = db[col_name];
@@ -261,7 +261,7 @@ impl Db.update_by_id(
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
 
-impl Db.delete_by_id(col_name: str, id: str) -> DeleteResult | Any {
+impl Db.delete_by_id(col_name: str, id: str) -> PyMongoDeleteResult | DeleteResult {
     if self.db_type == DatabaseType.MONGODB {
         db = self.client[self.db_name];
         col = db[col_name];

@@ -1,12 +1,18 @@
 """Direct Database Access Module."""
 import from pymongo { MongoClient }
+import from pymongo.results {
+    InsertOneResult as PyMongoInsertOneResult,
+    InsertManyResult as PyMongoInsertManyResult,
+    UpdateResult as PyMongoUpdateResult,
+    DeleteResult as PyMongoDeleteResult
+}
+import from pymongo.cursor { Cursor }
 import from redis { Redis }
 import from jac_scale.factories.database_factory {
     DatabaseProviderFactory,
     DatabaseType
 }
 import from bson { ObjectId }
-import from typing { Any }
 import from uuid { uuid4 }
 import json;
 
@@ -180,23 +186,23 @@ obj Db {
         db_type: DatabaseType = DatabaseType.MONGODB;
 
     def find_one(col_name: str, filter: dict) -> dict | None;
-    def find(col_name: str, filter: dict) -> list | Any;
-    def insert_one(col_name: str, document: dict) -> InsertResult | Any;
+    def find(col_name: str, filter: dict) -> Cursor | list;
+    def insert_one(col_name: str, document: dict) -> PyMongoInsertOneResult | InsertResult;
     def update_one(
         col_name: str, filter: dict, update_data: dict, upsert_mode: bool = False
-    ) -> UpdateResult | Any;
-    def delete_one(col_name: str, filter: dict) -> DeleteResult | Any;
+    ) -> PyMongoUpdateResult | UpdateResult;
+    def delete_one(col_name: str, filter: dict) -> PyMongoDeleteResult | DeleteResult;
 
     # Bulk operations
-    def insert_many(col_name: str, documents: list) -> InsertManyResult | Any;
+    def insert_many(col_name: str, documents: list) -> PyMongoInsertManyResult | InsertManyResult;
     def update_many(
         col_name: str, filter: dict, update_data: dict, upsert_mode: bool = False
-    ) -> UpdateResult | Any;
+    ) -> PyMongoUpdateResult | UpdateResult;
 
     # ID-based convenience methods
     def find_by_id(col_name: str, id: str) -> dict | None;
     def update_by_id(
         col_name: str, id: str, update_data: dict, upsert_mode: bool = False
-    ) -> UpdateResult | Any;
-    def delete_by_id(col_name: str, id: str) -> DeleteResult | Any;
+    ) -> PyMongoUpdateResult | UpdateResult;
+    def delete_by_id(col_name: str, id: str) -> PyMongoDeleteResult | DeleteResult;
 }
