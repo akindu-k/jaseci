@@ -19,6 +19,44 @@ import json;
 glob _mongo_clients: dict[str, MongoClient] = {},
      _redis_clients: dict[str, Redis] = {};
 
+# Private helper functions
+"""Resolve database URI from explicit parameter or configuration.
+
+    Args:
+        uri: Explicit URI provided by user (takes precedence).
+        db_type: Type of database (MONGODB or REDIS).
+
+    Returns:
+        Resolved URI string.
+
+    Raises:
+        ValueError: If URI cannot be resolved from config or unsupported db_type.
+    """
+def _resolve_uri(uri: (str | None), db_type: DatabaseType) -> str {
+    if uri is not None {
+        return uri;
+    }
+
+    import from jac_scale.config_loader { get_scale_config }
+    db_config = get_scale_config().get_database_config();
+
+    if db_type == DatabaseType.MONGODB {
+        resolved = db_config.get('mongodb_uri');
+        if resolved is None {
+            raise ValueError('MongoDB URI not found in configuration');
+        }
+        return resolved;
+    } elif db_type == DatabaseType.REDIS {
+        resolved = db_config.get('redis_url');
+        if resolved is None {
+            raise ValueError('Redis URL not found in configuration');
+        }
+        return resolved;
+    } else {
+        raise ValueError(f'Unsupported database type: {db_type}');
+    }
+}
+
 # Result classes for database operations
 class InsertResult {
     has inserted_id: str;
@@ -54,26 +92,18 @@ class DeleteResult {
     """
 def get_mongo_client(uri: (str | None) = None) -> MongoClient {
     global _mongo_clients;
-    import from jac_scale.config_loader { get_scale_config }
 
-    # Get default URI if not provided
-    if uri is None {
-        scale_config = get_scale_config();
-        db_config = scale_config.get_database_config();
-        uri = db_config.get('mongodb_uri');
-        if uri is None {
-            raise ValueError('MongoDB URI not found in configuration') ;
-        }
-    }
+    # Resolve URI from config if not provided
+    resolved_uri = _resolve_uri(uri, DatabaseType.MONGODB);
 
     # Return existing client or create new one
-    if uri not in _mongo_clients {
-        _mongo_clients[uri] = DatabaseProviderFactory.create_client(
-            DatabaseType.MONGODB, uri=uri
+    if resolved_uri not in _mongo_clients {
+        _mongo_clients[resolved_uri] = DatabaseProviderFactory.create_client(
+            DatabaseType.MONGODB, uri=resolved_uri
         );
     }
 
-    return _mongo_clients[uri];
+    return _mongo_clients[resolved_uri];
 }
 
 """Get or create a Redis client for the given URI.
@@ -92,26 +122,18 @@ def get_mongo_client(uri: (str | None) = None) -> MongoClient {
     """
 def get_redis_client(uri: (str | None) = None) -> Redis {
     global _redis_clients;
-    import from jac_scale.config_loader { get_scale_config }
 
-    # Get default URI if not provided
-    if uri is None {
-        scale_config = get_scale_config();
-        db_config = scale_config.get_database_config();
-        uri = db_config.get('redis_url');
-        if uri is None {
-            raise ValueError('Redis URL not found in configuration') ;
-        }
-    }
+    # Resolve URI from config if not provided
+    resolved_uri = _resolve_uri(uri, DatabaseType.REDIS);
 
     # Return existing client or create new one
-    if uri not in _redis_clients {
-        _redis_clients[uri] = DatabaseProviderFactory.create_client(
-            DatabaseType.REDIS, uri=uri
+    if resolved_uri not in _redis_clients {
+        _redis_clients[resolved_uri] = DatabaseProviderFactory.create_client(
+            DatabaseType.REDIS, uri=resolved_uri
         );
     }
 
-    return _redis_clients[uri];
+    return _redis_clients[resolved_uri];
 }
 
 """Close a specific MongoDB client connection.
@@ -121,18 +143,15 @@ def get_redis_client(uri: (str | None) = None) -> Redis {
     """
 def close_mongo_client(uri: (str | None) = None) -> None {
     global _mongo_clients;
-    import from jac_scale.config_loader { get_scale_config }
 
-    if uri is None {
-        scale_config = get_scale_config();
-        db_config = scale_config.get_database_config();
-        uri = db_config.get('mongodb_uri');
-    }
-
-    if uri and uri in _mongo_clients {
-        _mongo_clients[uri].close();
-        del _mongo_clients[uri];
-    }
+    # Resolve URI (silently skip if config not found)
+    try {
+        resolved_uri = _resolve_uri(uri, DatabaseType.MONGODB);
+        if resolved_uri in _mongo_clients {
+            _mongo_clients[resolved_uri].close();
+            del _mongo_clients[resolved_uri];
+        }
+    } except ValueError { }
 }
 
 """Close a specific Redis client connection.
@@ -142,18 +161,15 @@ def close_mongo_client(uri: (str | None) = None) -> None {
     """
 def close_redis_client(uri: (str | None) = None) -> None {
     global _redis_clients;
-    import from jac_scale.config_loader { get_scale_config }
 
-    if uri is None {
-        scale_config = get_scale_config();
-        db_config = scale_config.get_database_config();
-        uri = db_config.get('redis_url');
-    }
-
-    if uri and uri in _redis_clients {
-        _redis_clients[uri].close();
-        del _redis_clients[uri];
-    }
+    # Resolve URI (silently skip if config not found)
+    try {
+        resolved_uri = _resolve_uri(uri, DatabaseType.REDIS);
+        if resolved_uri in _redis_clients {
+            _redis_clients[resolved_uri].close();
+            del _redis_clients[resolved_uri];
+        }
+    } except ValueError { }
 }
 
 """Close all database connections (MongoDB and Redis).
