@@ -7,6 +7,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Key-Value Store API (`kvstore`)**: Added `kvstore()` function in `jac_scale.lib` for direct database operations without graph layer abstraction. Provides explicit import-based access (no global builtins). Supports both MongoDB and Redis with a unified API for CRUD operations (`insert_one`, `find_by_id`, `update_by_id`, `delete_by_id`, `insert_many`, `update_many`, `delete_many`). Database selection via `db_type` parameter (`'mongodb'` or `'redis'`), with configuration fallback mechanism (explicit URI → environment variable → jac.toml).
 
   **Usage**:
+
   ```jac
   import from jac_scale.lib { kvstore }
 
