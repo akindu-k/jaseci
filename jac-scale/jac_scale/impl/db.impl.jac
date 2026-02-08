@@ -1,26 +1,19 @@
-"""Database implementation dispatcher.
+"""Database implementation with proper separation of MongoDB and Redis semantics.
 
-This file dispatches database operations to the appropriate implementation
-based on the db_type (MongoDB or Redis).
+MongoDB: Document-based operations with filters and queries.
+Redis: Pure key-value operations with Redis-native features (TTL, INCR, etc.).
 """
 
-# Private utility functions for Redis operations
-"""Generate Redis key in the format: {db_name}:{col_name}:{doc_id}."""
-def _redis_key(db_name: str, col_name: str, doc_id: str) -> str {
-    return f"{db_name}:{col_name}:{doc_id}";
+# ===== HELPER FUNCTIONS =====
+"""Generate Redis key in the format: {db_name}:{col_name}:{key}."""
+def _redis_key(db_name: str, col_name: str, key: str) -> str {
+    return f"{db_name}:{col_name}:{key}";
 }
 
 """Apply MongoDB-style update operations to a document.
 
-    Supports both $set operator and direct updates.
-
-    Args:
-        doc: The document to update (modified in-place).
-        update_data: Update operations (e.g., {"$set": {...}} or {...}).
-
-    Returns:
-        The updated document.
-    """
+Supports both $set operator and direct updates.
+"""
 def _apply_update(doc: dict, update_data: dict) -> dict {
     if '$set' in update_data {
         doc.update(update_data['$set']);
@@ -30,173 +23,30 @@ def _apply_update(doc: dict, update_data: dict) -> dict {
     return doc;
 }
 
-# MongoDB implementations
-impl Db.find_one(col_name: str, filter: dict) -> dict | None {
-    if self.db_type == DatabaseType.MONGODB {
-        db = self.client[self.db_name];
-        col = db[col_name];
-        return col.find_one(filter);
-    } elif self.db_type == DatabaseType.REDIS {
-        # For Redis, use key pattern: {db_name}:{col_name}:{filter_key}
-        # Simple implementation: if filter has '_id', use it as key
-        if '_id' in filter {
-            key = _redis_key(self.db_name, col_name, filter['_id']);
-            if (data := self.client.get(key)) {
-                return json.loads(data);
-            }
-        }
-        return None;
-    }
-    raise ValueError(f"Unsupported database type: {self.db_type}") ;
+# ===== HELPER METHOD IMPLEMENTATIONS =====
+"""Get MongoDB collection reference.
+
+Reduces code duplication by centralizing collection access pattern."""
+impl Db._get_mongo_collection(col_name: str) -> Collection {
+    return self.client[self.db_name][col_name];
 }
 
-impl Db.find(col_name: str, filter: dict) -> Cursor | list {
-    if self.db_type == DatabaseType.MONGODB {
-        db = self.client[self.db_name];
-        col = db[col_name];
-        return col.find(filter);
-    } elif self.db_type == DatabaseType.REDIS {
-        # For Redis, return all keys matching pattern
-        pattern = f"{self.db_name}:{col_name}:*";
-        keys = self.client.keys(pattern);
-        results = [];
-        for key in keys {
-            if (data := self.client.get(key)) {
-                results.append(json.loads(data));
-            }
-        }
-        return results;
-    }
-    raise ValueError(f"Unsupported database type: {self.db_type}") ;
+"""Get namespaced Redis key.
+
+Reduces code duplication by centralizing key naming pattern."""
+impl Db._get_redis_key(col_name: str, key: str) -> str {
+    return _redis_key(self.db_name, col_name, key);
 }
 
-impl Db.insert_one(
-    col_name: str, document: dict
-) -> PyMongoInsertOneResult | InsertResult {
+# ===== COMMON METHODS (work for both) =====
+impl Db.get(
+    key: str, col_name: str = 'default'
+) -> dict | None {
     if self.db_type == DatabaseType.MONGODB {
-        db = self.client[self.db_name];
-        col = db[col_name];
-        return col.insert_one(document);
+        return self._get_mongo_collection(col_name).find_one({'_id': ObjectId(key)});
     } elif self.db_type == DatabaseType.REDIS {
-        # Generate an ID if not provided
-        if '_id' not in document {
-            document['_id'] = str(uuid4());
-        }
-        key = _redis_key(self.db_name, col_name, document['_id']);
-        self.client.set(key, json.dumps(document));
-        # Return a result object similar to MongoDB
-        return InsertResult(inserted_id=document['_id']);
-    }
-    raise ValueError(f"Unsupported database type: {self.db_type}") ;
-}
-
-impl Db.update_one(
-    col_name: str, filter: dict, update_data: dict, upsert_mode: bool = False
-) -> PyMongoUpdateResult | UpdateResult {
-    if self.db_type == DatabaseType.MONGODB {
-        db = self.client[self.db_name];
-        col = db[col_name];
-        return col.update_one(filter, update_data, upsert=upsert_mode);
-    } elif self.db_type == DatabaseType.REDIS {
-        # For Redis, find the document first, update it, and save
-        if '_id' in filter {
-            key = _redis_key(self.db_name, col_name, filter['_id']);
-            if (data := self.client.get(key)) {
-                doc = json.loads(data);
-                _apply_update(doc, update_data);
-                self.client.set(key, json.dumps(doc));
-                # Return result similar to MongoDB
-                return UpdateResult(matched_count=1, modified_count=1);
-            } elif upsert_mode {
-                # Create new document
-                doc = filter.copy();
-                _apply_update(doc, update_data);
-                self.client.set(key, json.dumps(doc));
-                return UpdateResult(matched_count=0, modified_count=0, upserted_id=filter['_id']);
-            }
-        }
-        return UpdateResult(matched_count=0, modified_count=0);
-    }
-    raise ValueError(f"Unsupported database type: {self.db_type}") ;
-}
-
-impl Db.delete_one(col_name: str, filter: dict) -> PyMongoDeleteResult | DeleteResult {
-    if self.db_type == DatabaseType.MONGODB {
-        db = self.client[self.db_name];
-        col = db[col_name];
-        return col.delete_one(filter);
-    } elif self.db_type == DatabaseType.REDIS {
-        if '_id' in filter {
-            key = _redis_key(self.db_name, col_name, filter['_id']);
-            deleted = self.client.delete(key);
-            # Return result similar to MongoDB
-            return DeleteResult(deleted_count=deleted);
-        }
-        return DeleteResult(deleted_count=0);
-    }
-    raise ValueError(f"Unsupported database type: {self.db_type}") ;
-}
-
-impl Db.insert_many(
-    col_name: str, documents: list
-) -> PyMongoInsertManyResult | InsertManyResult {
-    if self.db_type == DatabaseType.MONGODB {
-        db = self.client[self.db_name];
-        col = db[col_name];
-        return col.insert_many(documents);
-    } elif self.db_type == DatabaseType.REDIS {
-        inserted_ids = [];
-        for doc in documents {
-            if '_id' not in doc {
-                doc['_id'] = str(uuid4());
-            }
-            key = _redis_key(self.db_name, col_name, doc['_id']);
-            self.client.set(key, json.dumps(doc));
-            inserted_ids.append(doc['_id']);
-        }
-        return InsertManyResult(inserted_ids=inserted_ids);
-    }
-    raise ValueError(f"Unsupported database type: {self.db_type}") ;
-}
-
-impl Db.update_many(
-    col_name: str, filter: dict, update_data: dict, upsert_mode: bool = False
-) -> PyMongoUpdateResult | UpdateResult {
-    if self.db_type == DatabaseType.MONGODB {
-        db = self.client[self.db_name];
-        col = db[col_name];
-        return col.update_many(filter, update_data, upsert=upsert_mode);
-    } elif self.db_type == DatabaseType.REDIS {
-        # For Redis, find all matching keys and update them
-        pattern = f"{self.db_name}:{col_name}:*";
-        keys = self.client.keys(pattern);
-        matched = 0;
-        modified = 0;
-        for key in keys {
-            if (data := self.client.get(key)) {
-                doc = json.loads(data);
-                # Simple filter matching (only exact matches for now)
-                if all(doc.get(k) == v for (k, v) in filter.items()) {
-                    matched += 1;
-                    _apply_update(doc, update_data);
-                    self.client.set(key, json.dumps(doc));
-                    modified += 1;
-                }
-            }
-        }
-        return UpdateResult(matched_count=matched, modified_count=modified);
-    }
-    raise ValueError(f"Unsupported database type: {self.db_type}") ;
-}
-
-impl Db.find_by_id(col_name: str, id: str) -> dict | None {
-    if self.db_type == DatabaseType.MONGODB {
-        db = self.client[self.db_name];
-        col = db[col_name];
-        return col.find_one({'_id': ObjectId(id)});
-    } elif self.db_type == DatabaseType.REDIS {
-        key = _redis_key(self.db_name, col_name, id);
-        if (data := self.client.get(key)) {
+        redis_key = self._get_redis_key(col_name, key);
+        if (data := self.client.get(redis_key)) {
             return json.loads(data);
         }
         return None;
@@ -204,44 +54,234 @@ impl Db.find_by_id(col_name: str, id: str) -> dict | None {
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
 
-impl Db.update_by_id(
-    col_name: str, id: str, update_data: dict, upsert_mode: bool = False
-) -> PyMongoUpdateResult | UpdateResult {
+impl Db.set(key: str, value: dict, col_name: str = 'default') -> str {
     if self.db_type == DatabaseType.MONGODB {
-        db = self.client[self.db_name];
-        col = db[col_name];
-        return col.update_one({'_id': ObjectId(id)}, update_data, upsert=upsert_mode);
+        col = self._get_mongo_collection(col_name);
+        # Upsert: update if exists, insert if not
+        value_copy = value.copy();
+        value_copy['_id'] = ObjectId(key);
+        col.replace_one({'_id': ObjectId(key)}, value_copy, upsert=True);
+        return key;
     } elif self.db_type == DatabaseType.REDIS {
-        key = _redis_key(self.db_name, col_name, id);
-        if (data := self.client.get(key)) {
-            doc = json.loads(data);
-            _apply_update(doc, update_data);
-            self.client.set(key, json.dumps(doc));
-            return UpdateResult(matched_count=1, modified_count=1);
-        } elif upsert_mode {
-            doc = {'_id': id};
-            _apply_update(doc, update_data);
-            self.client.set(key, json.dumps(doc));
-            return UpdateResult(matched_count=0, modified_count=0, upserted_id=id);
-        }
-        return UpdateResult(matched_count=0, modified_count=0);
+        redis_key = self._get_redis_key(col_name, key);
+        self.client.set(redis_key, json.dumps(value));
+        return key;
     }
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
 
+impl Db.delete(key: str, col_name: str = 'default') -> int {
+    if self.db_type == DatabaseType.MONGODB {
+        result = self._get_mongo_collection(col_name).delete_one(
+            {'_id': ObjectId(key)}
+        );
+        return result.deleted_count;
+    } elif self.db_type == DatabaseType.REDIS {
+        return self.client.delete(self._get_redis_key(col_name, key));
+    }
+    raise ValueError(f"Unsupported database type: {self.db_type}") ;
+}
+
+impl Db.exists(key: str, col_name: str = 'default') -> bool {
+    if self.db_type == DatabaseType.MONGODB {
+        return self._get_mongo_collection(col_name).count_documents(
+            {'_id': ObjectId(key)}, limit=1
+        ) > 0;
+    } elif self.db_type == DatabaseType.REDIS {
+        return self.client.exists(self._get_redis_key(col_name, key)) > 0;
+    }
+    raise ValueError(f"Unsupported database type: {self.db_type}") ;
+}
+
+# ===== MONGODB-ONLY METHODS =====
+impl Db.find_one(
+    col_name: str, filter: dict
+) -> dict | None {
+    if self.db_type == DatabaseType.REDIS {
+        raise NotImplementedError(
+            "find_one() with filters is not supported for Redis. "
+            "Redis is a key-value store. Use get(key) instead."
+        ) ;
+    }
+    return self._get_mongo_collection(col_name).find_one(filter);
+}
+
+impl Db.find(col_name: str, filter: dict) -> Cursor | list {
+    if self.db_type == DatabaseType.REDIS {
+        raise NotImplementedError(
+            "find() with filters is not supported for Redis. "
+            "Redis is a key-value store. Use scan_keys(pattern) for pattern matching."
+        ) ;
+    }
+    return self._get_mongo_collection(col_name).find(filter);
+}
+
+impl Db.insert_one(
+    col_name: str, document: dict
+) -> PyMongoInsertOneResult | InsertResult {
+    if self.db_type == DatabaseType.REDIS {
+        raise NotImplementedError(
+            "insert_one() is not supported for Redis. Use set(key, value) instead."
+        ) ;
+    }
+    return self._get_mongo_collection(col_name).insert_one(document);
+}
+
+impl Db.update_one(
+    col_name: str, filter: dict, update_data: dict, upsert_mode: bool = False
+) -> PyMongoUpdateResult | UpdateResult {
+    if self.db_type == DatabaseType.REDIS {
+        raise NotImplementedError(
+            "update_one() with filters is not supported for Redis. "
+            "Use set(key, value) to update a value."
+        ) ;
+    }
+    return self._get_mongo_collection(col_name).update_one(
+        filter, update_data, upsert=upsert_mode
+    );
+}
+
+impl Db.delete_one(col_name: str, filter: dict) -> PyMongoDeleteResult | DeleteResult {
+    if self.db_type == DatabaseType.REDIS {
+        raise NotImplementedError(
+            "delete_one() with filters is not supported for Redis. "
+            "Use delete(key) instead."
+        ) ;
+    }
+    return self._get_mongo_collection(col_name).delete_one(filter);
+}
+
+# Bulk operations (MongoDB only)
+impl Db.insert_many(
+    col_name: str, documents: list
+) -> PyMongoInsertManyResult | InsertManyResult {
+    if self.db_type == DatabaseType.REDIS {
+        raise NotImplementedError(
+            "insert_many() is not supported for Redis. "
+            "Use set(key, value) in a loop or use Redis pipelines."
+        ) ;
+    }
+    return self._get_mongo_collection(col_name).insert_many(documents);
+}
+
+impl Db.update_many(
+    col_name: str, filter: dict, update_data: dict, upsert_mode: bool = False
+) -> PyMongoUpdateResult | UpdateResult {
+    if self.db_type == DatabaseType.REDIS {
+        raise NotImplementedError(
+            "update_many() with filters is not supported for Redis. "
+            "Redis does not support bulk updates with filters."
+        ) ;
+    }
+    return self._get_mongo_collection(col_name).update_many(
+        filter, update_data, upsert=upsert_mode
+    );
+}
+
+impl Db.delete_many(col_name: str, filter: dict) -> PyMongoDeleteResult | DeleteResult {
+    if self.db_type == DatabaseType.REDIS {
+        raise NotImplementedError(
+            "delete_many() with filters is not supported for Redis. "
+            "Use scan_keys(pattern) to find keys, then delete them individually."
+        ) ;
+    }
+    return self._get_mongo_collection(col_name).delete_many(filter);
+}
+
+# ID-based convenience methods (MongoDB only, but map to get/set/delete for Redis)
+impl Db.find_by_id(
+    col_name: str, id: str
+) -> dict | None {
+    if self.db_type == DatabaseType.MONGODB {
+        return self._get_mongo_collection(col_name).find_one({'_id': ObjectId(id)});
+    } elif self.db_type == DatabaseType.REDIS {
+        # For Redis, this is just an alias for get()
+        return self.get(id, col_name);
+    }
+    raise ValueError(f"Unsupported database type: {self.db_type}") ;
+}
+
+impl Db.update_by_id(
+    col_name: str, id: str, update_data: dict, upsert_mode: bool = False
+) -> PyMongoUpdateResult | UpdateResult {
+    if self.db_type == DatabaseType.REDIS {
+        raise NotImplementedError(
+            "update_by_id() is not supported for Redis. "
+            "Use get(key) to retrieve, modify, then set(key, value)."
+        ) ;
+    }
+    return self._get_mongo_collection(col_name).update_one(
+        {'_id': ObjectId(id)}, update_data, upsert=upsert_mode
+    );
+}
+
 impl Db.delete_by_id(col_name: str, id: str) -> PyMongoDeleteResult | DeleteResult {
     if self.db_type == DatabaseType.MONGODB {
-        db = self.client[self.db_name];
-        col = db[col_name];
-        return col.delete_one({'_id': ObjectId(id)});
+        return self._get_mongo_collection(col_name).delete_one({'_id': ObjectId(id)});
     } elif self.db_type == DatabaseType.REDIS {
-        key = _redis_key(self.db_name, col_name, id);
-        deleted = self.client.delete(key);
+        # For Redis, return a compatible result object
+        deleted = self.delete(id, col_name);
         return DeleteResult(deleted_count=deleted);
     }
     raise ValueError(f"Unsupported database type: {self.db_type}") ;
 }
 
+# ===== REDIS-ONLY METHODS =====
+impl Db.set_with_ttl(
+    key: str, value: dict, ttl: int, col_name: str = 'default'
+) -> bool {
+    if self.db_type == DatabaseType.MONGODB {
+        raise NotImplementedError(
+            "set_with_ttl() is not supported for MongoDB. "
+            "MongoDB uses TTL indexes, not per-key expiration."
+        ) ;
+    }
+    return self.client.setex(
+        self._get_redis_key(col_name, key), ttl, json.dumps(value)
+    );
+}
+
+impl Db.incr(key: str, col_name: str = 'default') -> int {
+    if self.db_type == DatabaseType.MONGODB {
+        raise NotImplementedError(
+            "incr() is not supported for MongoDB. "
+            "Use update_one() with $inc operator instead."
+        ) ;
+    }
+    return self.client.incr(self._get_redis_key(col_name, key));
+}
+
+impl Db.expire(key: str, seconds: int, col_name: str = 'default') -> bool {
+    if self.db_type == DatabaseType.MONGODB {
+        raise NotImplementedError(
+            "expire() is not supported for MongoDB. "
+            "MongoDB uses TTL indexes for document expiration."
+        ) ;
+    }
+    return self.client.expire(self._get_redis_key(col_name, key), seconds);
+}
+
+impl Db.scan_keys(pattern: str, col_name: str = 'default') -> list[str] {
+    if self.db_type == DatabaseType.MONGODB {
+        raise NotImplementedError(
+            "scan_keys() is not supported for MongoDB. "
+            "Use find() with filters instead."
+        ) ;
+    }
+    # Build pattern with namespace
+    full_pattern = self._get_redis_key(col_name, pattern);
+    keys = [];
+    # Use SCAN instead of KEYS for better performance
+    for key in self.client.scan_iter(match=full_pattern) {
+        # Remove the prefix to return just the key portion
+        key_str = key.decode('utf-8') if isinstance(key, bytes) else key;
+        # Extract just the key part (after last ':')
+        keys.append(key_str.split(':')[-1]);
+    }
+    return keys;
+}
+
+# ===== UTILITY =====
 def get_db -> Db {
     import from jac_scale.db { get_mongo_client }
     # Default to MongoDB for backward compatibility

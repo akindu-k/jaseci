@@ -7,6 +7,7 @@ import from pymongo.results {
     DeleteResult as PyMongoDeleteResult
 }
 import from pymongo.cursor { Cursor }
+import from pymongo.collection { Collection }
 import from redis { Redis }
 import from jac_scale.factories.database_factory {
     DatabaseProviderFactory,
@@ -164,24 +165,141 @@ obj Db {
         db_name: str = 'jac_db',
         db_type: DatabaseType = DatabaseType.MONGODB;
 
+    # ===== PRIVATE HELPER METHODS =====
+    """Get MongoDB collection reference.
+
+    Internal helper to reduce code duplication.
+    """
+    def _get_mongo_collection(col_name: str) -> Collection;
+
+    """Get namespaced Redis key.
+
+    Internal helper to reduce code duplication.
+    """
+    def _get_redis_key(col_name: str, key: str) -> str;
+
+    # ===== COMMON METHODS (work for both MongoDB and Redis) =====
+    """Get a document/value by key.
+
+    For MongoDB: key is treated as document ID in the collection.
+    For Redis: key is the direct Redis key.
+    """
+    def get(key: str, col_name: str = 'default') -> dict | None;
+
+    """Set a document/value by key.
+
+    For MongoDB: Inserts or updates document with given ID.
+    For Redis: Sets the key-value pair.
+
+    Returns: The key/ID of the inserted document.
+    """
+    def set(key: str, value: dict, col_name: str = 'default') -> str;
+
+    """Delete a document/value by key.
+
+    Returns: Number of documents/keys deleted (0 or 1).
+    """
+    def delete(key: str, col_name: str = 'default') -> int;
+
+    """Check if a key exists.
+
+    For MongoDB: Checks if document with given ID exists.
+    For Redis: Checks if key exists.
+    """
+    def exists(key: str, col_name: str = 'default') -> bool;
+
+    # ===== MONGODB-ONLY METHODS =====
+    # These will raise NotImplementedError for Redis
+    """Find one document matching filter (MongoDB only).
+
+    Raises:
+        NotImplementedError: When called on Redis database.
+    """
     def find_one(col_name: str, filter: dict) -> dict | None;
+
+    """Find all documents matching filter (MongoDB only).
+
+    Raises:
+        NotImplementedError: When called on Redis database.
+    """
     def find(col_name: str, filter: dict) -> Cursor | list;
-    def insert_one(col_name: str, document: dict) -> PyMongoInsertOneResult | InsertResult;
+
+    """Insert a single document (MongoDB only).
+
+    For simpler API, use set() which works for both databases.
+    """
+    def insert_one(
+        col_name: str, document: dict
+    ) -> PyMongoInsertOneResult | InsertResult;
+
+    """Update one document (MongoDB only).
+
+    Raises:
+        NotImplementedError: When called on Redis database.
+    """
     def update_one(
         col_name: str, filter: dict, update_data: dict, upsert_mode: bool = False
     ) -> PyMongoUpdateResult | UpdateResult;
+
+    """Delete one document (MongoDB only).
+
+    For simpler API, use delete() which works for both databases.
+    """
     def delete_one(col_name: str, filter: dict) -> PyMongoDeleteResult | DeleteResult;
 
-    # Bulk operations
-    def insert_many(col_name: str, documents: list) -> PyMongoInsertManyResult | InsertManyResult;
+    # Bulk operations (MongoDB only)
+    def insert_many(
+        col_name: str, documents: list
+    ) -> PyMongoInsertManyResult | InsertManyResult;
     def update_many(
         col_name: str, filter: dict, update_data: dict, upsert_mode: bool = False
     ) -> PyMongoUpdateResult | UpdateResult;
 
-    # ID-based convenience methods
+    def delete_many(col_name: str, filter: dict) -> PyMongoDeleteResult | DeleteResult;
+    # ID-based convenience methods (MongoDB only)
     def find_by_id(col_name: str, id: str) -> dict | None;
     def update_by_id(
         col_name: str, id: str, update_data: dict, upsert_mode: bool = False
     ) -> PyMongoUpdateResult | UpdateResult;
+
     def delete_by_id(col_name: str, id: str) -> PyMongoDeleteResult | DeleteResult;
+    # ===== REDIS-ONLY METHODS =====
+    # These will raise NotImplementedError for MongoDB
+    """Set a value with TTL/expiration (Redis only).
+
+    Args:
+        key: Redis key
+        value: Dictionary to store (JSON serialized)
+        ttl: Time to live in seconds
+        col_name: Optional namespace prefix
+
+    Raises:
+        NotImplementedError: When called on MongoDB database.
+    """
+    def set_with_ttl(
+        key: str, value: dict, ttl: int, col_name: str = 'default'
+    ) -> bool;
+
+    """Increment a numeric key (Redis only).
+
+    Raises:
+        NotImplementedError: When called on MongoDB database.
+    """
+    def incr(key: str, col_name: str = 'default') -> int;
+
+    """Set expiration on existing key (Redis only).
+
+    Raises:
+        NotImplementedError: When called on MongoDB database.
+    """
+    def expire(key: str, seconds: int, col_name: str = 'default') -> bool;
+
+    """Get all keys matching pattern (Redis only).
+
+    Warning: This uses SCAN which is safer than KEYS but still O(n).
+
+    Raises:
+        NotImplementedError: When called on MongoDB database.
+    """
+    def scan_keys(pattern: str, col_name: str = 'default') -> list[str];
 }

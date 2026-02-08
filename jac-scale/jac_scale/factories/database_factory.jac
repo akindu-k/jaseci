@@ -35,17 +35,17 @@ def _resolve_uri(uri: (str | None), db_type: DatabaseType) -> str {
     if db_type == DatabaseType.MONGODB {
         resolved = db_config.get('mongodb_uri');
         if resolved is None {
-            raise ValueError('MongoDB URI not found in configuration');
+            raise ValueError('MongoDB URI not found in configuration') ;
         }
         return cast(str, resolved);
     } elif db_type == DatabaseType.REDIS {
         resolved = db_config.get('redis_url');
         if resolved is None {
-            raise ValueError('Redis URL not found in configuration');
+            raise ValueError('Redis URL not found in configuration') ;
         }
         return cast(str, resolved);
     } else {
-        raise ValueError(f'Unsupported database type: {db_type}');
+        raise ValueError(f'Unsupported database type: {db_type}') ;
     }
 }
 

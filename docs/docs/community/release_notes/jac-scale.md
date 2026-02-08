@@ -4,39 +4,65 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.1.7 (Unreleased)
 
-- **Key-Value Store API (`kvstore`)**: Added `kvstore()` function in `jac_scale.lib` for direct database operations without graph layer abstraction. Provides explicit import-based access (no global builtins). Supports both MongoDB and Redis with a unified API for CRUD operations including:
-  - **Single document operations**: `insert_one`, `find_one`, `find_by_id`, `update_one`, `update_by_id`, `delete_one`, `delete_by_id`
-  - **Bulk operations**: `insert_many`, `update_many`, `delete_many`, `find` (query with filters)
-  - Database selection via `db_type` parameter (`'mongodb'` or `'redis'`), with configuration fallback mechanism (explicit URI → environment variable → jac.toml)
-  - Returns typed result objects (`InsertResult`, `InsertManyResult`, `UpdateResult`, `DeleteResult`) with operation metadata
+- **Direct Database Access API (`kvstore`)**: Added `kvstore()` function in `jac_scale.lib` for direct database operations without graph layer abstraction. Provides explicit import-based access (no global builtins). Supports both MongoDB and Redis with **database-appropriate semantics** - MongoDB gets document query operations, Redis gets pure key-value operations.
 
-  **Usage**:
+  **Common Methods** (work for both databases):
+  - `get(key, col_name)`: Get value by key
+  - `set(key, value, col_name)`: Set value by key
+  - `delete(key, col_name)`: Delete by key
+  - `exists(key, col_name)`: Check if key exists
+
+  **MongoDB-Only Methods** (raise `NotImplementedError` for Redis):
+  - Document queries: `find_one(col_name, filter)`, `find(col_name, filter)`
+  - Document operations: `insert_one`, `update_one`, `delete_one`
+  - Bulk operations: `insert_many`, `update_many`, `delete_many`
+  - ID-based helpers: `find_by_id`, `update_by_id`, `delete_by_id`
+
+  **Redis-Only Methods** (raise `NotImplementedError` for MongoDB):
+  - TTL support: `set_with_ttl(key, value, ttl)`, `expire(key, seconds)`
+  - Atomic operations: `incr(key)`
+  - Pattern scanning: `scan_keys(pattern)` (uses `SCAN`, not `KEYS`)
+
+  **Configuration**: Database selection via `db_type` parameter (`'mongodb'` or `'redis'`), with configuration fallback mechanism (explicit URI → environment variable → jac.toml). Returns typed result objects for operations.
+
+  **MongoDB Example** (document database with queries):
 
   ```jac
   import from jac_scale.lib { kvstore }
 
-  # MongoDB for persistent data
   mongo_db = kvstore(db_name='my_app', db_type='mongodb');
-  result = mongo_db.insert_one('users', {'name': 'Alice', 'role': 'admin'});
-  user = mongo_db.find_by_id('users', result.inserted_id);
 
-  # Redis for caching
-  redis_cache = kvstore(db_name='cache', db_type='redis');
-  redis_cache.insert_one('sessions', {'user_id': '123', 'token': 'abc'});
+  # Query documents with filters
+  mongo_db.insert_one('users', {'name': 'Alice', 'role': 'admin'});
+  user = mongo_db.find_one('users', {'name': 'Alice'});
 
-  # Custom URI
-  custom_db = kvstore(
-      db_name='analytics',
-      db_type='mongodb',
-      uri='mongodb://analytics-server:27017'
-  );
+  # Or use simple key-value API
+  mongo_db.set('user:123', {'name': 'Bob'}, 'users');
+  user = mongo_db.get('user:123', 'users');
   ```
 
-- **URI-Based Connection Pooling**: Implemented connection pooling for database clients using URI-keyed dictionaries. Same URI reuses existing connections while different URIs create separate connection pools. Added `close_mongo_client()`, `close_redis_client()`, and `close_all_db_connections()` cleanup functions for proper resource management and graceful shutdown.
+  **Redis Example** (key-value store with native Redis features):
+
+  ```jac
+  import from jac_scale.lib { kvstore }
+
+  redis_cache = kvstore(db_name='cache', db_type='redis');
+
+  # Pure key-value operations
+  redis_cache.set('session:abc', {'user_id': '123'});
+  session = redis_cache.get('session:abc');
+
+  # Redis-native features
+  redis_cache.set_with_ttl('temp:token', {'value': 'xyz'}, ttl=3600);
+  redis_cache.incr('page:views');
+  all_sessions = redis_cache.scan_keys('session:*');
+  ```
+
+- **URI-Based Connection Pooling**: Implemented connection pooling for database clients using URI-keyed dictionaries. Same URI reuses existing connections while different URIs create separate connection pools. Added `get_mongo_client()`, `get_redis_client()`, `close_mongo_client()`, `close_redis_client()`, and `close_all_db_connections()` functions for proper resource management and graceful shutdown.
 
 - **Database Factory Pattern**: Introduced `DatabaseProviderFactory` with `create_client()` method and `_resolve_uri()` utility supporting `DatabaseType` enum (`MONGODB`, `REDIS`) for type-safe database client instantiation. The factory pattern abstracts database-specific client creation logic and provides consistent error handling across different database backends.
 
-- **Db Object Interface**: Added `Db` class providing a unified interface for database operations across MongoDB and Redis. The class abstracts database-specific implementation details, allowing seamless switching between backends while maintaining a consistent API. Supports filter-based queries (`find`, `find_one`) and ID-based convenience methods for common CRUD operations.
+- **Honest Database Semantics**: The `Db` class respects each database's native behavior instead of forcing a unified interface. MongoDB operations that don't make sense for Redis (like `find()` with filters) raise clear `NotImplementedError` exceptions directing users to appropriate alternatives. Similarly, Redis-specific operations (like `incr()`, `set_with_ttl()`) are only available when using Redis. This design prevents performance surprises and leverages each database's strengths.
 - **Update syntax for TYPE_OP removal**: Replaced backtick type operator syntax (`` `root ``) with `Root` and filter syntax (`` (`?Type) ``) with `(?:Type)` across all docs, tests, examples, and README.
 
 ## jac-scale 0.1.6 (Latest Release)

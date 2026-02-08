@@ -7,9 +7,9 @@ import from jac_scale.factories.database_factory { DatabaseType }
 
 """Create a key-value store instance for direct database operations.
 
-    Provides a unified interface for MongoDB and Redis operations without
-    the graph abstraction layer. Useful for caching, session storage, and
-    direct document manipulation.
+    Provides access to MongoDB (document database) and Redis (key-value store)
+    without the graph abstraction layer. Each database type exposes methods
+    appropriate to its semantics.
 
     Args:
         db_name: Name of the database to use. Defaults to 'jac_db'.
@@ -23,19 +23,60 @@ import from jac_scale.factories.database_factory { DatabaseType }
     Raises:
         ValueError: If db_type is invalid or URI cannot be resolved from config.
 
-    Example:
+    Common Methods (work for both):
+        - get(key, col_name): Get a value by key
+        - set(key, value, col_name): Set a value by key
+        - delete(key, col_name): Delete a value by key
+        - exists(key, col_name): Check if key exists
+
+    MongoDB-Only Methods:
+        - find_one(col_name, filter): Query documents with filters
+        - find(col_name, filter): Find multiple documents
+        - insert_one(col_name, doc): Insert a document
+        - update_one/update_many: Update with MongoDB operators
+        - delete_many: Delete multiple documents
+
+    Redis-Only Methods:
+        - set_with_ttl(key, value, ttl): Set with expiration
+        - incr(key): Atomic increment
+        - expire(key, seconds): Set TTL on existing key
+        - scan_keys(pattern): Find keys matching pattern
+
+    Example - MongoDB for Document Queries:
         ```jac
         import from jac_scale.lib { kvstore }
 
-        # MongoDB for persistent data
         mongo_db = kvstore(db_name='my_app', db_type='mongodb');
+
+        # Document operations with filters
         mongo_db.insert_one('users', {'name': 'Alice', 'role': 'admin'});
+        user = mongo_db.find_one('users', {'name': 'Alice'});
 
-        # Redis for caching
+        # Or use simple key-value API
+        mongo_db.set('user:123', {'name': 'Bob'}, 'users');
+        user = mongo_db.get('user:123', 'users');
+        ```
+
+    Example - Redis for Caching:
+        ```jac
+        import from jac_scale.lib { kvstore }
+
         redis_cache = kvstore(db_name='cache', db_type='redis');
-        redis_cache.insert_one('sessions', {'user_id': '123', 'token': 'abc'});
 
-        # Custom URI
+        # Simple key-value operations
+        redis_cache.set('session:abc', {'user_id': '123', 'token': 'xyz'});
+        session = redis_cache.get('session:abc');
+
+        # Redis-specific features
+        redis_cache.set_with_ttl('temp:token', {'value': 'xyz'}, ttl=3600);
+        redis_cache.incr('page:views');
+
+        # Find keys by pattern
+        all_sessions = redis_cache.scan_keys('session:*');
+        ```
+
+    Example - Custom URI:
+        ```jac
         custom_db = kvstore(
             db_name='analytics',
             db_type='mongodb',
@@ -44,9 +85,7 @@ import from jac_scale.factories.database_factory { DatabaseType }
         ```
     """
 def kvstore(
-    db_name: str = 'jac_db',
-    db_type: str = 'mongodb',
-    uri: (str | None) = None
+    db_name: str = 'jac_db', db_type: str = 'mongodb', uri: (str | None) = None
 ) -> Db {
     # Convert string to DatabaseType enum
     db_type_enum = DatabaseType(db_type);
@@ -57,7 +96,7 @@ def kvstore(
     } elif db_type_enum == DatabaseType.REDIS {
         client = get_redis_client(uri=uri);
     } else {
-        raise ValueError(f'Unsupported database type: {db_type}');
+        raise ValueError(f'Unsupported database type: {db_type}') ;
     }
 
     return Db(client=client, db_name=db_name, db_type=db_type_enum);
