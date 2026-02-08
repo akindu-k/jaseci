@@ -37,6 +37,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Database Factory Pattern**: Introduced `DatabaseProviderFactory` with `create_client()` method and `_resolve_uri()` utility supporting `DatabaseType` enum (`MONGODB`, `REDIS`) for type-safe database client instantiation. The factory pattern abstracts database-specific client creation logic and provides consistent error handling across different database backends.
 
 - **Db Object Interface**: Added `Db` class providing a unified interface for database operations across MongoDB and Redis. The class abstracts database-specific implementation details, allowing seamless switching between backends while maintaining a consistent API. Supports filter-based queries (`find`, `find_one`) and ID-based convenience methods for common CRUD operations.
+- **Update syntax for TYPE_OP removal**: Replaced backtick type operator syntax (`` `root ``) with `Root` and filter syntax (`` (`?Type) ``) with `(?:Type)` across all docs, tests, examples, and README.
 
 ## jac-scale 0.1.6 (Latest Release)
 
