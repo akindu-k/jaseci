@@ -2355,17 +2355,6 @@ class JacRuntimeInterface(
 
         Default raises NotImplementedError. Plugins (like jac-scale) can override
         to provide database backend support.
-
-        Args:
-            db_name: Name of the database.
-            db_type: Type of database (mongodb, postgresql, etc.).
-            uri: Optional database connection URI.
-
-        Returns:
-            Database instance
-
-        Raises:
-            NotImplementedError: When jac-scale plugin is not installed.
         """
         raise NotImplementedError(
             "db() requires jac-scale plugin. Install with: pip install jac-scale"
