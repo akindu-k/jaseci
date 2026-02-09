@@ -56,7 +56,7 @@ def _get_db -> Callable[..., Any];
 def __getattr__(name: str) -> object;
 
 def printgraph(
-    <>node: (NodeArchetype | None) = None,
+    `node: (NodeArchetype | None) = None,
     depth: int = -1,
     traverse: bool = False,
     edge_type: (list[str] | None) = None,

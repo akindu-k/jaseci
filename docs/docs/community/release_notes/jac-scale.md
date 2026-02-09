@@ -2,7 +2,7 @@
 
 This document provides a summary of new features, improvements, and bug fixes in each version of **Jac-Scale**. For details on changes that might require updates to your existing code, please refer to the [Breaking Changes](../breaking-changes.md) page.
 
-## jac-scale 0.1.7 (Unreleased)
+## jac-scale 0.1.8 (Unreleased)
 
 - **Direct Database Access API (`kvstore`)**: Added `kvstore()` function in `jac_scale.lib` for direct database operations without graph layer abstraction. Provides explicit import-based access (no global builtins). Supports both MongoDB and Redis with **database-appropriate semantics** - MongoDB gets document query operations, Redis gets pure key-value operations.
 
@@ -63,9 +63,12 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Database Factory Pattern**: Introduced `DatabaseProviderFactory` with `create_client()` method and `_resolve_uri()` utility supporting `DatabaseType` enum (`MONGODB`, `REDIS`) for type-safe database client instantiation. The factory pattern abstracts database-specific client creation logic and provides consistent error handling across different database backends.
 
 - **Honest Database Semantics**: The `Db` class respects each database's native behavior instead of forcing a unified interface. MongoDB operations that don't make sense for Redis (like `find()` with filters) raise clear `NotImplementedError` exceptions directing users to appropriate alternatives. Similarly, Redis-specific operations (like `incr()`, `set_with_ttl()`) are only available when using Redis. This design prevents performance surprises and leverages each database's strengths.
+## jac-scale 0.1.7 (Latest Release)
+
+- **KWESC_NAME syntax changed from `<>` to backtick**: Updated keyword-escaped names from `<>` prefix to backtick prefix to match the jaclang grammar change.
 - **Update syntax for TYPE_OP removal**: Replaced backtick type operator syntax (`` `root ``) with `Root` and filter syntax (`` (`?Type) ``) with `(?:Type)` across all docs, tests, examples, and README.
 
-## jac-scale 0.1.6 (Latest Release)
+## jac-scale 0.1.6
 
 - **WebSocket Support**: Added WebSocket transport for walkers via `@restspec(protocol=APIProtocol.WEBSOCKET)` with persistent bidirectional connections at `ws://host/ws/{walker_name}`. The `APIProtocol` enum (`HTTP`, `WEBHOOK`, `WEBSOCKET`) replaces the previous `webhook=True` flag-migrate by changing `@restspec(webhook=True)` to `@restspec(protocol=APIProtocol.WEBHOOK)`.
 
