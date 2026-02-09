@@ -4,7 +4,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.1.8 (Unreleased)
 
-- **Direct Database Access API (`kvstore`)**: Added `kvstore()` function providing explicit database operations without graph layer abstraction, supporting both MongoDB (with document query operations like `find_one`, `find`, `insert_one`, `update_one`, `delete_one`, bulk operations, and ID-based helpers) and Redis (with key-value operations like `set_with_ttl`, `expire`, `incr`, `scan_keys`). Features URI-based connection pooling, database factory pattern, honest database-specific semantics (methods raise `NotImplementedError` when incompatible), and configuration fallback (explicit URI → environment variable → jac.toml). Common methods (`get`, `set`, `delete`, `exists`) work across both databases while database-specific methods leverage each system's native strengths.
+- **Direct Database Access (`kvstore`)**: Added `kvstore()` function for direct MongoDB and Redis operations without graph layer. Supports database-specific methods (MongoDB: `find_one`, `insert_one`, `update_one`; Redis: `set_with_ttl`, `incr`, `scan_keys`) with common methods (`get`, `set`, `delete`, `exists`) working across both. Import from `jac_scale.lib` with URI-based connection pooling and configuration fallback (explicit URI → env vars → jac.toml).
 
 ## jac-scale 0.1.7 (Latest Release)
 
