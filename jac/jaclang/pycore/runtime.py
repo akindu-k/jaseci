@@ -2345,20 +2345,6 @@ class JacRuntimeInterface(
 
         return LocalStorage(base_path=base_path, create_dirs=create_dirs)
 
-    @staticmethod
-    def db(
-        db_name: str = "jac_db",
-        db_type: str = "mongodb",
-        uri: str | None = None,
-    ) -> Any:  # noqa: ANN401
-        """Get database backend instance (hookable for plugins).
-
-        Default raises NotImplementedError. Plugins (like jac-scale) can override
-        to provide database backend support.
-        """
-        raise NotImplementedError(
-            "db() requires jac-scale plugin. Install with: pip install jac-scale"
-        )
 
 
 def generate_plugin_helpers(
