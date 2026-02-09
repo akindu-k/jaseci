@@ -251,6 +251,7 @@ obj Db {
     def insert_many(
         col_name: str, documents: list
     ) -> PyMongoInsertManyResult | InsertManyResult;
+
     def update_many(
         col_name: str, filter: dict, update_data: dict, upsert_mode: bool = False
     ) -> PyMongoUpdateResult | UpdateResult;

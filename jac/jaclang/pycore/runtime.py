@@ -2346,7 +2346,6 @@ class JacRuntimeInterface(
         return LocalStorage(base_path=base_path, create_dirs=create_dirs)
 
 
-
 def generate_plugin_helpers(
     plugin_class: type[Any],
 ) -> tuple[type[Any], type[Any], type[Any]]:
