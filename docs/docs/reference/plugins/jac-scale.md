@@ -806,7 +806,7 @@ with entry {
 
     # Delete a user
     result = mongo_db.delete_one('users', {'name': 'Bob'});
-    
+
     # Using simple key-value API
     mongo_db.set('user:alice', {'name': 'Alice', 'status': 'active'}, 'sessions');
     session = mongo_db.get('user:alice', 'sessions');
@@ -914,8 +914,6 @@ with entry {
     deleted = redis_db.delete('temp:token:abc');
 }
 ```
-
-
 
 ---
 
