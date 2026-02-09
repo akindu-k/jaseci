@@ -4,7 +4,6 @@ import from jac_scale.abstractions.database_provider { DatabaseProvider }
 import from jac_scale.abstractions.deployment_target { DeploymentTarget }
 import from jac_scale.config_loader { get_scale_config }
 import from enum { StrEnum }
-import os;
 
 enum DatabaseType ( StrEnum ) { MONGODB = 'mongodb', REDIS = 'redis' }
 
