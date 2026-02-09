@@ -709,11 +709,15 @@ redis_url = "redis://localhost:6379/0"
 **Explicit URI Example:**
 
 ```jac
-mongo_db = kvstore(
-    db_name='my_app',
-    db_type='mongodb',
-    uri='mongodb://admin:password@localhost:27017'
-);
+import from jac_scale.lib { kvstore }
+
+with entry {
+    mongo_db = kvstore(
+        db_name='my_app',
+        db_type='mongodb',
+        uri='mongodb://admin:password@localhost:27017'
+    );
+}
 ```
 
 ---
