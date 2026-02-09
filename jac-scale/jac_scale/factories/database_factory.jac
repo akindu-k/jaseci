@@ -6,10 +6,7 @@ import from jac_scale.config_loader { get_scale_config }
 import from enum { StrEnum }
 import os;
 
-enum DatabaseType(StrEnum) {
-        MONGODB = 'mongodb',
-        REDIS = 'redis'
-}
+enum DatabaseType ( StrEnum ) { MONGODB = 'mongodb', REDIS = 'redis' }
 
 """Resolve database URI from explicit parameter or configuration.
 
