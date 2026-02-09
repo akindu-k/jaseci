@@ -4,19 +4,6 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.10.1 (Unreleased)
 
-- **Direct Database Access via `kvstore()`**: The jac-scale plugin now provides `kvstore()` function for direct database operations without graph layer abstraction. Import explicitly from `jac_scale.lib` to access MongoDB (document database with query operations) and Redis (key-value store with TTL, atomic operations, and pattern matching). Uses import-only pattern instead of builtins for cleaner dependency management. Supports URI-based connection pooling, database factory pattern, and honest database-specific semantics (methods raise `NotImplementedError` when incompatible). Configuration falls back from explicit URI → environment variables → jac.toml.
-
-  **Example Usage**:
-
-  ```jac
-  import from jac_scale.lib { kvstore }
-
-  with entry {
-      mongo_db = kvstore(db_name='my_app', db_type='mongodb');
-      redis_cache = kvstore(db_name='cache', db_type='redis');
-  }
-  ```
-
 ## jaclang 0.10.0 (Latest Release)
 
 - **KWESC_NAME syntax changed from `<>` to backtick**: Keyword-escaped names now use a backtick prefix (`` `node ``) instead of the angle-bracket prefix (`<>node`). All `.jac` source files, the lexer, parser, unparse/DocIR passes, and auto-lint rules have been updated accordingly.
