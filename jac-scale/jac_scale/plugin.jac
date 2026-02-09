@@ -246,20 +246,16 @@ class JacScalePlugin {
 # But _multicall only passes argnames to hook implementations.
 # JacRuntimeInterfaceImpl strips defaults via generate_plugin_helpers, so we must too.
 import inspect;
+glob func = JacScalePlugin.create_j_context,
+     sig = inspect.signature(func),
+     sig_nodef = sig.replace(
+         parameters=[
+             p.replace(default=inspect.Parameter.empty)
+             for p in sig.parameters.values()
+         ]
+     );
 
-def strip_defaults(func: Any) -> None {
-    sig = inspect.signature(func);
-    sig_nodef = sig.replace(
-        parameters=[
-            p.replace(default=inspect.Parameter.empty) for p in sig.parameters.values()
-        ]
-    );
-    func.__signature__ = sig_nodef;
-}
-
-# Strip defaults from all hook methods that have parameters with defaults
 with entry {
-    strip_defaults(JacScalePlugin.create_j_context);
-    strip_defaults(JacScalePlugin.store);
+    func.__signature__ = sig_nodef;
     plugin_manager.register(JacScalePlugin());
 }
