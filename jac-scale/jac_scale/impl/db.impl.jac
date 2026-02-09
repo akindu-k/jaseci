@@ -43,7 +43,14 @@ impl Db.get(
     key: str, col_name: str = 'default'
 ) -> dict | None {
     if self.db_type == DatabaseType.MONGODB {
-        return self._get_mongo_collection(col_name).find_one({'_id': ObjectId(key)});
+        # Try string key first, then ObjectId if valid
+        result = self._get_mongo_collection(col_name).find_one({'_id': key});
+        if result is None {
+            try {
+                result = self._get_mongo_collection(col_name).find_one({'_id': ObjectId(key)});
+            } except Exception { }
+        }
+        return result;
     } elif self.db_type == DatabaseType.REDIS {
         redis_key = self._get_redis_key(col_name, key);
         if (data := self.client.get(redis_key)) {
@@ -59,8 +66,9 @@ impl Db.set(key: str, value: dict, col_name: str = 'default') -> str {
         col = self._get_mongo_collection(col_name);
         # Upsert: update if exists, insert if not
         value_copy = value.copy();
-        value_copy['_id'] = ObjectId(key);
-        col.replace_one({'_id': ObjectId(key)}, value_copy, upsert=True);
+        # Use string key directly as _id (MongoDB supports string _id)
+        value_copy['_id'] = key;
+        col.replace_one({'_id': key}, value_copy, upsert=True);
         return key;
     } elif self.db_type == DatabaseType.REDIS {
         redis_key = self._get_redis_key(col_name, key);
@@ -72,9 +80,13 @@ impl Db.set(key: str, value: dict, col_name: str = 'default') -> str {
 
 impl Db.delete(key: str, col_name: str = 'default') -> int {
     if self.db_type == DatabaseType.MONGODB {
-        result = self._get_mongo_collection(col_name).delete_one(
-            {'_id': ObjectId(key)}
-        );
+        # Try string key first, then ObjectId if valid
+        result = self._get_mongo_collection(col_name).delete_one({'_id': key});
+        if result.deleted_count == 0 {
+            try {
+                result = self._get_mongo_collection(col_name).delete_one({'_id': ObjectId(key)});
+            } except Exception { }
+        }
         return result.deleted_count;
     } elif self.db_type == DatabaseType.REDIS {
         return self.client.delete(self._get_redis_key(col_name, key));
@@ -84,9 +96,18 @@ impl Db.delete(key: str, col_name: str = 'default') -> int {
 
 impl Db.exists(key: str, col_name: str = 'default') -> bool {
     if self.db_type == DatabaseType.MONGODB {
-        return self._get_mongo_collection(col_name).count_documents(
-            {'_id': ObjectId(key)}, limit=1
+        # Try string key first, then ObjectId if valid
+        exists = self._get_mongo_collection(col_name).count_documents(
+            {'_id': key}, limit=1
         ) > 0;
+        if not exists {
+            try {
+                exists = self._get_mongo_collection(col_name).count_documents(
+                    {'_id': ObjectId(key)}, limit=1
+                ) > 0;
+            } except Exception { }
+        }
+        return exists;
     } elif self.db_type == DatabaseType.REDIS {
         return self.client.exists(self._get_redis_key(col_name, key)) > 0;
     }

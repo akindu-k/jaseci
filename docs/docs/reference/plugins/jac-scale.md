@@ -655,6 +655,306 @@ walker async_processor {
 
 ---
 
+## Direct Database Access (kvstore)
+
+jac-scale provides the `kvstore()` function for direct database operations without the graph layer abstraction. It supports both MongoDB (document database) and Redis (key-value store) with database-specific semantics.
+
+### Getting Started
+
+Import `kvstore` from the jac-scale library:
+
+```jac
+import from jac_scale.lib { kvstore }
+
+with entry {
+    # MongoDB instance
+    mongo_db = kvstore(db_name='my_app', db_type='mongodb');
+
+    # Redis instance
+    redis_db = kvstore(db_name='cache', db_type='redis');
+}
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `db_name` | `str` | `'jac_db'` | Database name |
+| `db_type` | `str` | `'mongodb'` | Database type: `'mongodb'` or `'redis'` |
+| `uri` | `str \| None` | `None` | Connection URI (falls back to env vars or jac.toml) |
+
+### Configuration
+
+Database URIs are resolved in this priority order:
+
+1. **Explicit URI parameter** (highest priority)
+2. **Environment variables**: `MONGODB_URI` or `REDIS_URL`
+3. **jac.toml configuration** (lowest priority)
+
+**Environment Variables:**
+
+```bash
+export MONGODB_URI="mongodb://admin:password@localhost:27017"
+export REDIS_URL="redis://localhost:6379/0"
+```
+
+**jac.toml Configuration:**
+
+```toml
+[database]
+mongodb_uri = "mongodb://admin:password@localhost:27017"
+redis_url = "redis://localhost:6379/0"
+```
+
+**Explicit URI Example:**
+
+```jac
+mongo_db = kvstore(
+    db_name='my_app',
+    db_type='mongodb',
+    uri='mongodb://admin:password@localhost:27017'
+);
+```
+
+---
+
+## MongoDB Operations
+
+MongoDB provides document database operations with powerful querying capabilities.
+
+### Common Methods
+
+These methods work for simple key-value operations:
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `get` | `get(key: str, col_name: str = 'default') -> dict \| None` | Get document by key |
+| `set` | `set(key: str, value: dict, col_name: str = 'default') -> str` | Set document by key |
+| `delete` | `delete(key: str, col_name: str = 'default') -> int` | Delete document by key |
+| `exists` | `exists(key: str, col_name: str = 'default') -> bool` | Check if key exists |
+
+### MongoDB-Only Methods
+
+Advanced document operations with query filters:
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `find_one` | `find_one(col_name: str, filter: dict) -> dict \| None` | Find single document matching filter |
+| `find` | `find(col_name: str, filter: dict) -> Cursor` | Find all documents matching filter |
+| `insert_one` | `insert_one(col_name: str, document: dict) -> InsertResult` | Insert single document |
+| `insert_many` | `insert_many(col_name: str, documents: list) -> InsertManyResult` | Insert multiple documents |
+| `update_one` | `update_one(col_name: str, filter: dict, update_data: dict, upsert_mode: bool = False) -> UpdateResult` | Update single document |
+| `update_many` | `update_many(col_name: str, filter: dict, update_data: dict, upsert_mode: bool = False) -> UpdateResult` | Update multiple documents |
+| `delete_one` | `delete_one(col_name: str, filter: dict) -> DeleteResult` | Delete single document |
+| `delete_many` | `delete_many(col_name: str, filter: dict) -> DeleteResult` | Delete multiple documents |
+| `find_by_id` | `find_by_id(col_name: str, id: str) -> dict \| None` | Find document by ID |
+| `update_by_id` | `update_by_id(col_name: str, id: str, update_data: dict, upsert_mode: bool = False) -> UpdateResult` | Update document by ID |
+| `delete_by_id` | `delete_by_id(col_name: str, id: str) -> DeleteResult` | Delete document by ID |
+
+### MongoDB Example: User Management
+
+```jac
+import from jac_scale.lib { kvstore }
+
+with entry {
+    mongo_db = kvstore(db_name='my_app', db_type='mongodb');
+
+    # Insert users
+    mongo_db.insert_one('users', {
+        'name': 'Alice',
+        'email': 'alice@example.com',
+        'role': 'admin',
+        'age': 30
+    });
+
+    mongo_db.insert_one('users', {
+        'name': 'Bob',
+        'email': 'bob@example.com',
+        'role': 'user',
+        'age': 25
+    });
+
+    # Find single user
+    alice = mongo_db.find_one('users', {'name': 'Alice'});
+
+    # Find all admins
+    admins = list(mongo_db.find('users', {'role': 'admin'}));
+
+    # Find users older than 28
+    older_users = list(mongo_db.find('users', {'age': {'$gt': 28}}));
+
+    # Update user
+    result = mongo_db.update_one(
+        'users',
+        {'name': 'Alice'},
+        {'$set': {'age': 31, 'last_login': '2024-01-15'}}
+    );
+
+    # Insert multiple documents
+    new_users = [
+        {'name': 'Charlie', 'role': 'user', 'age': 28},
+        {'name': 'Diana', 'role': 'moderator', 'age': 32}
+    ];
+    result = mongo_db.insert_many('users', new_users);
+
+    # Count all users
+    all_users = list(mongo_db.find('users', {}));
+
+    # Delete a user
+    result = mongo_db.delete_one('users', {'name': 'Bob'});
+    
+    # Using simple key-value API
+    mongo_db.set('user:alice', {'name': 'Alice', 'status': 'active'}, 'sessions');
+    session = mongo_db.get('user:alice', 'sessions');
+}
+```
+
+### MongoDB Query Operators
+
+MongoDB supports rich query operators:
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `$eq` | Equal to | `{'age': {'$eq': 30}}` |
+| `$gt` | Greater than | `{'age': {'$gt': 25}}` |
+| `$gte` | Greater than or equal | `{'age': {'$gte': 25}}` |
+| `$lt` | Less than | `{'age': {'$lt': 30}}` |
+| `$lte` | Less than or equal | `{'age': {'$lte': 30}}` |
+| `$in` | In array | `{'role': {'$in': ['admin', 'moderator']}}` |
+| `$ne` | Not equal | `{'status': {'$ne': 'deleted'}}` |
+| `$and` | Logical AND | `{'$and': [{'age': {'$gt': 25}}, {'role': 'admin'}]}` |
+| `$or` | Logical OR | `{'$or': [{'role': 'admin'}, {'role': 'moderator'}]}` |
+
+---
+
+## Redis Operations
+
+Redis provides high-performance key-value storage with native features like TTL, atomic operations, and pattern matching.
+
+### Common Methods
+
+These methods work for simple key-value operations:
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `get` | `get(key: str, col_name: str = 'default') -> dict \| None` | Get value by key |
+| `set` | `set(key: str, value: dict, col_name: str = 'default') -> str` | Set value by key |
+| `delete` | `delete(key: str, col_name: str = 'default') -> int` | Delete key |
+| `exists` | `exists(key: str, col_name: str = 'default') -> bool` | Check if key exists |
+
+### Redis-Only Methods
+
+Redis-native features for caching and counters:
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `set_with_ttl` | `set_with_ttl(key: str, value: dict, ttl: int, col_name: str = 'default') -> bool` | Set value with expiration (in seconds) |
+| `expire` | `expire(key: str, seconds: int, col_name: str = 'default') -> bool` | Set expiration on existing key |
+| `incr` | `incr(key: str, col_name: str = 'default') -> int` | Atomically increment numeric value |
+| `scan_keys` | `scan_keys(pattern: str, col_name: str = 'default') -> list[str]` | Find keys matching pattern (uses SCAN, not KEYS) |
+
+### Redis Example: Session & Cache Management
+
+```jac
+import from jac_scale.lib { kvstore }
+
+with entry {
+    redis_db = kvstore(db_name='cache', db_type='redis');
+
+    # Store session data
+    redis_db.set('session:user123', {
+        'user_id': '123',
+        'username': 'alice',
+        'login_time': '2024-01-15T10:30:00Z'
+    });
+
+    # Retrieve session
+    session = redis_db.get('session:user123');
+
+    # Store temporary data with TTL (expires after 60 seconds)
+    redis_db.set_with_ttl('temp:token:abc', {
+        'token': 'xyz123',
+        'user_id': '123'
+    }, ttl=60);
+
+    # Store cache with 1 hour TTL
+    redis_db.set_with_ttl('cache:user:123:profile', {
+        'name': 'Alice',
+        'email': 'alice@example.com',
+        'avatar_url': 'https://example.com/avatar.jpg'
+    }, ttl=3600);  # 1 hour
+
+    # Check if key exists
+    has_session = redis_db.exists('session:user123');
+
+    # Atomic counter operations
+    redis_db.incr('stats:page_views');
+    redis_db.incr('stats:page_views');
+    redis_db.incr('stats:page_views');
+    views = redis_db.get('stats:page_views');
+
+    # Increment API call counter
+    redis_db.incr('api:calls:user123');
+    api_calls = redis_db.get('api:calls:user123');
+
+    # Find all session keys
+    all_sessions = redis_db.scan_keys('session:*');
+
+    # Find all cache keys
+    cache_keys = redis_db.scan_keys('cache:*');
+
+    # Set expiration on existing key
+    redis_db.expire('session:user123', 1800);  # Expire in 30 minutes
+
+    # Delete a key
+    deleted = redis_db.delete('temp:token:abc');
+}
+```
+
+
+
+---
+
+## Database Method Compatibility
+
+### Methods Available for Both Databases
+
+| Method | MongoDB | Redis | Notes |
+|--------|---------|-------|-------|
+| `get()` | ✅ | ✅ | Simple key-value retrieval |
+| `set()` | ✅ | ✅ | Simple key-value storage |
+| `delete()` | ✅ | ✅ | Remove by key |
+| `exists()` | ✅ | ✅ | Check key existence |
+
+### MongoDB-Only Methods
+
+| Method | MongoDB | Redis | Error |
+|--------|---------|-------|-------|
+| `find_one()` | ✅ | ❌ | `NotImplementedError` |
+| `find()` | ✅ | ❌ | `NotImplementedError` |
+| `insert_one()` | ✅ | ❌ | `NotImplementedError` |
+| `insert_many()` | ✅ | ❌ | `NotImplementedError` |
+| `update_one()` | ✅ | ❌ | `NotImplementedError` |
+| `update_many()` | ✅ | ❌ | `NotImplementedError` |
+| `delete_one()` | ✅ | ❌ | `NotImplementedError` |
+| `delete_many()` | ✅ | ❌ | `NotImplementedError` |
+| `find_by_id()` | ✅ | ❌ | `NotImplementedError` |
+| `update_by_id()` | ✅ | ❌ | `NotImplementedError` |
+| `delete_by_id()` | ✅ | ❌ | `NotImplementedError` |
+
+### Redis-Only Methods
+
+| Method | MongoDB | Redis | Error |
+|--------|---------|-------|-------|
+| `set_with_ttl()` | ❌ | ✅ | `NotImplementedError` |
+| `expire()` | ❌ | ✅ | `NotImplementedError` |
+| `incr()` | ❌ | ✅ | `NotImplementedError` |
+| `scan_keys()` | ❌ | ✅ | `NotImplementedError` |
+
+**Important:** Calling database-specific methods on the wrong database type will raise `NotImplementedError` with a helpful message directing you to the appropriate method.
+
+---
+
 ## Database Configuration
 
 ### Environment Variables
