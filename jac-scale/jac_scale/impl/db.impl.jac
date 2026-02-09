@@ -47,7 +47,9 @@ impl Db.get(
         result = self._get_mongo_collection(col_name).find_one({'_id': key});
         if result is None {
             try {
-                result = self._get_mongo_collection(col_name).find_one({'_id': ObjectId(key)});
+                result = self._get_mongo_collection(col_name).find_one(
+                    {'_id': ObjectId(key)}
+                );
             } except Exception { }
         }
         return result;
@@ -84,7 +86,9 @@ impl Db.delete(key: str, col_name: str = 'default') -> int {
         result = self._get_mongo_collection(col_name).delete_one({'_id': key});
         if result.deleted_count == 0 {
             try {
-                result = self._get_mongo_collection(col_name).delete_one({'_id': ObjectId(key)});
+                result = self._get_mongo_collection(col_name).delete_one(
+                    {'_id': ObjectId(key)}
+                );
             } except Exception { }
         }
         return result.deleted_count;
