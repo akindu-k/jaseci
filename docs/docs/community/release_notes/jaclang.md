@@ -4,13 +4,17 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.10.1 (Unreleased)
 
-- **`db()` Builtin for Direct Database Access**: Added `db()` builtin function to the runtime interface as a hookable plugin point for database access. The base implementation raises `NotImplementedError` with guidance to install `jac-scale`. When jac-scale is installed, `db()` provides direct access to database operations without graph layer abstraction. This enables plugins to extend Jac with database capabilities while keeping the core language dependency-free.
+- **Direct Database Access via `kvstore()`**: The jac-scale plugin now provides `kvstore()` function for direct database operations without graph layer abstraction. Import explicitly from `jac_scale.lib` to access MongoDB (document database with query operations) and Redis (key-value store with TTL, atomic operations, and pattern matching). Uses import-only pattern instead of builtins for cleaner dependency management. Supports URI-based connection pooling, database factory pattern, and honest database-specific semantics (methods raise `NotImplementedError` when incompatible). Configuration falls back from explicit URI → environment variables → jac.toml.
 
-  **Usage** (requires jac-scale):
+  **Example Usage**:
 
   ```jac
-  mongo_db = db(db_name='my_app', db_type='mongodb');
-  redis_cache = db(db_name='cache', db_type='redis');
+  import from jac_scale.lib { kvstore }
+
+  with entry {
+      mongo_db = kvstore(db_name='my_app', db_type='mongodb');
+      redis_cache = kvstore(db_name='cache', db_type='redis');
+  }
   ```
 
 ## jaclang 0.10.0 (Latest Release)
