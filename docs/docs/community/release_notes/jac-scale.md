@@ -63,6 +63,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Database Factory Pattern**: Introduced `DatabaseProviderFactory` with `create_client()` method and `_resolve_uri()` utility supporting `DatabaseType` enum (`MONGODB`, `REDIS`) for type-safe database client instantiation. The factory pattern abstracts database-specific client creation logic and provides consistent error handling across different database backends.
 
 - **Honest Database Semantics**: The `Db` class respects each database's native behavior instead of forcing a unified interface. MongoDB operations that don't make sense for Redis (like `find()` with filters) raise clear `NotImplementedError` exceptions directing users to appropriate alternatives. Similarly, Redis-specific operations (like `incr()`, `set_with_ttl()`) are only available when using Redis. This design prevents performance surprises and leverages each database's strengths.
+
 ## jac-scale 0.1.7 (Latest Release)
 
 - **KWESC_NAME syntax changed from `<>` to backtick**: Updated keyword-escaped names from `<>` prefix to backtick prefix to match the jaclang grammar change.
