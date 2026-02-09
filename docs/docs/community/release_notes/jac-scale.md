@@ -4,65 +4,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.1.8 (Unreleased)
 
-- **Direct Database Access API (`kvstore`)**: Added `kvstore()` function in `jac_scale.lib` for direct database operations without graph layer abstraction. Provides explicit import-based access (no global builtins). Supports both MongoDB and Redis with **database-appropriate semantics** - MongoDB gets document query operations, Redis gets pure key-value operations.
-
-  **Common Methods** (work for both databases):
-  - `get(key, col_name)`: Get value by key
-  - `set(key, value, col_name)`: Set value by key
-  - `delete(key, col_name)`: Delete by key
-  - `exists(key, col_name)`: Check if key exists
-
-  **MongoDB-Only Methods** (raise `NotImplementedError` for Redis):
-  - Document queries: `find_one(col_name, filter)`, `find(col_name, filter)`
-  - Document operations: `insert_one`, `update_one`, `delete_one`
-  - Bulk operations: `insert_many`, `update_many`, `delete_many`
-  - ID-based helpers: `find_by_id`, `update_by_id`, `delete_by_id`
-
-  **Redis-Only Methods** (raise `NotImplementedError` for MongoDB):
-  - TTL support: `set_with_ttl(key, value, ttl)`, `expire(key, seconds)`
-  - Atomic operations: `incr(key)`
-  - Pattern scanning: `scan_keys(pattern)` (uses `SCAN`, not `KEYS`)
-
-  **Configuration**: Database selection via `db_type` parameter (`'mongodb'` or `'redis'`), with configuration fallback mechanism (explicit URI → environment variable → jac.toml). Returns typed result objects for operations.
-
-  **MongoDB Example** (document database with queries):
-
-  ```jac
-  import from jac_scale.lib { kvstore }
-
-  mongo_db = kvstore(db_name='my_app', db_type='mongodb');
-
-  # Query documents with filters
-  mongo_db.insert_one('users', {'name': 'Alice', 'role': 'admin'});
-  user = mongo_db.find_one('users', {'name': 'Alice'});
-
-  # Or use simple key-value API
-  mongo_db.set('user:123', {'name': 'Bob'}, 'users');
-  user = mongo_db.get('user:123', 'users');
-  ```
-
-  **Redis Example** (key-value store with native Redis features):
-
-  ```jac
-  import from jac_scale.lib { kvstore }
-
-  redis_cache = kvstore(db_name='cache', db_type='redis');
-
-  # Pure key-value operations
-  redis_cache.set('session:abc', {'user_id': '123'});
-  session = redis_cache.get('session:abc');
-
-  # Redis-native features
-  redis_cache.set_with_ttl('temp:token', {'value': 'xyz'}, ttl=3600);
-  redis_cache.incr('page:views');
-  all_sessions = redis_cache.scan_keys('session:*');
-  ```
-
-- **URI-Based Connection Pooling**: Implemented connection pooling for database clients using URI-keyed dictionaries. Same URI reuses existing connections while different URIs create separate connection pools. Added `get_mongo_client()`, `get_redis_client()`, `close_mongo_client()`, `close_redis_client()`, and `close_all_db_connections()` functions for proper resource management and graceful shutdown.
-
-- **Database Factory Pattern**: Introduced `DatabaseProviderFactory` with `create_client()` method and `_resolve_uri()` utility supporting `DatabaseType` enum (`MONGODB`, `REDIS`) for type-safe database client instantiation. The factory pattern abstracts database-specific client creation logic and provides consistent error handling across different database backends.
-
-- **Honest Database Semantics**: The `Db` class respects each database's native behavior instead of forcing a unified interface. MongoDB operations that don't make sense for Redis (like `find()` with filters) raise clear `NotImplementedError` exceptions directing users to appropriate alternatives. Similarly, Redis-specific operations (like `incr()`, `set_with_ttl()`) are only available when using Redis. This design prevents performance surprises and leverages each database's strengths.
+- **Direct Database Access API (`kvstore`)**: Added `kvstore()` function providing explicit database operations without graph layer abstraction, supporting both MongoDB (with document query operations like `find_one`, `find`, `insert_one`, `update_one`, `delete_one`, bulk operations, and ID-based helpers) and Redis (with key-value operations like `set_with_ttl`, `expire`, `incr`, `scan_keys`). Features URI-based connection pooling, database factory pattern, honest database-specific semantics (methods raise `NotImplementedError` when incompatible), and configuration fallback (explicit URI → environment variable → jac.toml). Common methods (`get`, `set`, `delete`, `exists`) work across both databases while database-specific methods leverage each system's native strengths.
 
 ## jac-scale 0.1.7 (Latest Release)
 
