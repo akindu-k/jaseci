@@ -46,11 +46,77 @@ impl ScaleTieredMemory.init(use_cache: bool = True) -> None {
     }
 }
 
+"""Commit - sync all modified persistent anchors to MongoDB."""
+impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
+    import from jaclang { JacRuntimeInterface as Jac }
+    import from jaclang.pycore.archetype { NodeAnchor, Root }
+    import from pickle { dumps }
+    # Only needed for MongoDB - SQLite handles this via its own sync()
+    if not isinstance(self.l3, MongoBackend) {
+        # Delegate to base TieredMemory.commit() for SQLite
+        if self.l3 {
+            self.l3.sync();
+        }
+        return;
+    }
+    # Sync all modified persistent anchors in L1 to MongoDB.
+    # An anchor is considered modified if its current pickle hash differs from
+    # the hash recorded when it was loaded (anchor.hash set in __setstate__).
+    for (id, mem_anchor) in list(self.__mem__.items()) {
+        if not mem_anchor.persistent {
+            continue;
+        }
+        # Skip newly created anchors (hash==0 means never loaded from DB, already
+        # written by TieredMemory.put via check_write_access at creation time)
+        if mem_anchor.hash == 0 {
+            continue;
+        }
+        # Detect if this anchor has been modified since it was loaded from MongoDB.
+        # EdgeAnchors whose source/target stubs have been populated will change hash,
+        # but we only need to re-persist NodeAnchors (for edge list) and any anchor
+        # whose archetype fields changed.
+        current_hash = hash(dumps(mem_anchor));
+        if current_hash == mem_anchor.hash {
+            continue;  # Unchanged, skip MongoDB read
+        }
+        # Load the current stored version from MongoDB to merge changes
+        stored = self.l3.get(id);
+        if stored {
+            updated = False;
+            # Handle edge list updates (requires CONNECT access)
+            if (
+                isinstance(stored, NodeAnchor)
+                and isinstance(mem_anchor, NodeAnchor)
+                and stored.edges != mem_anchor.edges
+                and Jac.check_connect_access(mem_anchor)
+            ) {
+                stored.edges = mem_anchor.edges;
+                updated = True;
+            }
+            # Handle archetype and access updates (requires WRITE access)
+            if Jac.check_write_access(mem_anchor) {
+                if hash(dumps(stored.access)) != hash(dumps(mem_anchor.access)) {
+                    stored.access = mem_anchor.access;
+                    updated = True;
+                }
+                if hash(dumps(stored.archetype)) != hash(dumps(mem_anchor.archetype)) {
+                    stored.archetype = mem_anchor.archetype;
+                    updated = True;
+                }
+            }
+            if updated {
+                self.l3.put(stored);
+            }
+        }
+    }
+}
+
 """Close all backends."""
 impl ScaleTieredMemory.close -> None {
-    # Sync and close L3 persistence
+    # Flush any pending modifications before closing
+    self.commit();
+    # Close L3 persistence
     if self.l3 {
-        self.l3.sync();
         self.l3.close();
     }
     # Close L2 cache

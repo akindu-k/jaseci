@@ -137,4 +137,5 @@ obj ScaleTieredMemory(TieredMemory) {
 
     def init(use_cache: bool = True) -> None;
     def close -> None;
+    def commit(anchor: (Anchor | None) = None) -> None;
 }
