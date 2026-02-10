@@ -60,11 +60,12 @@ impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
             continue;
         }
         if mem_anchor.hash == 0 {
+            self.l3.put(mem_anchor);
             continue;
         }
         current_hash = hash(dumps(mem_anchor));
         if current_hash == mem_anchor.hash {
-            continue;  
+            continue;
         }
         stored = self.l3.get(id);
         if stored {
@@ -72,24 +73,19 @@ impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
             if (
                 isinstance(stored, NodeAnchor)
                 and isinstance(mem_anchor, NodeAnchor)
-                and stored.edges != mem_anchor.edges
                 and Jac.check_connect_access(mem_anchor)
             ) {
                 stored.edges = mem_anchor.edges;
                 updated = True;
             }
             if Jac.check_write_access(mem_anchor) {
-                if hash(dumps(stored.access)) != hash(dumps(mem_anchor.access)) {
-                    stored.access = mem_anchor.access;
-                    updated = True;
-                }
-                if hash(dumps(stored.archetype)) != hash(dumps(mem_anchor.archetype)) {
-                    stored.archetype = mem_anchor.archetype;
-                    updated = True;
-                }
+                stored.access = mem_anchor.access;
+                stored.archetype = mem_anchor.archetype;
+                updated = True;
             }
             if updated {
                 self.l3.put(stored);
+                mem_anchor.hash = hash(dumps(stored));
             }
         }
     }
