@@ -40,20 +40,7 @@ obj DeleteResult {
     has deleted_count: int;
 }
 
-"""Get or create a MongoDB client for the given URI.
-
-    Uses connection pooling with URI as the key. If URI is None,
-    fetches the default URI from configuration.
-
-    Args:
-        uri: MongoDB connection URI. If None, uses config default.
-
-    Returns:
-        MongoClient instance for the given URI.
-
-    Raises:
-        ValueError: If no URI is provided and none found in config.
-    """
+"""Get or create a pooled MongoDB client for the given URI."""
 def get_mongo_client(uri: (str | None) = None) -> MongoClient {
     global _mongo_clients;
 
@@ -70,20 +57,7 @@ def get_mongo_client(uri: (str | None) = None) -> MongoClient {
     return _mongo_clients[resolved_uri];
 }
 
-"""Get or create a Redis client for the given URI.
-
-    Uses connection pooling with URI as the key. If URI is None,
-    fetches the default URI from configuration.
-
-    Args:
-        uri: Redis connection URL. If None, uses config default.
-
-    Returns:
-        Redis instance for the given URI.
-
-    Raises:
-        ValueError: If no URI is provided and none found in config.
-    """
+"""Get or create a pooled Redis client for the given URI."""
 def get_redis_client(uri: (str | None) = None) -> Redis {
     global _redis_clients;
 
@@ -100,11 +74,7 @@ def get_redis_client(uri: (str | None) = None) -> Redis {
     return _redis_clients[resolved_uri];
 }
 
-"""Close a specific MongoDB client connection.
-
-    Args:
-        uri: MongoDB connection URI. If None, closes default connection.
-    """
+"""Close a specific MongoDB client connection."""
 def close_mongo_client(uri: (str | None) = None) -> None {
     global _mongo_clients;
 
@@ -118,11 +88,7 @@ def close_mongo_client(uri: (str | None) = None) -> None {
     } except ValueError { }
 }
 
-"""Close a specific Redis client connection.
-
-    Args:
-        uri: Redis connection URL. If None, closes default connection.
-    """
+"""Close a specific Redis client connection."""
 def close_redis_client(uri: (str | None) = None) -> None {
     global _redis_clients;
 
@@ -136,10 +102,7 @@ def close_redis_client(uri: (str | None) = None) -> None {
     } except ValueError { }
 }
 
-"""Close all database connections (MongoDB and Redis).
-
-    Useful for cleanup during application shutdown.
-    """
+"""Close all MongoDB and Redis connections."""
 def close_all_db_connections -> None {
     global _mongo_clients,_redis_clients;
 
@@ -166,88 +129,53 @@ obj Db {
         db_type: DatabaseType = DatabaseType.MONGODB;
 
     # ===== PRIVATE HELPER METHODS =====
-    """Get MongoDB collection reference.
-
-    Internal helper to reduce code duplication.
-    """
+    """Get MongoDB collection reference."""
     def _get_mongo_collection(col_name: str) -> Collection;
 
-    """Get namespaced Redis key.
-
-    Internal helper to reduce code duplication.
-    """
+    """Get namespaced Redis key."""
     def _get_redis_key(col_name: str, key: str) -> str;
 
     # ===== COMMON METHODS (work for both MongoDB and Redis) =====
     """Get a document/value by key.
 
-    For MongoDB: key is treated as document ID in the collection.
-    For Redis: key is the direct Redis key.
+    For MongoDB: key is the document ID.
+    For Redis: key is the Redis key.
     """
     def get(key: str, col_name: str = 'default') -> dict | None;
 
     """Set a document/value by key.
-
     For MongoDB: Inserts or updates document with given ID.
     For Redis: Sets the key-value pair.
-
-    Returns: The key/ID of the inserted document.
-    """
+"""
     def set(key: str, value: dict, col_name: str = 'default') -> str;
 
-    """Delete a document/value by key.
-
-    Returns: Number of documents/keys deleted (0 or 1).
-    """
+    """Delete a document/value by key. Returns count deleted."""
     def delete(key: str, col_name: str = 'default') -> int;
 
-    """Check if a key exists.
-
-    For MongoDB: Checks if document with given ID exists.
-    For Redis: Checks if key exists.
-    """
+    """Check if a key exists."""
     def exists(key: str, col_name: str = 'default') -> bool;
 
     # ===== MONGODB-ONLY METHODS =====
-    # These will raise NotImplementedError for Redis
-    """Find one document matching filter (MongoDB only).
-
-    Raises:
-        NotImplementedError: When called on Redis database.
-    """
+    """Find one document matching filter."""
     def find_one(col_name: str, filter: dict) -> dict | None;
 
-    """Find all documents matching filter (MongoDB only).
-
-    Raises:
-        NotImplementedError: When called on Redis database.
-    """
+    """Find all documents matching filter."""
     def find(col_name: str, filter: dict) -> Cursor | list;
 
-    """Insert a single document (MongoDB only).
-
-    For simpler API, use set() which works for both databases.
-    """
+    """Insert a single document."""
     def insert_one(
         col_name: str, document: dict
     ) -> PyMongoInsertOneResult | InsertResult;
 
-    """Update one document (MongoDB only).
-
-    Raises:
-        NotImplementedError: When called on Redis database.
-    """
+    """Update one document."""
     def update_one(
         col_name: str, filter: dict, update_data: dict, upsert_mode: bool = False
     ) -> PyMongoUpdateResult | UpdateResult;
 
-    """Delete one document (MongoDB only).
-
-    For simpler API, use delete() which works for both databases.
-    """
+    """Delete one document."""
     def delete_one(col_name: str, filter: dict) -> PyMongoDeleteResult | DeleteResult;
 
-    # Bulk operations (MongoDB only)
+    # Bulk operations
     def insert_many(
         col_name: str, documents: list
     ) -> PyMongoInsertManyResult | InsertManyResult;
@@ -257,7 +185,7 @@ obj Db {
     ) -> PyMongoUpdateResult | UpdateResult;
 
     def delete_many(col_name: str, filter: dict) -> PyMongoDeleteResult | DeleteResult;
-    # ID-based convenience methods (MongoDB only)
+    # ID-based convenience methods
     def find_by_id(col_name: str, id: str) -> dict | None;
     def update_by_id(
         col_name: str, id: str, update_data: dict, upsert_mode: bool = False
@@ -265,42 +193,25 @@ obj Db {
 
     def delete_by_id(col_name: str, id: str) -> PyMongoDeleteResult | DeleteResult;
     # ===== REDIS-ONLY METHODS =====
-    # These will raise NotImplementedError for MongoDB
-    """Set a value with TTL/expiration (Redis only).
-
+    """Set a value with TTL/expiration.
     Args:
         key: Redis key
         value: Dictionary to store (JSON serialized)
         ttl: Time to live in seconds
         col_name: Optional namespace prefix
-
-    Raises:
-        NotImplementedError: When called on MongoDB database.
     """
     def set_with_ttl(
         key: str, value: dict, ttl: int, col_name: str = 'default'
     ) -> bool;
 
-    """Increment a numeric key (Redis only).
-
-    Raises:
-        NotImplementedError: When called on MongoDB database.
-    """
+    """Increment a numeric key."""
     def incr(key: str, col_name: str = 'default') -> int;
 
-    """Set expiration on existing key (Redis only).
-
-    Raises:
-        NotImplementedError: When called on MongoDB database.
-    """
+    """Set expiration on existing key."""
     def expire(key: str, seconds: int, col_name: str = 'default') -> bool;
 
     """Get all keys matching pattern (Redis only).
-
     Warning: This uses SCAN which is safer than KEYS but still O(n).
-
-    Raises:
-        NotImplementedError: When called on MongoDB database.
     """
     def scan_keys(pattern: str, col_name: str = 'default') -> list[str];
 }

@@ -5,15 +5,12 @@ Redis: Pure key-value operations with Redis-native features (TTL, INCR, etc.).
 """
 
 # ===== HELPER FUNCTIONS =====
-"""Generate Redis key in the format: {db_name}:{col_name}:{key}."""
+"""Generate Redis key in format: {db_name}:{col_name}:{key}."""
 def _redis_key(db_name: str, col_name: str, key: str) -> str {
     return f"{db_name}:{col_name}:{key}";
 }
 
-"""Apply MongoDB-style update operations to a document.
-
-Supports both $set operator and direct updates.
-"""
+"""Apply MongoDB-style update operations to a document."""
 def _apply_update(doc: dict, update_data: dict) -> dict {
     if '$set' in update_data {
         doc.update(update_data['$set']);
@@ -24,16 +21,12 @@ def _apply_update(doc: dict, update_data: dict) -> dict {
 }
 
 # ===== HELPER METHOD IMPLEMENTATIONS =====
-"""Get MongoDB collection reference.
-
-Reduces code duplication by centralizing collection access pattern."""
+"""Get MongoDB collection reference."""
 impl Db._get_mongo_collection(col_name: str) -> Collection {
     return self.client[self.db_name][col_name];
 }
 
-"""Get namespaced Redis key.
-
-Reduces code duplication by centralizing key naming pattern."""
+"""Get namespaced Redis key."""
 impl Db._get_redis_key(col_name: str, key: str) -> str {
     return _redis_key(self.db_name, col_name, key);
 }

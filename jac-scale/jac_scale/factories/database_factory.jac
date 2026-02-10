@@ -7,18 +7,7 @@ import from enum { StrEnum }
 
 enum DatabaseType ( StrEnum ) { MONGODB = 'mongodb', REDIS = 'redis' }
 
-"""Resolve database URI from explicit parameter or configuration.
-
-    Args:
-        uri: Explicit URI provided by user (takes precedence).
-        db_type: Type of database (MONGODB or REDIS).
-
-    Returns:
-        Resolved URI string.
-
-    Raises:
-        ValueError: If URI cannot be resolved from config or unsupported db_type.
-    """
+"""Resolve database URI from parameter or configuration."""
 def _resolve_uri(uri: (str | None), db_type: DatabaseType) -> str {
     if uri is not None {
         return uri;
@@ -45,20 +34,7 @@ def _resolve_uri(uri: (str | None), db_type: DatabaseType) -> str {
 
 """Factory for creating database provider instances."""
 class DatabaseProviderFactory {
-    """Create a database provider based on type.
-
-    Args:
-        provider_type: Type of database provider ('kubernetes_mongo', 'kubernetes_redis', etc.)
-        target: Deployment target instance (for target-specific providers)
-        config: Optional provider-specific configuration
-
-    Returns:
-        DatabaseProvider instance
-
-    Raises:
-        ValueError: If provider_type is not supported
-        NotImplementedError: If provider is not yet implemented
-    """
+    """Create a database provider based on type."""
     static def create(
         provider_type: str,
         target: (DeploymentTarget | None) = None,
