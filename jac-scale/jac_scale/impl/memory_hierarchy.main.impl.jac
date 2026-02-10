@@ -64,7 +64,7 @@ impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
         }
         current_hash = hash(dumps(mem_anchor));
         if current_hash == mem_anchor.hash {
-            continue;  
+            continue;
         }
         stored = self.l3.get(id);
         if stored {
