@@ -58,7 +58,12 @@ def test_mongodb_crud(mongo_uri: str) -> None:
 
     # Bulk operations
     db.insert_many("scores", [{"score": 100}, {"score": 200}, {"score": 300}])
-    assert db.update_many("scores", {"score": {"$gte": 200}}, {"$set": {"tier": "gold"}}).modified_count == 2
+    assert (
+        db.update_many(
+            "scores", {"score": {"$gte": 200}}, {"$set": {"tier": "gold"}}
+        ).modified_count
+        == 2
+    )
     assert db.delete_many("scores", {"tier": "gold"}).deleted_count == 2
 
 
@@ -189,8 +194,14 @@ def test_cache_aside_pattern(mongo_uri: str, redis_uri: str) -> None:
     cache = kvstore(db_name="cache", db_type="redis", uri=redis_uri)
 
     # Persist user in MongoDB, cache session in Redis
-    user_id = str(mongo.insert_one("users", {"email": "u@example.com", "name": "User"}).inserted_id)
-    cache.set_with_ttl(f"session:{user_id}", {"user_id": user_id, "token": "abc"}, ttl=3600)
+    user_id = str(
+        mongo.insert_one(
+            "users", {"email": "u@example.com", "name": "User"}
+        ).inserted_id
+    )
+    cache.set_with_ttl(
+        f"session:{user_id}", {"user_id": user_id, "token": "abc"}, ttl=3600
+    )
 
     assert cache.get(f"session:{user_id}")["user_id"] == user_id
     assert mongo.find_one("users", {"email": "u@example.com"})["name"] == "User"
