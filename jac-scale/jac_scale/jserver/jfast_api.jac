@@ -92,6 +92,7 @@ obj JSONBodyParameterHandler(ParameterHandler) {
 
     """Generate Pydantic model for JSON body."""
     def generate_body_model -> (type[BaseModel] | None);
+    def _resolve_custom_type(type_obj: type) -> type;
 }
 
 """

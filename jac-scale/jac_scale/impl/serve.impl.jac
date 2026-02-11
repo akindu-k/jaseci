@@ -714,6 +714,7 @@ impl JacAPIServer.create_walker_parameters(
             continue;
         }
         field_type = walker_fields[field_name]['type'];
+        field_type_obj = walker_fields[field_name].get('type_obj', None);  # <-- ADD
         # Determine parameter type based on field type and method
         if (field_name == '_jac_spawn_node') {
             param_type = ParameterType.PATH;
@@ -723,21 +724,23 @@ impl JacAPIServer.create_walker_parameters(
         ) {
             param_type = ParameterType.QUERY;
         } elif ('UploadFile' in field_type or 'uploadfile' in field_type.lower()) {
-            # Support UploadFile type for file uploads
             param_type = ParameterType.FILE;
         } else {
             param_type = ParameterType.BODY;
         }
-        parameters.append(
-            APIParameter(
-                name='node' if (field_name == '_jac_spawn_node') else field_name,
-                data_type=field_type,
-                required=walker_fields[field_name]['required'],
-                default=walker_fields[field_name]['default'],
-                description=f"Field {field_name} for walker {walker_name}",
-                type=param_type
-            )
+        api_param = APIParameter(
+            name='node' if (field_name == '_jac_spawn_node') else field_name,
+            data_type=field_type,
+            required=walker_fields[field_name]['required'],
+            default=walker_fields[field_name]['default'],
+            description=f"Field {field_name} for walker {walker_name}",
+            type=param_type
         );
+        # Attach actual type object for custom type resolution
+        if field_type_obj is not None {
+            api_param._type_obj = field_type_obj;  # <-- ADD
+        }
+        parameters.append(api_param);
     }
     return parameters;
 }

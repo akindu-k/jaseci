@@ -170,7 +170,7 @@ impl JFastApiServer._get_python_type(
         'dict': `dict,
         'object': `dict
     };
-    return type_mapping.get(type_string.lower(), str);
+    return type_mapping.get(type_string.lower(), `dict);
 }
 
 """Implementation of PATH parameter handler."""
@@ -247,7 +247,14 @@ impl JSONBodyParameterHandler.generate_body_model -> (type[BaseModel] | None) {
         if not param.name {
             continue;
         }
-        param_type = self.type_converter._get_python_type(param.data_type);
+        # Check if param has an actual type object (for custom objects)
+        param_type = None;
+        if hasattr(param, '_type_obj') and param._type_obj is not None {
+            param_type = self._resolve_custom_type(param._type_obj);
+        }
+        if param_type is None {
+            param_type = self.type_converter._get_python_type(param.data_type);
+        }
         description = param.description or '';
         if param.required {
             model_fields[param.name] = (
@@ -272,6 +279,59 @@ impl JSONBodyParameterHandler.generate_body_model -> (type[BaseModel] | None) {
         return create_model('RequestBody', **model_fields);
     }
     return None;
+}
+
+"""Resolve a custom Jac object type into a Pydantic model for API parameter validation."""
+impl JSONBodyParameterHandler._resolve_custom_type(type_obj: type) -> type {
+    import from pydantic { BaseModel, create_model, Field }
+    import from typing { Any, get_type_hints }
+    import inspect;
+    
+    # If it's already a primitive or known type, return as-is
+    if type_obj in (str, int, float, bool, list, dict, type(None)) {
+        return type_obj;
+    }
+    # If it's already a Pydantic model, return as-is
+    if isinstance(type_obj, type) and issubclass(type_obj, BaseModel) {
+        return type_obj;
+    }
+    # Try to build a Pydantic model from the custom type's fields
+    try {
+        hints = get_type_hints(type_obj.__init__) if hasattr(type_obj, '__init__') else {};
+        sig = inspect.signature(type_obj.__init__) if hasattr(type_obj, '__init__') else None;
+        
+        if not hints and not sig {
+            return dict;
+        }
+        
+        model_fields: dict[str, Any] = {};
+        params = sig.parameters if sig else {};
+        
+        for (name, param) in params.items() {
+            if name in ('self', 'args', 'kwargs') {
+                continue;
+            }
+            field_type = hints.get(name, Any);
+            # Recursively resolve nested custom types
+            if isinstance(field_type, type) and field_type not in (str, int, float, bool, list, dict, type(None)) {
+                if not (isinstance(field_type, type) and issubclass(field_type, BaseModel)) {
+                    field_type = _resolve_custom_type(field_type);
+                }
+            }
+            if param.default == inspect.Parameter.empty {
+                model_fields[name] = (field_type, Field(...));
+            } else {
+                model_fields[name] = (field_type | None, Field(param.default));
+            }
+        }
+        
+        if model_fields {
+            return create_model(type_obj.__name__ + 'Model', **model_fields);
+        }
+        return dict;
+    } except Exception {
+        return dict;
+    }
 }
 
 """Create the actual endpoint function with parameter injection."""

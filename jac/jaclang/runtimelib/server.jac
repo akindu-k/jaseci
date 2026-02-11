@@ -94,6 +94,10 @@ obj ExecutionManager {
         func: Callable[(..., Any)], args: dict[(str, Any)], username: str
     ) -> dict[str, JsonValue];
 
+    def _resolve_walker_fields(
+        walker_cls: type, fields: dict[(str, Any)]
+    ) -> dict[(str, Any)];
+
     async def spawn_walker(
         walker_cls: type[WalkerArchetype], fields: dict[(str, Any)], username: str
     ) -> dict[str, JsonValue];

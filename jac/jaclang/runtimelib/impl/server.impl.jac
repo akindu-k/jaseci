@@ -284,6 +284,65 @@ impl ExecutionManager.execute_function(
     }
 }
 
+"""Resolve dict values into custom object instances for walker fields."""
+impl ExecutionManager._resolve_walker_fields(
+    walker_cls: type, fields: dict[str, Any]
+) -> dict[str, Any] {
+    import from typing { get_type_hints }
+    try {
+        hints = get_type_hints(walker_cls.init);
+    } except Exception {
+        return fields;
+    }
+    resolved: dict[str, Any] = {};
+    for (key, value) in fields.items() {
+        if key in hints and isinstance(value, dict) {
+            target_type = hints[key];
+            # Check if the target type is a custom class (not a primitive or built-in)
+            if (
+                isinstance(target_type, type)
+                and target_type not in (str, int, float, bool, list, dict, type(None))
+                and not issubclass(target_type, dict)
+            ) {
+                try {
+                    # Recursively resolve nested custom objects
+                    nested_hints = get_type_hints(target_type.__init__) if hasattr(target_type, '__init__') else {};
+                    nested_resolved = {};
+                    for (nested_key, nested_value) in value.items() {
+                        if nested_key in nested_hints and isinstance(nested_value, dict) {
+                            nested_type = nested_hints[nested_key];
+                            if (
+                                isinstance(nested_type, type)
+                                and nested_type not in (str, int, float, bool, list, dict, type(None))
+                            ) {
+                                nested_resolved[nested_key] = nested_type(**nested_value);
+                            } else {
+                                nested_resolved[nested_key] = nested_value;
+                            }
+                        } else {
+                            nested_resolved[nested_key] = nested_value;
+                        }
+                    }
+                    resolved[key] = target_type(**nested_resolved);
+                } except Exception {
+                    # If construction fails, try passing the dict directly
+                    try {
+                        resolved[key] = target_type(**value);
+                    } except Exception {
+                        resolved[key] = value;  # Fallback: pass raw dict
+                    }
+                }
+            } else {
+                resolved[key] = value;
+            }
+        } else {
+            resolved[key] = value;
+        }
+    }
+    return resolved;
+}
+
+
 """Spawn a walker in user's context."""
 impl ExecutionManager.spawn_walker(
     walker_cls: type[WalkerArchetype], fields: dict[(str, Any)], username: str
@@ -300,7 +359,9 @@ impl ExecutionManager.spawn_walker(
     call_token = ctx.call_state.set(CallState());
     call_state = ctx.call_state.get();
     try {
-        `walker = walker_cls(**fields);
+        # Deserialize dict fields into custom object types
+        resolved_fields = _resolve_walker_fields(walker_cls, fields);
+        `walker = walker_cls(**resolved_fields);
         if target_node_id {
             target_node = Jac.get_object(target_node_id);
             if not isinstance(target_node, NodeArchetype) {
@@ -310,7 +371,6 @@ impl ExecutionManager.spawn_walker(
             target_node = ctx.get_root();
         }
         spawn_result = Jac.spawn(`walker, target_node);
-        # Handle async walkers - await the coroutine if spawn returns one
         if iscoroutine(spawn_result) {
             result = await spawn_result;
         } else {
@@ -318,7 +378,7 @@ impl ExecutionManager.spawn_walker(
         }
         call_state.reports.put_nowait(call_state._sentinel);
         reports = await self.report_collector(call_state);
-        Jac.commit();  # Persist changes
+        Jac.commit();
         if isgenerator(reports) or isinstance(reports, AsyncGenerator) {
             return reports;
         } else {
@@ -662,6 +722,7 @@ impl ModuleIntrospector.introspect_walker(
             annotation = param.annotation;
             if (annotation != inspect.Parameter.empty) {
                 type_name = getattr(annotation, '__name__', str(annotation));
+                type_obj = annotation;
             } else {
                 type_name = 'Any';
             }
@@ -671,13 +732,15 @@ impl ModuleIntrospector.introspect_walker(
             'required': (param.default == inspect.Parameter.empty),
             'default': None
             if (param.default == inspect.Parameter.empty)
-            else param.default
+            else param.default,
+            'type_obj': type_obj
         };
     }
     fields['_jac_spawn_node'] = {
         'type': 'str (node ID, optional)',
         'required': False,
-        'default': 'root'
+        'default': 'root',
+        'type_obj': str
     };
     return {'fields': fields};
 }
