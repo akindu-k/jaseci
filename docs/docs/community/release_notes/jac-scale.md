@@ -4,6 +4,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.1.8 (Unreleased)
 
+- **Minor Internal Refactor in Tests**: Minor internal refactoring in test_direct.py to improve test structure
 - **Prometheus Metrics Integration**: Added `/metrics` endpoint with HTTP request metrics, configurable via `[plugins.scale.metrics]` in `jac.toml`.
 - Update jaseci scale k8s pipeline to support parellel test cases.
 - **early exit from k8s deployment if container restarted**
