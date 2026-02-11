@@ -286,7 +286,7 @@ impl JSONBodyParameterHandler._resolve_custom_type(type_obj: type) -> type {
     import from pydantic { BaseModel, create_model, Field }
     import from typing { Any, get_type_hints }
     import inspect;
-    
+
     # If it's already a primitive or known type, return as-is
     if type_obj in (str, int, float, bool, list, dict, type(None)) {
         return type_obj;
@@ -299,14 +299,14 @@ impl JSONBodyParameterHandler._resolve_custom_type(type_obj: type) -> type {
     try {
         hints = get_type_hints(type_obj.__init__) if hasattr(type_obj, '__init__') else {};
         sig = inspect.signature(type_obj.__init__) if hasattr(type_obj, '__init__') else None;
-        
+
         if not hints and not sig {
             return dict;
         }
-        
+
         model_fields: dict[str, Any] = {};
         params = sig.parameters if sig else {};
-        
+
         for (name, param) in params.items() {
             if name in ('self', 'args', 'kwargs') {
                 continue;
@@ -324,7 +324,7 @@ impl JSONBodyParameterHandler._resolve_custom_type(type_obj: type) -> type {
                 model_fields[name] = (field_type | None, Field(param.default));
             }
         }
-        
+
         if model_fields {
             return create_model(type_obj.__name__ + 'Model', **model_fields);
         }
