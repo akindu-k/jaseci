@@ -336,12 +336,7 @@ impl ExecutionManager.spawn_walker(
     }
 }
 
-"""Recursively resolve dict values to custom Jac object instances.
-
-When a walker field expects a custom obj type (e.g., User) and the API sends
-a plain dict (e.g., {"name": "Alice", "age": 25}), this method converts
-the dict into the proper Jac object instance.
-"""
+"""Recursively resolve dict values to custom Jac object instances."""
 impl ExecutionManager._resolve_object_fields(
     cls: type, fields: dict[(str, Any)]
 ) -> dict[str, Any] {

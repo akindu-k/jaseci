@@ -723,6 +723,7 @@ impl JacAPIServer.create_walker_parameters(
         ) {
             param_type = ParameterType.QUERY;
         } elif ('UploadFile' in field_type or 'uploadfile' in field_type.lower()) {
+            # Support UploadFile type for file uploads
             param_type = ParameterType.FILE;
         } else {
             param_type = ParameterType.BODY;
