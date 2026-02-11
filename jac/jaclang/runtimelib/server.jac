@@ -17,7 +17,9 @@ import from typing {
     AsyncGenerator,
     Literal,
     TypeAlias,
-    get_type_hints
+    get_type_hints,
+    get_origin,
+    get_args
 }
 import from urllib.parse { parse_qs, urlparse }
 import from jaclang.runtimelib.client_bundle { ClientBundleError }
@@ -99,6 +101,12 @@ obj ExecutionManager {
     ) -> dict[str, JsonValue];
 
     async def report_collector(call_state: CallState) -> dict[str, JsonValue];
+
+    def _resolve_object_fields(
+        cls: type, fields: dict[(str, Any)]
+    ) -> dict[str, Any];
+
+    def _get_list_item_type(type_hint: Any) -> (type | None);
 }
 
 """Introspects and caches module metadata."""
@@ -136,6 +144,7 @@ obj ModuleIntrospector {
     def is_auth_required_for_function(func_name: str) -> bool;
     def is_auth_required_for_walker(walker_name: str) -> bool;
     def _collect_client_globals -> dict[str, Any];
+    def _introspect_object_fields(obj_cls: type) -> dict[str, dict[str, Any]];
 }
 
 """Build and send HTTP responses."""

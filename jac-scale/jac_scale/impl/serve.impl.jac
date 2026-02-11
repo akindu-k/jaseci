@@ -706,7 +706,7 @@ impl JacAPIServer.create_walker_parameters(
             )
         );
     }
-    walker_fields = self.introspector.introspect_walker(
+        walker_fields = self.introspector.introspect_walker(
         self.get_walkers()[walker_name]
     )['fields'];
     for field_name in walker_fields {
@@ -723,15 +723,21 @@ impl JacAPIServer.create_walker_parameters(
         ) {
             param_type = ParameterType.QUERY;
         } elif ('UploadFile' in field_type or 'uploadfile' in field_type.lower()) {
-            # Support UploadFile type for file uploads
             param_type = ParameterType.FILE;
         } else {
             param_type = ParameterType.BODY;
         }
+
+        # If field has 'properties' key, it's a nested object — use 'object' data_type
+        api_data_type = field_type;
+        if 'properties' in walker_fields[field_name] {
+            api_data_type = 'object';
+        }
+
         parameters.append(
             APIParameter(
                 name='node' if (field_name == '_jac_spawn_node') else field_name,
-                data_type=field_type,
+                data_type=api_data_type,
                 required=walker_fields[field_name]['required'],
                 default=walker_fields[field_name]['default'],
                 description=f"Field {field_name} for walker {walker_name}",

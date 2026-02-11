@@ -300,7 +300,8 @@ impl ExecutionManager.spawn_walker(
     call_token = ctx.call_state.set(CallState());
     call_state = ctx.call_state.get();
     try {
-        `walker = walker_cls(**fields);
+        resolved_fields = self._resolve_object_fields(walker_cls, fields);
+        `walker = walker_cls(**resolved_fields);
         if target_node_id {
             target_node = Jac.get_object(target_node_id);
             if not isinstance(target_node, NodeArchetype) {
@@ -333,6 +334,84 @@ impl ExecutionManager.spawn_walker(
     } finally {
         ctx.call_state.reset(call_token);
     }
+}
+
+"""Recursively resolve dict values to custom Jac object instances.
+
+When a walker field expects a custom obj type (e.g., User) and the API sends
+a plain dict (e.g., {"name": "Alice", "age": 25}), this method converts
+the dict into the proper Jac object instance.
+"""
+impl ExecutionManager._resolve_object_fields(
+    cls: type, fields: dict[(str, Any)]
+) -> dict[str, Any] {
+    import from jaclang.jac0core.constructs { Archetype }
+    try {
+        type_hints = get_type_hints(cls.init);
+    } except Exception {
+        return fields;
+    }
+    resolved: dict[str, Any] = {};
+    for (field_name, field_value) in fields.items() {
+        if field_name in ('self', 'args', 'kwargs') {
+            continue;
+        }
+        expected_type = type_hints.get(field_name, None);
+        if (
+            expected_type is not None
+            and isinstance(field_value, dict)
+            and isinstance(expected_type, type)
+            and issubclass(expected_type, Archetype)
+        ) {
+            # Recursively resolve nested objects first
+            nested_resolved = self._resolve_object_fields(expected_type, field_value);
+            try {
+                field_value = expected_type(**nested_resolved);
+            } except Exception {
+                # If construction fails, pass the raw dict
+            }
+        } elif (
+            expected_type is not None
+            and isinstance(field_value, list)
+        ) {
+            # Handle list of custom objects (e.g., list[User])
+            item_type = self._get_list_item_type(expected_type);
+            if (
+                item_type is not None
+                and isinstance(item_type, type)
+                and issubclass(item_type, Archetype)
+            ) {
+                resolved_list = [];
+                for item in field_value {
+                    if isinstance(item, dict) {
+                        nested_resolved = self._resolve_object_fields(item_type, item);
+                        try {
+                            resolved_list.append(item_type(**nested_resolved));
+                        } except Exception {
+                            resolved_list.append(item);
+                        }
+                    } else {
+                        resolved_list.append(item);
+                    }
+                }
+                field_value = resolved_list;
+            }
+        }
+        resolved[field_name] = field_value;
+    }
+    return resolved;
+}
+
+"""Extract the item type from a generic list type hint (e.g., list[User] -> User)."""
+impl ExecutionManager._get_list_item_type(type_hint: Any) -> (type | None) {
+    origin = get_origin(type_hint);
+    if origin is list {
+        args = get_args(type_hint);
+        if args and len(args) == 1 {
+            return args[0];
+        }
+    }
+    return None;
 }
 
 impl ModuleIntrospector.postinit -> None {
@@ -638,6 +717,7 @@ impl ModuleIntrospector.introspect_callable(
 impl ModuleIntrospector.introspect_walker(
     walker_cls: type[WalkerArchetype]
 ) -> dict[str, Any] {
+    import from jaclang.jac0core.constructs { Archetype }
     try {
         sig = inspect.signature(walker_cls.init);
         try {
@@ -662,17 +742,29 @@ impl ModuleIntrospector.introspect_walker(
             annotation = param.annotation;
             if (annotation != inspect.Parameter.empty) {
                 type_name = getattr(annotation, '__name__', str(annotation));
+                type_obj = annotation;
             } else {
                 type_name = 'Any';
             }
         }
-        fields[name] = {
+        field_info: dict[str, Any] = {
             'type': type_name,
             'required': (param.default == inspect.Parameter.empty),
             'default': None
             if (param.default == inspect.Parameter.empty)
             else param.default
         };
+        if (
+            type_obj is not None
+            and isinstance(type_obj, type)
+            and issubclass(type_obj, Archetype)
+            and type_obj is not Archetype
+        ) {
+            field_info['type'] = 'object';
+            field_info['object_type'] = type_name;
+            field_info['properties'] = self._introspect_object_fields(type_obj);
+        }
+        fields[name] = field_info;
     }
     fields['_jac_spawn_node'] = {
         'type': 'str (node ID, optional)',
@@ -704,6 +796,62 @@ impl ModuleIntrospector.ensure_bundle -> str {
         raise ClientBundleError(self._bundle_error) ;
     }
 }
+
+"""Introspect a custom object's fields for nested schema generation."""
+impl ModuleIntrospector._introspect_object_fields(
+    obj_cls: type
+) -> dict[str, dict[str, Any]] {
+    import from jaclang.jac0core.constructs { Archetype }
+    properties: dict[str, dict[str, Any]] = {};
+    try {
+        sig = inspect.signature(obj_cls.init);
+        try {
+            type_hints = get_type_hints(obj_cls.init);
+        } except Exception {
+            type_hints = {};
+        }
+    } except Exception {
+        return properties;
+    }
+    for (name, param) in sig.parameters.items() {
+        if (name in ('self', 'args', 'kwargs')) {
+            continue;
+        }
+        type_obj = type_hints.get(name, None);
+        if type_obj is not None {
+            type_name = getattr(type_obj, '__name__', str(type_obj));
+        } else {
+            annotation = param.annotation;
+            if (annotation != inspect.Parameter.empty) {
+                type_name = getattr(annotation, '__name__', str(annotation));
+                type_obj = annotation;
+            } else {
+                type_name = 'Any';
+            }
+        }
+        prop_info: dict[str, Any] = {
+            'type': type_name,
+            'required': (param.default == inspect.Parameter.empty),
+            'default': None
+            if (param.default == inspect.Parameter.empty)
+            else param.default
+        };
+        # Recursively introspect nested custom objects
+        if (
+            type_obj is not None
+            and isinstance(type_obj, type)
+            and issubclass(type_obj, Archetype)
+            and type_obj is not Archetype
+        ) {
+            prop_info['type'] = 'object';
+            prop_info['object_type'] = type_name;
+            prop_info['properties'] = self._introspect_object_fields(type_obj);
+        }
+        properties[name] = prop_info;
+    }
+    return properties;
+}
+
 
 """Render HTML page for client function."""
 impl ModuleIntrospector.render_page(
