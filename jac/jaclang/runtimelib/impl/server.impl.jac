@@ -368,12 +368,9 @@ impl ExecutionManager._resolve_object_fields(
             try {
                 field_value = expected_type(**nested_resolved);
             } except Exception {
-                # If construction fails, pass the raw dict
+            # If construction fails, pass the raw dict
             }
-        } elif (
-            expected_type is not None
-            and isinstance(field_value, list)
-        ) {
+        } elif (expected_type is not None and isinstance(field_value, list)) {
             # Handle list of custom objects (e.g., list[User])
             item_type = self._get_list_item_type(expected_type);
             if (
@@ -851,7 +848,6 @@ impl ModuleIntrospector._introspect_object_fields(
     }
     return properties;
 }
-
 
 """Render HTML page for client function."""
 impl ModuleIntrospector.render_page(

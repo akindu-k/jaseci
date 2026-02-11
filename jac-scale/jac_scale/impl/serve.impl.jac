@@ -706,7 +706,7 @@ impl JacAPIServer.create_walker_parameters(
             )
         );
     }
-        walker_fields = self.introspector.introspect_walker(
+    walker_fields = self.introspector.introspect_walker(
         self.get_walkers()[walker_name]
     )['fields'];
     for field_name in walker_fields {
