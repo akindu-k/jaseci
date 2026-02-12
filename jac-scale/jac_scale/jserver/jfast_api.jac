@@ -154,6 +154,7 @@ class JFastApiServer(JServer[FastAPI]) {
     def _create_response_model(
         self: JFastApiServer, response_config: (dict[(str, Any)] | None) = None
     ) -> (type[BaseModel] | None);
+
     def _create_nested_model(
         self: JFastApiServer, model_name: str, properties: dict[str, Any]
     ) -> type[BaseModel];
