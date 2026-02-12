@@ -102,7 +102,6 @@ obj ExecutionManager {
 
     async def report_collector(call_state: CallState) -> dict[str, JsonValue];
     def _resolve_object_fields(cls: type, fields: dict[(str, Any)]) -> dict[str, Any];
-
     def _get_list_item_type(type_hint: Any) -> (type | None);
 }
 
