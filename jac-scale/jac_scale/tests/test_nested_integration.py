@@ -28,6 +28,8 @@ class TestNestedIntegration:
     test_file: Path
     port: int
     base_url: str
+    token: str
+    headers: dict[str, str]
     server_process: subprocess.Popen[str] | None = None
 
     @classmethod
@@ -133,7 +135,7 @@ class TestNestedIntegration:
         cls.token = data["data"]["token"]
         cls.headers = {"Authorization": f"Bearer {cls.token}"}
 
-    def _extract_data(self, response: dict[str, Any] | list[Any]) -> Any:
+    def _extract_data(self, response: dict[str, Any] | list[Any]) -> Any:  # noqa: ANN401
         if isinstance(response, list) and len(response) == 2:
             response = response[1]
 
