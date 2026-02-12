@@ -2,7 +2,10 @@
 
 import contextlib
 import os
+import pickle
 from collections.abc import Generator
+from pathlib import Path
+from uuid import UUID
 
 import pytest
 from testcontainers.mongodb import MongoDbContainer
@@ -10,6 +13,18 @@ from testcontainers.redis import RedisContainer
 
 from jac_scale.db import close_all_db_connections
 from jac_scale.lib import kvstore
+
+try:
+    from jaclang import JacRuntime as Jac
+    from jaclang.jac0core.archetype import EdgeAnchor, NodeAnchor
+
+    JAC_AVAILABLE = True
+except ImportError:
+    JAC_AVAILABLE = False
+
+pytestmark_jac = pytest.mark.skipif(not JAC_AVAILABLE, reason="jaclang not available")
+
+_FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture(scope="session")
@@ -213,3 +228,60 @@ def test_cache_aside_pattern(mongo_uri: str, redis_uri: str) -> None:
     mongo.delete_by_id("users", user_id)
     assert cache.get(f"session:{user_id}") is None
     assert mongo.find_by_id("users", user_id) is None
+
+
+# ===== JAC GRAPH FIXTURE & KVSTORE =====
+
+
+@pytest.fixture
+def jac_graph() -> dict[str, "NodeAnchor | EdgeAnchor"]:
+    """Run graph_app.jac::build walker and return all in-memory anchors.
+
+    Returns a dict keyed by str(anchor.id) containing every NodeAnchor and
+    EdgeAnchor that the walker created, including the root.
+    """
+    ctx = Jac.create_j_context(user_root=None)
+    Jac.set_context(ctx)
+    try:
+        (loaded_mod,) = Jac.jac_import(
+            target="graph_app",
+            base_path=str(_FIXTURES_DIR),
+            override_name="__main__",
+        )
+        # Instantiate and spawn the build walker on root
+        walker = loaded_mod.build()
+        Jac.spawn(ctx.user_root.archetype, walker)  # type: ignore[attr-defined]
+        # Collect every persistent anchor from L1 memory
+        anchors = {
+            str(anchor.id): anchor
+            for anchor in ctx.mem.get_mem().values()
+            if anchor.persistent
+        }
+    finally:
+        ctx.close()
+
+    return anchors
+
+
+@pytestmark_jac
+def test_jac_graph_store_and_retrieve_kvstore(
+    mongo_uri: str,
+    jac_graph: dict,
+) -> None:
+    """Persist a Jac anchor graph via kvstore and walk the retrieved graph."""
+
+    db = kvstore(db_name="jac_graph_db", db_type="mongodb", uri=mongo_uri)
+
+    for anchor_id, anchor in jac_graph.items():
+        db.set(anchor_id, {"data": pickle.dumps(anchor)}, "anchors")
+
+    root_id = str(UUID("00000000-0000-0000-0000-000000000000"))
+    doc = db.get(root_id, "anchors")
+    assert doc is not None, "root anchor not found in store"
+    root: NodeAnchor = pickle.loads(doc["data"])
+
+    assert str(root.id) == root_id
+    assert root.persistent is True
+
+    for anchor_id in jac_graph:
+        db.delete(anchor_id, "anchors")
