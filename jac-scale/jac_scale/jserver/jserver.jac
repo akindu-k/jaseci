@@ -29,7 +29,9 @@ obj APIParameter {
         data_type: str = 'str',
         required: bool = True,
         `default: Any = None,
-        description: str = '';
+        description: str = '',
+        properties: (dict[str, Any] | None) = None,
+        object_type: (str | None) = None;
 }
 
 """

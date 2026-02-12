@@ -150,6 +150,65 @@ impl JFastApiServer._create_response_model(
     return model;
 }
 
+"""Create a nested Pydantic model from properties dict."""
+impl JFastApiServer._create_nested_model(
+    self: JFastApiServer, model_name: str, properties: dict[str, Any]
+) -> type[BaseModel] {
+    if model_name in self._models {
+        return self._models[model_name];
+    }
+
+    pydantic_fields: dict[(str, Any)] = {};
+    for (field_name, field_config) in properties.items() {
+        field_type_str = field_config.get('type', 'str');
+        is_list = field_type_str.startswith('list') or field_type_str.startswith('List');
+
+        # Check for nested properties
+        nested_props = field_config.get('properties');
+        if nested_props {
+            # Extract nested type name (simple heuristic)
+            nested_type_name = field_config.get('object_type', field_name.capitalize());
+            nested_model = self._create_nested_model(nested_type_name, nested_props);
+
+            if is_list {
+                field_type = list[nested_model];
+            } else {
+                field_type = nested_model;
+            }
+        } else {
+            # Standard type resolution
+            base_type = self._get_python_type(field_type_str);
+            if is_list {
+                 # Try to get inner type if possible, otherwise list[Any] or list[str]
+                 # default to list
+                 field_type = `list;
+            } else {
+                field_type = base_type;
+            }
+        }
+
+        required = field_config.get('required', True);
+        description = field_config.get('description', '');
+
+        if required {
+            pydantic_fields[field_name] = (
+                field_type,
+                Field(..., description=description)
+            );
+        } else {
+            default_value = field_config.get('default');
+            pydantic_fields[field_name] = (
+                (field_type | None),
+                Field(default_value, description=description)
+            );
+        }
+    }
+
+    model = create_model(model_name, **pydantic_fields);
+    self._models[model_name] = model;
+    return model;
+}
+
 """Convert string type to Python type."""
 impl JFastApiServer._get_python_type(
     self: JFastApiServer, type_string: str
@@ -249,6 +308,23 @@ impl JSONBodyParameterHandler.generate_body_model -> (type[BaseModel] | None) {
         }
         param_type = self.type_converter._get_python_type(param.data_type);
         description = param.description or '';
+
+        if param.properties {
+            # Handle nested object schema
+            nested_model_name = param.object_type if param.object_type else (
+                param.name.capitalize() + 'Model'
+            );
+            nested_model = self.type_converter._create_nested_model(
+                nested_model_name, param.properties
+            );
+
+            if 'list' in param.data_type.lower() {
+                param_type = list[nested_model];
+            } else {
+                param_type = nested_model;
+            }
+        }
+
         if param.required {
             model_fields[param.name] = (
                 param_type,

@@ -729,7 +729,6 @@ impl JacAPIServer.create_walker_parameters(
             param_type = ParameterType.BODY;
         }
 
-        # If field has 'properties' key, it's a nested object — use 'object' data_type
         api_data_type = field_type;
         if 'properties' in walker_fields[field_name] {
             api_data_type = 'object';
@@ -742,7 +741,9 @@ impl JacAPIServer.create_walker_parameters(
                 required=walker_fields[field_name]['required'],
                 default=walker_fields[field_name]['default'],
                 description=f"Field {field_name} for walker {walker_name}",
-                type=param_type
+                type=param_type,
+                properties=walker_fields[field_name].get('properties'),
+                object_type=walker_fields[field_name].get('object_type')
             )
         );
     }
