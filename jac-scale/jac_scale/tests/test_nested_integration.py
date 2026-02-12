@@ -3,14 +3,13 @@
 import contextlib
 import gc
 import glob
+import socket
 import subprocess
 import time
-import socket
 from pathlib import Path
 from typing import Any
 
 import requests
-import pytest
 
 
 def get_free_port() -> int:
@@ -123,14 +122,14 @@ class TestNestedIntegration:
         response = requests.post(
             f"{cls.base_url}/user/register",
             json={"username": "testuser", "password": "password123"},
-            timeout=5
+            timeout=5,
         )
         if response.status_code != 201:
             raise RuntimeError(f"Failed to register user: {response.text}")
-        
+
         data = response.json()
         if isinstance(data, list):
-             data = data[1]
+            data = data[1]
         cls.token = data["data"]["token"]
         cls.headers = {"Authorization": f"Bearer {cls.token}"}
 
@@ -148,12 +147,9 @@ class TestNestedIntegration:
         payload = {
             "user": {
                 "name": "Alice",
-                "address": {
-                    "street": "123 Main St",
-                    "zip": 90210
-                },
+                "address": {"street": "123 Main St", "zip": 90210},
                 "tags": ["vip", "early-adopter"],
-                "metadata": {"source": "test"}
+                "metadata": {"source": "test"},
             }
         }
 
@@ -161,11 +157,11 @@ class TestNestedIntegration:
             f"{self.base_url}/walker/NestedWalker",
             json=payload,
             headers=self.headers,
-            timeout=5
+            timeout=5,
         )
         assert response.status_code == 200
         data = self._extract_data(response.json())
-        
+
         # Verify the report contains correctly extracted values
         report = data["reports"][0]
         assert report["name"] == "Alice"
@@ -178,14 +174,8 @@ class TestNestedIntegration:
         """Test instantiation of a list of custom objects."""
         payload = {
             "users": [
-                {
-                    "name": "Bob",
-                    "address": {"street": "456 Elm St", "zip": 10001}
-                },
-                {
-                    "name": "Charlie",
-                    "address": {"street": "789 Oak St", "zip": 20002}
-                }
+                {"name": "Bob", "address": {"street": "456 Elm St", "zip": 10001}},
+                {"name": "Charlie", "address": {"street": "789 Oak St", "zip": 20002}},
             ]
         }
 
@@ -193,11 +183,11 @@ class TestNestedIntegration:
             f"{self.base_url}/walker/NestedListWalker",
             json=payload,
             headers=self.headers,
-            timeout=5
+            timeout=5,
         )
         assert response.status_code == 200
         data = self._extract_data(response.json())
-        
+
         # Verify report contains list of names form instantiated objects
         report = data["reports"][0]
         assert report == ["Bob", "Charlie"]
@@ -207,16 +197,16 @@ class TestNestedIntegration:
         response = requests.get(f"{self.base_url}/openapi.json", timeout=5)
         assert response.status_code == 200
         spec = response.json()
-        
+
         # Check components/schemas for User and Address
         schemas = spec.get("components", {}).get("schemas", {})
-        
+
         # Verify Address schema
         assert "Address" in schemas
         address_props = schemas["Address"]["properties"]
         assert "street" in address_props
         assert "zip" in address_props
-        
+
         # Verify User schema and its nested relationship
         assert "User" in schemas
         user_props = schemas["User"]["properties"]
@@ -224,19 +214,19 @@ class TestNestedIntegration:
         assert "address" in user_props
         # Check that address references the Address schema
         assert "$ref" in user_props["address"] or "allOf" in user_props["address"]
-        
+
         # Verify Walker schema uses User
         # The walker payload schema is usually dynamically generated or referenced
         # We look for the path definition
         paths = spec.get("paths", {})
         walker_path = paths.get("/walker/NestedWalker", {})
         assert walker_path, "Walker path not found in OpenAPI"
-        
+
         post_op = walker_path.get("post", {})
         request_body = post_op.get("requestBody", {})
         content = request_body.get("content", {}).get("application/json", {})
         schema = content.get("schema", {})
-        
+
         # The schema for the walker body should have a 'user' property
         # It might be an inline schema or a ref
         if "$ref" in schema:
@@ -245,13 +235,13 @@ class TestNestedIntegration:
             props = walker_schema.get("properties", {})
         else:
             props = schema.get("properties", {})
-            
+
         assert "user" in props
         # Verify user field in walker references User schema
         user_ref = props["user"]
         # It handles ref directly or via allOf/anyOf
-        assert "$ref" in user_ref or (
-            "allOf" in user_ref and "$ref" in user_ref["allOf"][0]
-        ) or (
-            "type" in user_ref and user_ref["type"] == "object"
+        assert (
+            "$ref" in user_ref
+            or ("allOf" in user_ref and "$ref" in user_ref["allOf"][0])
+            or ("type" in user_ref and user_ref["type"] == "object")
         )
