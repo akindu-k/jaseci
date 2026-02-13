@@ -70,3 +70,34 @@ def to_uuid(id: (UUID | str)) -> UUID {
     }
     return UUID(str(id));
 }
+
+
+"""Bidirectional serializer for Jac objects."""
+obj Serializer {
+    """Serialize any object to JSON-compatible format."""
+    static def serialize(`obj: object, include_type: bool = False) -> object;
+
+    """Deserialize data back to original object type."""
+    static def deserialize(data: dict[str, object]) -> (object | None);
+
+    """Serialize a value recursively."""
+    static def _serialize_value(val: object, include_type: bool) -> object;
+
+    """Deserialize a value recursively."""
+    static def _deserialize_value(val: object) -> object;
+
+    """Get class by module and name."""
+    static def _get_class(module_name: str, class_name: str) -> (type | None);
+
+    """Deserialize Anchor objects."""
+    static def _deserialize_anchor(data: dict[str, object]) -> (object | None);
+
+    """Deserialize Permission objects."""
+    static def _deserialize_permission(data: object) -> object;
+
+    """Deserialize Access objects."""
+    static def _deserialize_access(data: object) -> object;
+
+    """Deserialize Archetype objects."""
+    static def _deserialize_archetype(data: dict[str, object], anchor: object) -> (object | None);
+}

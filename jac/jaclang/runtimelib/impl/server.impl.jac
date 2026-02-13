@@ -1,55 +1,33 @@
 import from jaclang.cli.console { console }
 import from jaclang.cli.banners { JAC_DISCORD_URL }
+import from jaclang.runtimelib.utils { Serializer }
 
-"""Serialize objects to JSON-compatible format."""
+"""Serialize objects to JSON-compatible format.
+
+Uses the generalized Serializer with include_type=False for API responses.
+This keeps responses clean without __type__/__module__ metadata.
+"""
 impl JacSerializer.serialize(`obj: object) -> JsonValue {
     import from jaclang.jac0core.constructs { Archetype }
-    if ((`obj is None) or isinstance(`obj, (str, int, float, bool))) {
-        return `obj;
-    }
-    if isinstance(`obj, (list, tuple)) {
-        return [JacSerializer.serialize(item) for item in `obj];
-    }
-    if isinstance(`obj, dict) {
-        return {key: JacSerializer.serialize(value) for (key, value) in `obj.items()};
-    }
+    # For Archetypes, use the specialized method that adds _jac_ prefixed metadata
     if isinstance(`obj, Archetype) {
         return JacSerializer._serialize_archetype(`obj);
     }
-    if `obj?.__dict__ {
-        with suppress(Exception) {
-            return JacSerializer.serialize(
-                {
-                    k: v
-                    for (k, v) in `obj.__dict__.items()
-                    if not k.startswith('_')
-                }
-            );
-        }
-    }
-    return str(`obj);
+    # For everything else, use the generalized Serializer
+    return Serializer.serialize(`obj, include_type=False);
 }
 
-"""Serialize Archetype instances."""
+"""Serialize Archetype instances with API-friendly metadata."""
 impl JacSerializer._serialize_archetype(arch: Archetype) -> dict[str, JsonValue] {
     import from jaclang.jac0core.constructs { NodeArchetype, WalkerArchetype }
-    result: dict[(str, JsonValue)] = {
-        '_jac_type': type(arch).__name__,
-        '_jac_id': arch.__jac__.id.hex,
-        '_jac_archetype': 'node'
+    # Start with the basic serialized data
+    result: dict[(str, JsonValue)] = Serializer.serialize(arch, include_type=False);
+    # Add API-specific metadata with _jac_ prefix (different from storage __type__)
+    result['_jac_type'] = type(arch).__name__;
+    result['_jac_id'] = arch.__jac__.id.hex if arch?.__jac__ else None;
+    result['_jac_archetype'] = 'node'
         if isinstance(arch, NodeArchetype)
-        else 'walker' if isinstance(arch, WalkerArchetype) else 'archetype'
-    };
-    for attr_name in dir(arch) {
-        if (not attr_name.startswith('_') and (attr_name != '__jac__')) {
-            with suppress(Exception) {
-                attr_value = getattr(arch, attr_name);
-                if not callable(attr_value) {
-                    result[attr_name] = JacSerializer.serialize(attr_value);
-                }
-            }
-        }
-    }
+        else 'walker' if isinstance(arch, WalkerArchetype) else 'archetype';
     return result;
 }
 
