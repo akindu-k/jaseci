@@ -1,13 +1,12 @@
 """MongoDB PersistenceBackend Implementation."""
 import logging;
 import from collections.abc { Callable, Generator, Iterable }
-import from pickle { dumps, loads }
 import from typing { Any, cast }
 import from uuid { UUID }
 import from pymongo { MongoClient, UpdateOne }
 import from pymongo.errors { ConnectionFailure }
 import from jaclang.jac0core.archetype { Anchor, NodeAnchor, Root }
-import from jaclang.runtimelib.utils { storage_key, to_uuid }
+import from jaclang.runtimelib.utils { storage_key, to_uuid, Serializer }
 
 glob logger = logging.getLogger(__name__);
 
@@ -73,10 +72,10 @@ impl MongoBackend.put(anchor: Anchor) -> None {
     }
     _id = to_uuid(anchor.id);
     try {
-        data_blob = dumps(anchor);
+        data = Serializer.serialize(anchor, include_type=True);
         self.collection.update_one(
             {'_id': str(_id)},
-            {'$set': {'data': data_blob, 'type': type(anchor).__name__}},
+            {'$set': {'data': data, 'type': type(anchor).__name__}},
             upsert=True
         );
     } except Exception as e {
@@ -203,11 +202,11 @@ impl MongoBackend.bulk_put(anchors: Iterable[Anchor]) -> None {
         }
         _id = to_uuid(anchor.id);
         try {
-            data_blob = dumps(anchor);
+            data = Serializer.serialize(anchor, include_type=True);
             ops.append(
                 UpdateOne(
                     {'_id': str(_id)},
-                    {'$set': {'data': data_blob, 'type': type(anchor).__name__}},
+                    {'$set': {'data': data, 'type': type(anchor).__name__}},
                     upsert=True
                 )
             );
@@ -230,8 +229,8 @@ impl MongoBackend._load_anchor(raw: dict[(str, Any)]) -> (Anchor | None) {
         return None;
     }
     try {
-        data: bytes = raw['data'];
-        return loads(data);
+        data = raw['data'];
+        return Serializer.deserialize(data);
     } except Exception as e {
         logger.debug(f"MongoDB _load_anchor failed: {e}");
         return None;

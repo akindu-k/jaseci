@@ -1,11 +1,11 @@
 """Redis CacheBackend Implementation."""
+import json;
 import redis;
 import logging;
 import from collections.abc { Callable, Generator, Iterable }
-import from pickle { dumps, loads }
 import from uuid { UUID }
 import from jaclang.jac0core.archetype { Anchor, Root }
-import from jaclang.runtimelib.utils { storage_key, to_uuid }
+import from jaclang.runtimelib.utils { storage_key, to_uuid, Serializer }
 
 glob logger = logging.getLogger(__name__);
 
@@ -54,7 +54,8 @@ impl RedisBackend.get(id: UUID) -> (Anchor | None) {
         if not raw {
             return None;
         }
-        return loads(raw);
+        data = json.loads(raw);
+        return Serializer.deserialize(data);
     } except Exception as e {
         logger.debug(f"Redis get failed: {e}");
         return None;
@@ -67,9 +68,9 @@ impl RedisBackend.put(anchor: Anchor) -> None {
         return;
     }
     try {
-        data = dumps(anchor);
+        data = Serializer.serialize(anchor, include_type=True);
         key = storage_key(anchor.id);
-        self.redis_client.set(key, data);
+        sself.redis_client.set(key, json.dumps(data));
     } except Exception as e {
         logger.debug(f"Redis put failed: {e}");
     }

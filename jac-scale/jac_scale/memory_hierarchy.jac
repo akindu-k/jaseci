@@ -11,7 +11,6 @@ Falls back to jaclang's SqliteMemory when MongoDB is unavailable.
 """
 import logging;
 import from collections.abc { Callable, Generator, Iterable }
-import from pickle { dumps, loads }
 import from typing { Any }
 import from uuid { UUID }
 import redis;
@@ -24,7 +23,7 @@ import from jaclang.runtimelib.memory {
     TieredMemory,
     SqliteMemory
 }
-import from jaclang.runtimelib.utils { storage_key, to_uuid }
+import from jaclang.runtimelib.utils { storage_key, to_uuid, Serializer }
 import from jac_scale.config_loader { get_scale_config }
 
 # Load database configuration from jac.toml with env var overrides
