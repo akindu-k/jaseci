@@ -70,7 +70,7 @@ impl RedisBackend.put(anchor: Anchor) -> None {
     try {
         data = Serializer.serialize(anchor, include_type=True);
         key = storage_key(anchor.id);
-        sself.redis_client.set(key, json.dumps(data));
+        self.redis_client.set(key, json.dumps(data));
     } except Exception as e {
         logger.debug(f"Redis put failed: {e}");
     }
