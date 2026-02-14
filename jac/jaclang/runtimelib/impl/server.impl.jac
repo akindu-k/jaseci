@@ -26,8 +26,8 @@ impl JacSerializer._serialize_archetype(arch: Archetype) -> dict[str, JsonValue]
     result['_jac_type'] = type(arch).__name__;
     result['_jac_id'] = arch.__jac__.id.hex if arch?.__jac__ else None;
     result['_jac_archetype'] = 'node'
-        if isinstance(arch, NodeArchetype)
-        else 'walker' if isinstance(arch, WalkerArchetype) else 'archetype';
+    if isinstance(arch, NodeArchetype)
+    else 'walker' if isinstance(arch, WalkerArchetype) else 'archetype';
     return result;
 }
 
