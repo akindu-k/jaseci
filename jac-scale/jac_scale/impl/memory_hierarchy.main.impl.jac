@@ -50,14 +50,12 @@ impl ScaleTieredMemory.init(use_cache: bool = True) -> None {
 impl ScaleTieredMemory.commit(anchor: (Any | None) = None) -> None {
     import from jaclang { JacRuntimeInterface as Jac }
     if self.l3 is None or self._persistence_type != PersistenceType.MONGODB {
-        # Fall through to base TieredMemory behaviour for SQLite (calls l3.sync())
         if self.l3 {
             self.l3.sync();
         }
         return;
     }
     if anchor is not None {
-        # Single-anchor commit (e.g. Jac.commit(specific_anchor))
         try {
             if isinstance(anchor, Anchor) and anchor.persistent {
                 typed_anchor = cast(Anchor, anchor);
@@ -88,7 +86,6 @@ impl ScaleTieredMemory.commit(anchor: (Any | None) = None) -> None {
 
 """Close all backends."""
 impl ScaleTieredMemory.close -> None {
-    # Final commit before closing to ensure all L1 mutations are persisted
     self.commit();
     # Sync and close L3 persistence
     if self.l3 {
