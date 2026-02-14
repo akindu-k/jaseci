@@ -244,7 +244,6 @@ impl sys_path_context(path: str) -> Iterator[None] {
 }
 
 # Serializer Implementation
-
 """Serialize any object to JSON-compatible format."""
 impl Serializer.serialize(`obj: object, include_type: bool = False) -> object {
     return Serializer._serialize_value(`obj, include_type);
@@ -255,31 +254,30 @@ impl Serializer._serialize_value(val: object, include_type: bool) -> object {
     import from uuid { UUID }
     import from enum { Enum, IntEnum }
     import from jaclang.jac0core.archetype {
-        Anchor, NodeAnchor, EdgeAnchor,
-        Permission, Access, AccessLevel
+        Anchor,
+        NodeAnchor,
+        EdgeAnchor,
+        Permission,
+        Access,
+        AccessLevel
     }
     import from jaclang.jac0core.constructs { Archetype }
-
     # Primitives
     if val is None or isinstance(val, (str, int, float, bool)) {
         return val;
     }
-
     # UUID -> string
     if isinstance(val, UUID) {
         return str(val);
     }
-
     # Enum -> value (int or str)
     if isinstance(val, (Enum, IntEnum)) {
         return val.value;
     }
-
     # List/tuple
     if isinstance(val, (list, tuple)) {
         return [Serializer._serialize_value(item, include_type) for item in val];
     }
-
     # Dict
     if isinstance(val, dict) {
         return {
@@ -287,14 +285,10 @@ impl Serializer._serialize_value(val: object, include_type: bool) -> object {
             for (k, v) in val.items()
         };
     }
-
     # Access
     if isinstance(val, Access) {
-        return {
-            'anchors': {str(k): v.value for (k, v) in val.anchors.items()}
-        };
+        return {'anchors': {str(k): v.value for (k, v) in val.anchors.items()}};
     }
-
     # Permission
     if isinstance(val, Permission) {
         return {
@@ -302,16 +296,13 @@ impl Serializer._serialize_value(val: object, include_type: bool) -> object {
             'roots': Serializer._serialize_value(val.roots, include_type)
         };
     }
-
     # Anchor types (NodeAnchor, EdgeAnchor, Anchor)
     if isinstance(val, Anchor) {
         result: dict[str, object] = {};
-
         if include_type {
             result['__type__'] = type(val).__name__;
             result['__module__'] = type(val).__module__;
         }
-
         result['id'] = str(val.id);
         result['root'] = str(val.root) if val.root else None;
         result['persistent'] = val.persistent;
@@ -330,29 +321,27 @@ impl Serializer._serialize_value(val: object, include_type: bool) -> object {
                     with suppress(Exception) {
                         attr_val = getattr(arch, attr_name);
                         if not callable(attr_val) {
-                            arch_data[attr_name] = Serializer._serialize_value(attr_val, include_type);
+                            arch_data[attr_name] = Serializer._serialize_value(
+                                attr_val, include_type
+                            );
                         }
                     }
                 }
             }
             result['archetype'] = arch_data;
         }
-
         # NodeAnchor specific: edges (store only IDs to avoid cycles)
         if isinstance(val, NodeAnchor) {
             result['edges'] = [str(e.id) for e in val.edges];
         }
-
         # EdgeAnchor specific: source, target, is_undirected
         if isinstance(val, EdgeAnchor) {
             result['source'] = str(val.source.id);
             result['target'] = str(val.target.id);
             result['is_undirected'] = val.is_undirected;
         }
-
         return result;
     }
-
     # Archetype (standalone, not wrapped in Anchor)
     if isinstance(val, Archetype) {
         result: dict[str, object] = {};
@@ -366,14 +355,15 @@ impl Serializer._serialize_value(val: object, include_type: bool) -> object {
                 with suppress(Exception) {
                     attr_val = getattr(val, attr_name);
                     if not callable(attr_val) {
-                       result[attr_name] = Serializer._serialize_value(attr_val, include_type);
+                        result[attr_name] = Serializer._serialize_value(
+                            attr_val, include_type
+                        );
                     }
                 }
             }
         }
         return result;
     }
-
     # Generic object with __dict__
     if val?.__dict__ {
         with suppress(Exception) {
@@ -398,36 +388,34 @@ impl Serializer._serialize_value(val: object, include_type: bool) -> object {
 impl Serializer.deserialize(data: dict[str, object]) -> (object | None) {
     import from uuid { UUID }
     import from jaclang.jac0core.archetype {
-        Anchor, NodeAnchor, EdgeAnchor,
-        Permission, Access, AccessLevel
+        Anchor,
+        NodeAnchor,
+        EdgeAnchor,
+        Permission,
+        Access,
+        AccessLevel
     }
     if not isinstance(data, dict) {
         return data;
     }
-
     type_name = data.get('__type__');
     module_name = data.get('__module__');
-
     if not type_name {
         # No type info, return as-is (recursively deserialize values)
         return {k: Serializer._deserialize_value(v) for (k, v) in data.items()};
     }
-
     # Handle Anchor types
     if type_name in ('Anchor', 'NodeAnchor', 'EdgeAnchor') {
         return Serializer._deserialize_anchor(data);
     }
-
     # Handle Permission
     if type_name == 'Permission' {
         return Serializer._deserialize_permission(data);
     }
-
     # Handle Access
     if type_name == 'Access' {
         return Serializer._deserialize_access(data);
     }
-
     # Try to get the class and reconstruct
     cls = Serializer._get_class(module_name, type_name);
     if cls {
@@ -445,7 +433,6 @@ impl Serializer.deserialize(data: dict[str, object]) -> (object | None) {
             return None;
         }
     }
-
     return None;
 }
 
@@ -454,29 +441,24 @@ impl Serializer._deserialize_value(val: object) -> object {
     if val is None or isinstance(val, (str, int, float, bool)) {
         return val;
     }
-
     if isinstance(val, list) {
         return [Serializer._deserialize_value(item) for item in val];
     }
-
     if isinstance(val, dict) {
         if '__type__' in val {
             return Serializer.deserialize(val);
         }
         return {k: Serializer._deserialize_value(v) for (k, v) in val.items()};
     }
-
     return val;
 }
 
 """Get class by module and name."""
 impl Serializer._get_class(module_name: str, class_name: str) -> (type | None) {
     import importlib;
-
     if not module_name or not class_name {
         return None;
     }
-
     try {
         module = importlib.import_module(module_name);
         return getattr(module, class_name, None);
@@ -490,11 +472,12 @@ impl Serializer._get_class(module_name: str, class_name: str) -> (type | None) {
 impl Serializer._deserialize_anchor(data: dict[str, object]) -> (Anchor | None) {
     import from uuid { UUID }
     import from jaclang.jac0core.archetype {
-        Anchor, NodeAnchor, EdgeAnchor, Permission
+        Anchor,
+        NodeAnchor,
+        EdgeAnchor,
+        Permission
     }
-
     type_name = data.get('__type__', 'Anchor');
-
     # Determine anchor class
     if type_name == 'NodeAnchor' {
         anchor_cls = NodeAnchor;
@@ -503,7 +486,6 @@ impl Serializer._deserialize_anchor(data: dict[str, object]) -> (Anchor | None) 
     } else {
         anchor_cls = Anchor;
     }
-
     try {
         # Create anchor instance
         anchor = object.__new__(anchor_cls);
@@ -514,10 +496,10 @@ impl Serializer._deserialize_anchor(data: dict[str, object]) -> (Anchor | None) 
 
         # Deserialize permission
         if (perm_data := data.get('access')) {
-           anchor.access = Serializer._deserialize_permission(perm_data);
+            anchor.access = Serializer._deserialize_permission(perm_data);
         } else {
             anchor.access = Permission();
-       }
+        }
         # Deserialize archetype
         if (arch_data := data.get('archetype')) {
             anchor.archetype = Serializer._deserialize_archetype(arch_data, anchor);
@@ -547,51 +529,43 @@ impl Serializer._deserialize_anchor(data: dict[str, object]) -> (Anchor | None) 
 """Helper to deserialize Permission."""
 impl Serializer._deserialize_permission(data: object) -> Permission {
     import from jaclang.jac0core.archetype { Permission, Access, AccessLevel }
-
     if not isinstance(data, dict) {
         return Permission();
     }
-
     perm = Permission();
     perm.all = AccessLevel(data.get('all', -1));
-
     if (roots_data := data.get('roots')) {
         perm.roots = Serializer._deserialize_access(roots_data);
     }
-
     return perm;
 }
 
 """Helper to deserialize Access."""
 impl Serializer._deserialize_access(data: object) -> Access {
     import from jaclang.jac0core.archetype { Access, AccessLevel }
-
     if not isinstance(data, dict) {
         return Access();
     }
-
     access = Access();
     if (anchors := data.get('anchors')) {
         access.anchors = {k: AccessLevel(v) for (k, v) in anchors.items()};
     }
-
     return access;
 }
 
 """Helper to deserialize Archetype."""
-impl Serializer._deserialize_archetype(data: dict[str, object], anchor: Anchor) -> (object | None) {
+impl Serializer._deserialize_archetype(
+    data: dict[str, object], anchor: Anchor
+) -> (object | None) {
     type_name = data.get('__type__');
     module_name = data.get('__module__');
-
     if not type_name or not module_name {
         return None;
     }
-
     cls = Serializer._get_class(module_name, type_name);
     if not cls {
         return None;
     }
-
     try {
         # Create archetype instance without calling __init__
         arch = object.__new__(cls);

@@ -75,7 +75,6 @@ def to_uuid(id: (UUID | str)) -> UUID {
     return UUID(str(id));
 }
 
-
 """Bidirectional serializer for Jac objects."""
 obj Serializer {
     """Serialize any object to JSON-compatible format."""
@@ -103,5 +102,7 @@ obj Serializer {
     static def _deserialize_access(data: object) -> object;
 
     """Deserialize Archetype objects."""
-    static def _deserialize_archetype(data: dict[str, object], anchor: object) -> (object | None);
+    static def _deserialize_archetype(
+        data: dict[str, object], anchor: object
+    ) -> (object | None);
 }
