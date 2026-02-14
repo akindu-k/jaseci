@@ -2,8 +2,11 @@
 
 This document provides a summary of new features, improvements, and bug fixes in each version of **Jac-Scale**. For details on changes that might require updates to your existing code, please refer to the [Breaking Changes](../breaking-changes.md) page.
 
-## jac-scale 0.1.8 (Unreleased)
+## jac-scale 0.1.9 (Unreleased)
 
+## jac-scale 0.1.8 (Latest Release)
+
+- Internal: K8s integration tests now install jac plugins from fork PRs instead of always using main
 - **.jac folder is excluded when creating the zip folder that is uploaded into jaseci deployment pods.Fasten up deployment**
 - **Fix: `jac start` Startup Banner**: Server now displays the startup banner (URLs, network IPs, mode info) correctly via `on_ready` callback, consistent with stdlib server behavior.
 - Various refactors
@@ -17,9 +20,10 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Minor Internal Refactor in Tests**: Minor internal refactoring in test_direct.py to improve test structure
 - **Nested Object Support in API**: Added full support for nested custom objects in walker parameters. The server now recursively instantiates nested Jac objects from JSON payloads and generates accurate OpenAPI schemas for them, ensuring type safety and better client generation support.
 - **fix**: Return 401 instead of 500 for deleted users with valid JWT tokens.
+- Docs update: return type `any` -> `JsxElement`
 - **1 Small Refactors**
 
-## jac-scale 0.1.7 (Latest Release)
+## jac-scale 0.1.7
 
 - **KWESC_NAME syntax changed from `<>` to backtick**: Updated keyword-escaped names from `<>` prefix to backtick prefix to match the jaclang grammar change.
 - **Update syntax for TYPE_OP removal**: Replaced backtick type operator syntax (`` `root ``) with `Root` and filter syntax (`` (`?Type) ``) with `(?:Type)` across all docs, tests, examples, and README.

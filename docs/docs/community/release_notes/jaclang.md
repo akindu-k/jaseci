@@ -2,27 +2,37 @@
 
 This document provides a summary of new features, improvements, and bug fixes in each version of **Jaclang**. For details on changes that might require updates to your existing code, please refer to the [Breaking Changes](../breaking-changes.md) page.
 
-## jaclang 0.10.1 (Unreleased)
+## jaclang 0.10.2 (Unreleased)
 
+## jaclang 0.10.1 (Latest Release)
+
+- **`jac purge` Command**: Added `jac purge` to clear the bytecode cache. Works even when the cache is corrupted.
+- **`format_build_error` Plugin Hook**: Added `format_build_error(error_output, project_dir, config)` hook to `JacMachineInterface`, allowing plugins to provide custom error formatting for client bundle build failures. The default implementation returns raw error output; plugins like `jac-client` can override to display structured diagnostics.
+- **Fix: MTIR scope key uses file stem for portability**: Fixed MTIR scope key generation to use only the file stem (filename without extension) instead of path-relative module names. This ensures consistent scope keys across different execution environments (local vs Docker) and enables compiled bytecode to be portable across different directory structures.
+- **Fix: False Type Errors in Nested Functions**: Fixed incorrect type checking errors when using nested functions inside `impl` blocks. Nested functions now correctly validate their return statements against their own return type instead of the outer function's return type.
 - **Fix: `jac start` Output Ordering**: Server startup messages now appear after compilation completes instead of before, ensuring users see build progress first and "Server ready" only when the server is actually accepting connections. Added `on_ready` callback parameter to `JacAPIServer.start()` for consistent startup message handling across stdlib and jac-scale servers.
 - **`jac format --check` Mode**: Added a `--check` flag to validate formatting without modifying files. Exits with status 1 if files need formatting or have syntax errors.
 - **Fix: `jac start` Output Ordering**: Server startup messages now appear after compilation completes instead of before, ensuring users see build progress first and "Server ready" only when the server is actually accepting connections.
-- **Support Go to Definition for Inherited Members**: "Go to Definition" now works correctly for inherited methods and attributes on classes without an explicit parent class.
 - **PWA Build Detection**: The stdlib server now detects existing PWA builds and serves Vite-hashed client files (`client.*.js`) correctly.
 - **Fix: Serve JSON and JS files as static assets**: Added `.json` and `.js` to the list of recognized asset extensions, fixing PWA `manifest.json` and `sw.js` serving.
-- **Code refactors**: Backtick escape, etc.
 - **Code refactors**: Backtick escape, TS cleanup, etc.
 - **Bootstrap Compiler (`jac0`)**: Added a single-file Python transpiler (`jac0.py`, ~1900 lines) that compiles the Jac subset produced by `py2jac` into equivalent Python source code. This closes the bootstrap loop.
 - **RD Parser: Broad Grammar Parity Fixes**: Fixed 16 grammar gaps in the recursive descent parser, raising walk-check match rate from 95.3% to 98.7%.
 - **`jac --version` Shows Installed Plugins**: The version banner now lists all installed Jac plugins with their versions, making it easy to see the full environment at a glance.
-- **Fix: Type Checker Crashes**: Fixed crashes when type-checking default/star imports (`import from mod { default as X }`) and walker entry/exit handlers.
-- **Fix: LiteralString class in Typechecker**: Literal string class is now supported in typechecker which improves binary operator chain handling.
+- **Support Go to Definition for Inherited Members**: "Go to Definition" now works correctly for inherited methods and attributes on classes without an explicit parent class.
+- **Type Checker Improvements**:
+  - **Fix: Type Checker Crashes**: Fixed crashes when type-checking default/star imports (`import from mod { default as X }`) and walker entry/exit handlers.
+  - **Fix: LiteralString Type Support**: Added `LiteralString` class to the type checker, improving binary operator chain handling and ensuring type compatibility between `LiteralString` and `str` types.
+  - **Type Checking for `super.init()` Calls**: Added validation for `super.init()` calls, catching argument errors against parent class initializers with proper MRO resolution.
 - **Fix: Native Code Cache False Positive**: Fixed a bug where "Setting up Jac for first use" appeared on every run instead of only the first time.
 -**Fix: LiteralString String type Compatibility**: LiteralStrings and Strings are now type compatible with type checker.
 - **Nested Object Support**: `ExecutionManager` now recursively instantiates nested custom Jac objects and lists of objects from dictionary payloads when spawning walkers. `ModuleIntrospector` also recursively introspects custom object fields, extending schema support to nested types.
 - **1 Small Refactors**
+- Docs update: return type `any` -> `JsxElement`
+- **Fix:** Spurious Write Access Warning on System Root During Sync
+- **3 Small Refactors**
 
-## jaclang 0.10.0 (Latest Release)
+## jaclang 0.10.0
 
 - **KWESC_NAME syntax changed from `<>` to backtick**: Keyword-escaped names now use a backtick prefix (`` `node ``) instead of the angle-bracket prefix (`<>node`). All `.jac` source files, the lexer, parser, unparse/DocIR passes, and auto-lint rules have been updated accordingly.
 - **Remove Backtick Type Operator**: Removed the backtick (`` ` ``) `TYPE_OP` token and `TypeRef` AST node from the language. The `Root` type is now referenced directly by name (e.g., `with Root entry` instead of `` with `root entry ``). Filter comprehension syntax changed from `` (`?Type:field==val) `` to `(?:Type, field==val)`. `Root` is automatically imported from `jaclib` when used in walker event signatures.
