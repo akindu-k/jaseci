@@ -12,7 +12,7 @@ Falls back to jaclang's SqliteMemory when MongoDB is unavailable.
 import logging;
 import from collections.abc { Callable, Generator, Iterable }
 import from pickle { dumps, loads }
-import from typing { Any }
+import from typing { Any, cast }
 import from uuid { UUID }
 import redis;
 import from pymongo { MongoClient }

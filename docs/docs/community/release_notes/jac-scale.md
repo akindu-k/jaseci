@@ -4,6 +4,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.1.9 (Unreleased)
 
+- **Fix: MongoDB data not retrieved after server restart**: Resolved a bug where nodes and edges created before a server restart were not visible on subsequent requests when using `MONGODB_URI`.
+
 ## jac-scale 0.1.8 (Latest Release)
 
 - Internal: K8s integration tests now install jac plugins from fork PRs instead of always using main

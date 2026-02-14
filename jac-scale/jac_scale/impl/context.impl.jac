@@ -13,16 +13,11 @@ impl JScaleExecutionContext.init(self: JScaleExecutionContext) -> None {
     self.custom: Any = MISSING;
     system_root_anchor: (Anchor | None) = self.mem.get(UUID(Con.SUPER_ROOT_UUID));
     if not isinstance(system_root_anchor, NodeAnchor) {
-        # Only create a new system root if one does NOT already exist in storage.
-        # If l3 (persistent backend) has the key, deserialization failed - raise
-        # rather than silently overwriting previously stored user data.
         super_root_id = UUID(Con.SUPER_ROOT_UUID);
         if self.mem.l3 is not None and self.mem.l3.`has(super_root_id) {
             raise RuntimeError(
                 f"System root anchor (id={Con.SUPER_ROOT_UUID}) exists in "
                 f"persistent storage but could not be deserialized. "
-                f"This likely means the stored data is from an incompatible version. "
-                f"Check logs for details. Refusing to overwrite existing data."
             );
         }
         system_root_anchor = Root().__jac__;
