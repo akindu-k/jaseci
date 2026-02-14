@@ -18,7 +18,7 @@ impl JScaleExecutionContext.init(self: JScaleExecutionContext) -> None {
             raise RuntimeError(
                 f"System root anchor (id={Con.SUPER_ROOT_UUID}) exists in "
                 f"persistent storage but could not be deserialized. "
-            );
+            ) ;
         }
         system_root_anchor = Root().__jac__;
         system_root_anchor.id = super_root_id;
