@@ -2,7 +2,9 @@
 
 This document provides a summary of new features, improvements, and bug fixes in each version of **Jaclang**. For details on changes that might require updates to your existing code, please refer to the [Breaking Changes](../breaking-changes.md) page.
 
-## jaclang 0.10.1 (Unreleased)
+## jaclang 0.10.2 (Unreleased)
+
+## jaclang 0.10.1 (Latest Release)
 
 - **Generalized `Serializer` in `runtimelib.utils`**: Added a `Serializer` class providing bidirectional JSON-compatible serialization for all Jac/runtime objects (`Anchor`, `NodeAnchor`, `EdgeAnchor`, `Archetype`, `Permission`, `Access`, enums, UUIDs, etc.). `serialize(obj, include_type=False)` produces clean API output; `serialize(obj, include_type=True)` embeds `__type__`/`__module__` metadata for full round-trip `deserialize()`. Used by the stdlib `JacSerializer` (for API responses) and jac-scale storage backends (replacing pickle).
 - **`jac purge` Command**: Added `jac purge` to clear the bytecode cache. Works even when the cache is corrupted.
@@ -26,7 +28,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Fix: Native Code Cache False Positive**: Fixed a bug where "Setting up Jac for first use" appeared on every run instead of only the first time.
 - **3 Small Refactors**
 
-## jaclang 0.10.0 (Latest Release)
+## jaclang 0.10.0
 
 - **KWESC_NAME syntax changed from `<>` to backtick**: Keyword-escaped names now use a backtick prefix (`` `node ``) instead of the angle-bracket prefix (`<>node`). All `.jac` source files, the lexer, parser, unparse/DocIR passes, and auto-lint rules have been updated accordingly.
 - **Remove Backtick Type Operator**: Removed the backtick (`` ` ``) `TYPE_OP` token and `TypeRef` AST node from the language. The `Root` type is now referenced directly by name (e.g., `with Root entry` instead of `` with `root entry ``). Filter comprehension syntax changed from `` (`?Type:field==val) `` to `(?:Type, field==val)`. `Root` is automatically imported from `jaclib` when used in walker event signatures.
