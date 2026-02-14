@@ -46,16 +46,7 @@ impl ScaleTieredMemory.init(use_cache: bool = True) -> None {
     }
 }
 
-"""Commit changes: flush all modified L1 anchors to MongoDB.
-
-Unlike SqliteMemory (which has its own sync logic), MongoBackend.put() is
-write-through only for NEW anchors saved via Jac.save(). It does NOT
-automatically re-write anchors that were mutated in L1 memory after being
-loaded from MongoDB (e.g. a user-root NodeAnchor whose edges list grows
-when a new node is connected via `++>`). This override iterates every
-persistent anchor in L1 and re-writes it to MongoDB, so mutations like
-edge-list updates survive a server restart.
-"""
+"""Commit changes: flush all modified L1 anchors to MongoDB."""
 impl ScaleTieredMemory.commit(anchor: (Any | None) = None) -> None {
     import from jaclang { JacRuntimeInterface as Jac }
     if self.l3 is None or self._persistence_type != PersistenceType.MONGODB {
@@ -67,11 +58,9 @@ impl ScaleTieredMemory.commit(anchor: (Any | None) = None) -> None {
     }
     if anchor is not None {
         # Single-anchor commit (e.g. Jac.commit(specific_anchor))
-        import from jaclang.jac0core.archetype { Anchor as _Anchor }
-        import from typing { cast }
         try {
-            if isinstance(anchor, _Anchor) and anchor.persistent {
-                typed_anchor = cast(_Anchor, anchor);
+            if isinstance(anchor, Anchor) and anchor.persistent {
+                typed_anchor = cast(Anchor, anchor);
                 if Jac.check_write_access(typed_anchor) {
                     self.l3.put(typed_anchor);
                 }
@@ -81,8 +70,6 @@ impl ScaleTieredMemory.commit(anchor: (Any | None) = None) -> None {
         }
         return;
     }
-    # Full flush: write back every persistent L1 anchor to MongoDB so
-    # mutations (edge list updates, archetype field changes, etc.) are durable.
     for (_, mem_anchor) in list(self.__mem__.items()) {
         if mem_anchor.persistent {
             try {
