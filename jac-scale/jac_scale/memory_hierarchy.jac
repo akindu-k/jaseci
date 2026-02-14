@@ -36,7 +36,7 @@ Redis cache backend - implements CacheMemory for distributed L2 caching.
 Replaces LocalCacheMemory when Redis is available.
 """
 obj RedisBackend(CacheMemory) {
-    has redis_url: str = _db_config['redis_url'],
+    has redis_url: (str | None) = None,
         redis_client: (redis.Redis | None) = None;
 
     def postinit -> None;
@@ -79,7 +79,7 @@ obj MongoBackend(PersistentMemory) {
         collection: Any by postinit,
         db_name: str = 'jac_db',
         collection_name: str = 'anchors',
-        mongo_url: str = _db_config['mongodb_uri'];
+        mongo_url: (str | None) = None;
 
     def postinit -> None;
     def is_available -> bool;
@@ -137,4 +137,5 @@ obj ScaleTieredMemory(TieredMemory) {
 
     def init(use_cache: bool = True) -> None;
     def close -> None;
+    def commit(anchor: (Any | None) = None) -> None;
 }

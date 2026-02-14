@@ -1,5 +1,6 @@
 """MongoDB PersistenceBackend Implementation."""
 import logging;
+import os;
 import from collections.abc { Callable, Generator, Iterable }
 import from pickle { dumps, loads }
 import from typing { Any, cast }
@@ -13,13 +14,16 @@ glob logger = logging.getLogger(__name__);
 
 """Post-initialization: connect to MongoDB."""
 impl MongoBackend.postinit -> None {
+    if self.mongo_url is None {
+        self.mongo_url = os.environ.get('MONGODB_URI') or self.mongo_url;
+    }
     if self.client is None and self.mongo_url {
         try {
             self.client = MongoClient(self.mongo_url);
             self.db = self.client[self.db_name];
             self.collection = self.db[self.collection_name];
         } except Exception as e {
-            logger.debug(f"MongoDB connection failed: {e}");
+            logger.warning(f"MongoDB connection failed: {e}");
             self.client = None;
         }
     }
@@ -27,6 +31,9 @@ impl MongoBackend.postinit -> None {
 
 """Check if MongoDB is available and connected."""
 impl MongoBackend.is_available -> bool {
+    if not self.mongo_url {
+        self.mongo_url = os.environ.get('MONGODB_URI') or self.mongo_url;
+    }
     if not self.mongo_url {
         return False;
     }
@@ -231,9 +238,17 @@ impl MongoBackend._load_anchor(raw: dict[(str, Any)]) -> (Anchor | None) {
     }
     try {
         data: bytes = raw['data'];
-        return loads(data);
+        anchor = loads(data);
+        return anchor;
     } except Exception as e {
-        logger.debug(f"MongoDB _load_anchor failed: {e}");
+        doc_id = raw.get('_id', '<unknown>');
+        doc_type = raw.get('type', '<unknown>');
+        logger.warning(
+            f"MongoDB _load_anchor failed to deserialize anchor "
+            f"(id={doc_id}, type={doc_type}): {e}. "
+            f"This anchor will be skipped. Data may be from an incompatible "
+            f"version or the class definition has changed."
+        );
         return None;
     }
 }

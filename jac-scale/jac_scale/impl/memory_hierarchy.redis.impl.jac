@@ -1,6 +1,7 @@
 """Redis CacheBackend Implementation."""
 import redis;
 import logging;
+import os;
 import from collections.abc { Callable, Generator, Iterable }
 import from pickle { dumps, loads }
 import from uuid { UUID }
@@ -11,11 +12,14 @@ glob logger = logging.getLogger(__name__);
 
 """Post-initialization: connect to Redis."""
 impl RedisBackend.postinit -> None {
+    if self.redis_url is None {
+        self.redis_url = os.environ.get('REDIS_URL') or self.redis_url;
+    }
     if self.redis_url and self.redis_client is None {
         try {
             self.redis_client = redis.from_url(self.redis_url);
         } except Exception as e {
-            logger.debug(f"Redis connection failed: {e}");
+            logger.warning(f"Redis connection failed: {e}");
             self.redis_client = None;
         }
     }
@@ -23,6 +27,9 @@ impl RedisBackend.postinit -> None {
 
 """Check if Redis is available and connected."""
 impl RedisBackend.is_available -> bool {
+    if not self.redis_url {
+        self.redis_url = os.environ.get('REDIS_URL') or self.redis_url;
+    }
     if not self.redis_url {
         return False;
     }
