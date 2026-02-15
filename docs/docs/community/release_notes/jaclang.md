@@ -4,6 +4,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.10.2 (Unreleased)
 
+- 1 Minor refactors/changes.
+
 ## jaclang 0.10.1 (Latest Release)
 
 - **`jac purge` Command**: Added `jac purge` to clear the bytecode cache. Works even when the cache is corrupted.
@@ -27,6 +29,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Fix: Native Code Cache False Positive**: Fixed a bug where "Setting up Jac for first use" appeared on every run instead of only the first time.
 -**Fix: LiteralString String type Compatibility**: LiteralStrings and Strings are now type compatible with type checker.
 - **Nested Object Support**: `ExecutionManager` now recursively instantiates nested custom Jac objects and lists of objects from dictionary payloads when spawning walkers. `ModuleIntrospector` also recursively introspects custom object fields, extending schema support to nested types.
+- **Fix: LiteralString String type Compatibility**: LiteralStrings and Strings are now type compatible with type checker.
+- **Lark Parser Removal**: Replaced the Lark-based parser with a hand-written recursive descent parser as the default. Deleted `jac_parser.py`, `jac.lark`, `lark_jac_parser.py`, and the vendored `lark/` directory. All 110 language tests, 438 format tests, and 15 LSP server tests pass with the new parser.
 - **1 Small Refactors**
 - Docs update: return type `any` -> `JsxElement`
 - **Fix:** Spurious Write Access Warning on System Root During Sync
