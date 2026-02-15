@@ -1,8 +1,12 @@
 """Integration tests for direct database operations using testcontainers."""
 
 import contextlib
+import io
+import json
 import os
+import sys
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 from testcontainers.mongodb import MongoDbContainer
@@ -10,6 +14,9 @@ from testcontainers.redis import RedisContainer
 
 from jac_scale.db import close_all_db_connections
 from jac_scale.lib import kvstore
+
+_FIXTURES_DIR = Path(__file__).parent / "fixtures"
+_SOCIAL_GRAPH_JAC = str(_FIXTURES_DIR / "social_graph.jac")
 
 
 @pytest.fixture(scope="session")
@@ -182,6 +189,122 @@ def test_invalid_db_type(mongo_uri: str) -> None:
     """Test invalid db_type raises ValueError."""
     with pytest.raises(ValueError, match="is not a valid DatabaseType"):
         kvstore(db_name="test", db_type="invalid_db", uri=mongo_uri)
+
+
+# ===== SOCIAL GRAPH / SERIALIZATION =====
+
+
+def _run_jac_walker(filename: str, walker: str, *args: object) -> list[object]:
+    """Run a Jac walker via execution.enter and capture its report() output.
+
+    Walker ``report`` statements are printed as JSON lines to stdout.
+    Returns the list of reported values (one entry per ``report`` call).
+    """
+    from jaclang.cli.commands import execution  # type: ignore[attr-defined]
+
+    buf = io.StringIO()
+    old_stdout = sys.stdout
+    sys.stdout = buf
+    try:
+        execution.enter(filename=filename, entrypoint=walker, args=list(args))
+    finally:
+        sys.stdout = old_stdout
+
+    output = buf.getvalue().strip()
+    if not output:
+        return []
+    reports = []
+    for line in output.splitlines():
+        line = line.strip()
+        if line:
+            try:
+                reports.append(json.loads(line))
+            except json.JSONDecodeError:
+                reports.append(line)
+    return reports
+
+
+def test_social_graph_build_and_query_mongodb(mongo_uri: str, tmp_path: Path) -> None:
+    """Run BuildGraph then QueryGraph walkers from social_graph.jac against a real MongoDB container and verify"""
+    from jaclang import JacRuntime as Jac
+
+    original_base = Jac.base_path_dir
+    Jac.set_base_path(str(tmp_path))
+    try:
+        # ── Phase 1: BuildGraph walker ────────────────────────────────────────
+        build_reports = _run_jac_walker(
+            _SOCIAL_GRAPH_JAC, "BuildGraph", mongo_uri
+        )
+
+        assert len(build_reports) >= 1, "BuildGraph should report at least once"
+        build_result = build_reports[0]
+        assert build_result.get("users") == 2, "BuildGraph must report 2 users"
+        assert build_result.get("posts") == 3, "BuildGraph must report 3 posts"
+
+        # ── Phase 2: QueryGraph walker ────────────────────────────────────────
+        query_reports = _run_jac_walker(
+            _SOCIAL_GRAPH_JAC, "QueryGraph", mongo_uri
+        )
+
+        assert len(query_reports) >= 1, "QueryGraph should report at least once"
+        result = query_reports[0]
+
+        # alice: exact key lookup (db.get('Alice', 'users'))
+        alice = result["alice"]
+        assert alice is not None, "Alice must be retrievable from kvstore"
+        assert alice["name"] == "Alice"
+        assert alice["role"] == "admin"
+        assert alice["age"] == 30, "int field 'age' must survive the serialize/deserialize round-trip"
+        assert isinstance(alice["age"], int), "age must remain int, not str or float"
+
+        # admins: filter query (db.find('users', {'role': 'admin'}))
+        admins = result["admins"]
+        assert len(admins) == 1
+        assert admins[0]["name"] == "Alice"
+
+        # young: range query (db.find('users', {'age': {'$lt': 28}}))
+        young = result["young"]
+        assert len(young) == 1
+        assert young[0]["name"] == "Bob"
+        assert young[0]["age"] == 25
+
+        # posts: all-docs query (db.find('posts', {}))
+        posts = result["posts"]
+        assert len(posts) == 3
+        titles = {p["title"] for p in posts}
+        assert titles == {"Hello World", "Jac is cool", "Getting started"}
+        # Verify string fields are intact after round-trip
+        for post in posts:
+            assert isinstance(post["title"], str)
+            assert isinstance(post["content"], str)
+
+        # ── Phase 3: direct kvstore verification after walkers ────────────────
+        db = kvstore(db_name="social", db_type="mongodb", uri=mongo_uri)
+
+        bob = db.get("Bob", "users")
+        assert bob is not None
+        assert bob["name"] == "Bob"
+        assert bob["role"] == "user"
+        assert bob["age"] == 25
+        assert isinstance(bob["age"], int)
+
+        p1 = db.get("Hello World", "posts")
+        assert p1 is not None
+        assert p1["content"] == "My first post"
+
+        assert db.exists("Alice", "users") is True
+        assert db.exists("Charlie", "users") is False
+
+        # Update round-trip: overwrite a field and confirm persistence
+        db.set("Bob", {"name": "Bob", "role": "user", "age": 26}, "users")
+        assert db.get("Bob", "users")["age"] == 26
+
+        # Delete round-trip
+        assert db.delete("Hello World", "posts") == 1
+        assert db.get("Hello World", "posts") is None
+        assert len(list(db.find("posts", {}))) == 2
+    finally:
+        Jac.set_base_path(original_base)
 
 
 # ===== REAL-WORLD PATTERN =====
