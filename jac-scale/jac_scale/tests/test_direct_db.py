@@ -194,11 +194,14 @@ def test_invalid_db_type(mongo_uri: str) -> None:
 # ===== SOCIAL GRAPH / SERIALIZATION =====
 
 
-def _run_jac_walker(filename: str, walker: str, *args: object) -> list[object]:
+def _run_jac_walker(
+    filename: str, walker: str, *args: object
+) -> list[dict[str, object]]:
     """Run a Jac walker via execution.enter and capture its report() output.
 
     Walker ``report`` statements are printed as JSON lines to stdout.
-    Returns the list of reported values (one entry per ``report`` call).
+    Returns the list of reported dicts (one entry per ``report`` call).
+    Non-JSON and non-dict lines are silently skipped.
     """
     from jaclang.cli.commands import execution  # type: ignore[attr-defined]
 
@@ -213,14 +216,16 @@ def _run_jac_walker(filename: str, walker: str, *args: object) -> list[object]:
     output = buf.getvalue().strip()
     if not output:
         return []
-    reports = []
+    reports: list[dict[str, object]] = []
     for line in output.splitlines():
         line = line.strip()
         if line:
             try:
-                reports.append(json.loads(line))
+                parsed = json.loads(line)
+                if isinstance(parsed, dict):
+                    reports.append(parsed)
             except json.JSONDecodeError:
-                reports.append(line)
+                pass
     return reports
 
 
