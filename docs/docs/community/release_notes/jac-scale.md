@@ -4,6 +4,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.1.9 (Unreleased)
 
+- 1 Minor refactors/changes.
+
 ## jac-scale 0.1.8 (Latest Release)
 
 - **Remove Pickle Serialization**: Replaced `pickle`-based serialization in MongoDB and Redis backends with the new generalized `Serializer` from `jaclang.runtimelib.utils`. Data is now stored as JSON-compatible dicts with `include_type=True` for full round-trip reconstruction, eliminating Python-version-dependent binary blobs.
