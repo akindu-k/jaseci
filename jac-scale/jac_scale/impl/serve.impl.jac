@@ -1331,9 +1331,7 @@ impl JacAPIServer.register_dynamic_walker_endpoint -> None {
     import from fastapi { Request }
     # Dynamic handler that looks up walker at request time
     async def dynamic_walker_handler(
-        request: Request,
-        walker_name: str,
-        nd: str | None = None
+        request: Request, walker_name: str, nd: str | None = None
     ) -> TransportResponse {
         # Parse request body or query params to get walker fields
         if request.method == 'GET' {
