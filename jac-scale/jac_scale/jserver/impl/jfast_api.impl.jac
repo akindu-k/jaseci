@@ -285,6 +285,7 @@ impl JFastApiServer._create_endpoint_function(
     accepts_kwargs = any(
         (p.kind == inspect.Parameter.VAR_KEYWORD) for p in sig.parameters.values()
     );
+    needs_request_no_params = 'request' in sig.parameters;
     if not parameters {
         if accepts_kwargs {
             if inspect.iscoroutinefunction(callback) {
@@ -292,7 +293,11 @@ impl JFastApiServer._create_endpoint_function(
                     import from jaclang.runtimelib.transport { TransportResponse }
                     try {
                         query_params = dict(request.query_params);
-                        result = await callback(**query_params);
+                        if needs_request_no_params {
+                            result = await callback(request=request, **query_params);
+                        } else {
+                            result = await callback(**query_params);
+                        }
                         # Automatically convert TransportResponse to JSONResponse (like HTTPTransport.send)
                         if isinstance(result, TransportResponse) {
                             return _convert_transport_response_to_json_response(result);
@@ -308,7 +313,11 @@ impl JFastApiServer._create_endpoint_function(
                     import from jaclang.runtimelib.transport { TransportResponse }
                     try {
                         query_params = dict(request.query_params);
-                        result = callback(**query_params);
+                        if needs_request_no_params {
+                            result = callback(request=request, **query_params);
+                        } else {
+                            result = callback(**query_params);
+                        }
                         # Automatically convert TransportResponse to JSONResponse (like HTTPTransport.send)
                         if isinstance(result, TransportResponse) {
                             return _convert_transport_response_to_json_response(result);
