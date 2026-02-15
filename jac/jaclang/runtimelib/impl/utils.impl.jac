@@ -239,12 +239,16 @@ impl sys_path_context(path: str) -> Iterator[None] {
 
 # Serializer Implementation
 """Serialize any object to JSON-compatible format."""
-impl Serializer.serialize(`obj: object, include_type: bool = False) -> object {
-    return Serializer._serialize_value(`obj, include_type);
+impl Serializer.serialize(
+    `obj: object, include_type: bool = False, api_mode: bool = False
+) -> object {
+    return Serializer._serialize_value(`obj, include_type, api_mode);
 }
 
 """Serialize a value recursively."""
-impl Serializer._serialize_value(val: object, include_type: bool) -> object {
+impl Serializer._serialize_value(
+    val: object, include_type: bool, api_mode: bool = False
+) -> object {
     import from uuid { UUID }
     import from enum { Enum, IntEnum }
     import from jaclang.jac0core.archetype {
@@ -255,7 +259,7 @@ impl Serializer._serialize_value(val: object, include_type: bool) -> object {
         Access,
         AccessLevel
     }
-    import from jaclang.jac0core.constructs { Archetype }
+    import from jaclang.jac0core.constructs { Archetype, NodeArchetype, WalkerArchetype }
     # Primitives
     if val is None or isinstance(val, (str, int, float, bool)) {
         return val;
@@ -270,12 +274,12 @@ impl Serializer._serialize_value(val: object, include_type: bool) -> object {
     }
     # List/tuple
     if isinstance(val, (list, tuple)) {
-        return [Serializer._serialize_value(item, include_type) for item in val];
+        return [Serializer._serialize_value(item, include_type, api_mode) for item in val];
     }
     # Dict
     if isinstance(val, dict) {
         return {
-            str(k): Serializer._serialize_value(v, include_type)
+            str(k): Serializer._serialize_value(v, include_type, api_mode)
             for (k, v) in val.items()
         };
     }
@@ -287,7 +291,7 @@ impl Serializer._serialize_value(val: object, include_type: bool) -> object {
     if isinstance(val, Permission) {
         return {
             'all': val.all.value,
-            'roots': Serializer._serialize_value(val.roots, include_type)
+            'roots': Serializer._serialize_value(val.roots, include_type, api_mode)
         };
     }
     # Anchor types (NodeAnchor, EdgeAnchor, Anchor)
@@ -300,7 +304,7 @@ impl Serializer._serialize_value(val: object, include_type: bool) -> object {
         result['id'] = str(val.id);
         result['root'] = str(val.root) if val.root else None;
         result['persistent'] = val.persistent;
-        result['access'] = Serializer._serialize_value(val.access, include_type);
+        result['access'] = Serializer._serialize_value(val.access, include_type, api_mode);
         # Archetype (the user's node/edge/walker class)
         if val.is_populated() {
             arch = val.archetype;
@@ -316,7 +320,7 @@ impl Serializer._serialize_value(val: object, include_type: bool) -> object {
                         attr_val = getattr(arch, attr_name);
                         if not callable(attr_val) {
                             arch_data[attr_name] = Serializer._serialize_value(
-                                attr_val, include_type
+                                attr_val, include_type, api_mode
                             );
                         }
                     }
@@ -344,13 +348,21 @@ impl Serializer._serialize_value(val: object, include_type: bool) -> object {
             result['__module__'] = type(val).__module__;
             result['_jac_id'] = val.__jac__.id.hex if val?.__jac__ else None;
         }
+        # api_mode: inject _jac_ metadata for API consumers
+        if api_mode {
+            result['_jac_type'] = type(val).__name__;
+            result['_jac_id'] = val.__jac__.id.hex if val?.__jac__ else None;
+            result['_jac_archetype'] = 'node'
+            if isinstance(val, NodeArchetype)
+            else 'walker' if isinstance(val, WalkerArchetype) else 'archetype';
+        }
         for attr_name in dir(val) {
             if not attr_name.startswith('_') and attr_name != '__jac__' {
                 with suppress(Exception) {
                     attr_val = getattr(val, attr_name);
                     if not callable(attr_val) {
                         result[attr_name] = Serializer._serialize_value(
-                            attr_val, include_type
+                            attr_val, include_type, api_mode
                         );
                     }
                 }
@@ -368,7 +380,7 @@ impl Serializer._serialize_value(val: object, include_type: bool) -> object {
             }
             for (k, v) in val.__dict__.items() {
                 if not k.startswith('_') {
-                    result[k] = Serializer._serialize_value(v, include_type);
+                    result[k] = Serializer._serialize_value(v, include_type, api_mode);
                 }
             }
             return result;

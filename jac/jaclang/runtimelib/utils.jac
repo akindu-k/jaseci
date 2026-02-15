@@ -77,14 +77,26 @@ def to_uuid(id: (UUID | str)) -> UUID {
 
 """Bidirectional serializer for Jac objects."""
 obj Serializer {
-    """Serialize any object to JSON-compatible format."""
-    static def serialize(`obj: object, include_type: bool = False) -> object;
+    """Serialize any object to JSON-compatible format.
+
+    Args:
+        obj: The object to serialize.
+        include_type: If True, embeds __type__/__module__ metadata for round-trip
+            deserialization (used by storage backends).
+        api_mode: If True, adds _jac_type/_jac_id/_jac_archetype metadata to
+            Archetype objects for API responses.
+    """
+    static def serialize(
+        `obj: object, include_type: bool = False, api_mode: bool = False
+    ) -> object;
 
     """Deserialize data back to original object type."""
     static def deserialize(data: dict[str, object]) -> (object | None);
 
     """Serialize a value recursively."""
-    static def _serialize_value(val: object, include_type: bool) -> object;
+    static def _serialize_value(
+        val: object, include_type: bool, api_mode: bool = False
+    ) -> object;
 
     """Deserialize a value recursively."""
     static def _deserialize_value(val: object) -> object;

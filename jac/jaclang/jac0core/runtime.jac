@@ -1765,7 +1765,7 @@ class JacAPIServer {
         args: dict[(str, Any)],
         username: str
     ) -> dict[(str, Any)] {
-        import from jaclang.runtimelib.server { JacSerializer }
+        import from jaclang.runtimelib.utils { Serializer }
         introspector.load();
         available_exports = (
             `set(introspector._client_manifest.get('exports', []))
@@ -1779,7 +1779,7 @@ class JacAPIServer {
             introspector._client_manifest.get('params', {}).get(function_name, [])
         );
         globals_payload = {
-            name: JacSerializer.serialize(value)
+            name: Serializer.serialize(value, api_mode=True)
             for (name, value) in introspector._collect_client_globals().items()
         };
         initial_state = {
@@ -1788,7 +1788,7 @@ class JacAPIServer {
             else introspector.module_name,
             'function': function_name,
             'args': {
-                key: JacSerializer.serialize(value) for (key, value) in args.items()
+                key: Serializer.serialize(value, api_mode=True) for (key, value) in args.items()
             },
             'globals': globals_payload,
             'argOrder': arg_order

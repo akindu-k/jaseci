@@ -2,35 +2,6 @@ import from jaclang.cli.console { console }
 import from jaclang.cli.banners { JAC_DISCORD_URL }
 import from jaclang.runtimelib.utils { Serializer }
 
-"""Serialize objects to JSON-compatible format.
-
-Uses the generalized Serializer with include_type=False for API responses.
-This keeps responses clean without __type__/__module__ metadata.
-"""
-impl JacSerializer.serialize(`obj: object) -> JsonValue {
-    import from jaclang.jac0core.constructs { Archetype }
-    # For Archetypes, use the specialized method that adds _jac_ prefixed metadata
-    if isinstance(`obj, Archetype) {
-        return JacSerializer._serialize_archetype(`obj);
-    }
-    # For everything else, use the generalized Serializer
-    return Serializer.serialize(`obj, include_type=False);
-}
-
-"""Serialize Archetype instances with API-friendly metadata."""
-impl JacSerializer._serialize_archetype(arch: Archetype) -> dict[str, JsonValue] {
-    import from jaclang.jac0core.constructs { NodeArchetype, WalkerArchetype }
-    # Start with the basic serialized data
-    result: dict[(str, JsonValue)] = Serializer.serialize(arch, include_type=False);
-    # Add API-specific metadata with _jac_ prefix (different from storage __type__)
-    result['_jac_type'] = type(arch).__name__;
-    result['_jac_id'] = arch.__jac__.id.hex if arch?.__jac__ else None;
-    result['_jac_archetype'] = 'node'
-    if isinstance(arch, NodeArchetype)
-    else 'walker' if isinstance(arch, WalkerArchetype) else 'archetype';
-    return result;
-}
-
 impl UserManager.postinit -> None {
     import sqlite3;
     data_dir = os.path.join(self.base_path, ".jac", "data");
@@ -251,8 +222,8 @@ impl ExecutionManager.execute_function(
             return reports;
         } else {
             return {
-                'result': JacSerializer.serialize(result),
-                'reports': JacSerializer.serialize(reports)
+                'result': Serializer.serialize(result, api_mode=True),
+                'reports': Serializer.serialize(reports, api_mode=True)
             };
         }
     } except Exception as e {
@@ -301,8 +272,8 @@ impl ExecutionManager.spawn_walker(
             return reports;
         } else {
             return {
-                'result': JacSerializer.serialize(result),
-                'reports': JacSerializer.serialize(reports)
+                'result': Serializer.serialize(result, api_mode=True),
+                'reports': Serializer.serialize(reports, api_mode=True)
             };
         }
     } except Exception as e {
