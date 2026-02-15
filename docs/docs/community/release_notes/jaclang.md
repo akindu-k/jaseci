@@ -4,7 +4,11 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.10.2 (Unreleased)
 
-- 2 Minor refactors/changes.
+- **Perf: Bootstrap Bytecode Cache**: Cache the jac0-transpiled bytecode for jac0core modules on disk, eliminating ~200ms of repeated transpilation on every invocation. `jac purge -f` clears both caches.
+- **Perf: Cache `len()` in Lexer/Parser Hot Paths**: Cached source and token list lengths in the jac0 bootstrap transpiler and the RD parser/lexer, eliminating ~1.8M redundant `len()` calls per startup.
+- 3 Minor refactors/changes.
+- **Fix: `jac grammar` Command Broken Path**: Fixed the `jac grammar` CLI command.
+- 4 Minor refactors/changes.
 
 ## jaclang 0.10.1 (Latest Release)
 
