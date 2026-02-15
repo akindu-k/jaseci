@@ -7,6 +7,7 @@ import os
 import sys
 from collections.abc import Generator
 from pathlib import Path
+from typing import cast
 
 import pytest
 from testcontainers.mongodb import MongoDbContainer
@@ -251,7 +252,7 @@ def test_social_graph_build_and_query_mongodb(mongo_uri: str, tmp_path: Path) ->
         result = query_reports[0]
 
         # alice: exact key lookup (db.get('Alice', 'users'))
-        alice = result["alice"]
+        alice = cast(dict[str, object], result["alice"])
         assert alice is not None, "Alice must be retrievable from kvstore"
         assert alice["name"] == "Alice"
         assert alice["role"] == "admin"
@@ -261,18 +262,18 @@ def test_social_graph_build_and_query_mongodb(mongo_uri: str, tmp_path: Path) ->
         assert isinstance(alice["age"], int), "age must remain int, not str or float"
 
         # admins: filter query (db.find('users', {'role': 'admin'}))
-        admins = result["admins"]
+        admins = cast(list[dict[str, object]], result["admins"])
         assert len(admins) == 1
         assert admins[0]["name"] == "Alice"
 
         # young: range query (db.find('users', {'age': {'$lt': 28}}))
-        young = result["young"]
+        young = cast(list[dict[str, object]], result["young"])
         assert len(young) == 1
         assert young[0]["name"] == "Bob"
         assert young[0]["age"] == 25
 
         # posts: all-docs query (db.find('posts', {}))
-        posts = result["posts"]
+        posts = cast(list[dict[str, object]], result["posts"])
         assert len(posts) == 3
         titles = {p["title"] for p in posts}
         assert titles == {"Hello World", "Jac is cool", "Getting started"}
