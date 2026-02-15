@@ -1788,7 +1788,8 @@ class JacAPIServer {
             else introspector.module_name,
             'function': function_name,
             'args': {
-                key: Serializer.serialize(value, api_mode=True) for (key, value) in args.items()
+                key: Serializer.serialize(value, api_mode=True)
+                for (key, value) in args.items()
             },
             'globals': globals_payload,
             'argOrder': arg_order

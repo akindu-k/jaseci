@@ -259,7 +259,11 @@ impl Serializer._serialize_value(
         Access,
         AccessLevel
     }
-    import from jaclang.jac0core.constructs { Archetype, NodeArchetype, WalkerArchetype }
+    import from jaclang.jac0core.constructs {
+        Archetype,
+        NodeArchetype,
+        WalkerArchetype
+    }
     # Primitives
     if val is None or isinstance(val, (str, int, float, bool)) {
         return val;
@@ -274,7 +278,9 @@ impl Serializer._serialize_value(
     }
     # List/tuple
     if isinstance(val, (list, tuple)) {
-        return [Serializer._serialize_value(item, include_type, api_mode) for item in val];
+        return [
+            Serializer._serialize_value(item, include_type, api_mode) for item in val
+        ];
     }
     # Dict
     if isinstance(val, dict) {
@@ -304,7 +310,9 @@ impl Serializer._serialize_value(
         result['id'] = str(val.id);
         result['root'] = str(val.root) if val.root else None;
         result['persistent'] = val.persistent;
-        result['access'] = Serializer._serialize_value(val.access, include_type, api_mode);
+        result['access'] = Serializer._serialize_value(
+            val.access, include_type, api_mode
+        );
         # Archetype (the user's node/edge/walker class)
         if val.is_populated() {
             arch = val.archetype;
