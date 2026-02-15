@@ -232,9 +232,7 @@ def test_social_graph_build_and_query_mongodb(mongo_uri: str, tmp_path: Path) ->
     Jac.set_base_path(str(tmp_path))
     try:
         # ── Phase 1: BuildGraph walker ────────────────────────────────────────
-        build_reports = _run_jac_walker(
-            _SOCIAL_GRAPH_JAC, "BuildGraph", mongo_uri
-        )
+        build_reports = _run_jac_walker(_SOCIAL_GRAPH_JAC, "BuildGraph", mongo_uri)
 
         assert len(build_reports) >= 1, "BuildGraph should report at least once"
         build_result = build_reports[0]
@@ -242,9 +240,7 @@ def test_social_graph_build_and_query_mongodb(mongo_uri: str, tmp_path: Path) ->
         assert build_result.get("posts") == 3, "BuildGraph must report 3 posts"
 
         # ── Phase 2: QueryGraph walker ────────────────────────────────────────
-        query_reports = _run_jac_walker(
-            _SOCIAL_GRAPH_JAC, "QueryGraph", mongo_uri
-        )
+        query_reports = _run_jac_walker(_SOCIAL_GRAPH_JAC, "QueryGraph", mongo_uri)
 
         assert len(query_reports) >= 1, "QueryGraph should report at least once"
         result = query_reports[0]
@@ -254,7 +250,9 @@ def test_social_graph_build_and_query_mongodb(mongo_uri: str, tmp_path: Path) ->
         assert alice is not None, "Alice must be retrievable from kvstore"
         assert alice["name"] == "Alice"
         assert alice["role"] == "admin"
-        assert alice["age"] == 30, "int field 'age' must survive the serialize/deserialize round-trip"
+        assert alice["age"] == 30, (
+            "int field 'age' must survive the serialize/deserialize round-trip"
+        )
         assert isinstance(alice["age"], int), "age must remain int, not str or float"
 
         # admins: filter query (db.find('users', {'role': 'admin'}))
