@@ -4,6 +4,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.10.3 (Unreleased)
 
+- **Fix: Display detailed syntax error messages**: Display detailed syntax error messages in `jac run` and `jac start` commands instead of generic import errors.
+
 ## jaclang 0.10.2 (Latest Release)
 
 - **Unified Primitive Codegen Interface**: Added abstract emitter contracts (`primitives.jac`) for all Jac primitive type methods and builtin functions. Each compilation backend (Python, ECMAScript, Native) must implement these interfaces, ensuring consistent primitive support across all code generation pathways. Python, JS, and Native backend implementations provided.
@@ -15,16 +17,10 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Grammar Extraction Pass Improvements & Spec Snapshot Test**: Improved `jac grammar` extraction accuracy for negated-check loops, optional dispatch branches, `while True` parse-and-break patterns, and standalone `match_tok` calls. Added a golden-file snapshot test (`jac.spec`) that validates extracted grammar rules against a checked-in spec, catching unintended grammar drift on every CI run.
 - **Black-style Grammar Formatting**: Replaced alignment-based `jac grammar` formatting with Black-style fixed 4-space indentation, blank lines between rules, and 88-char line width. Uses a recursive tree-based formatter instead of the previous string-based wrapping.
 - 4 Minor refactors/changes.
-<<<<<<< remove-pickle
 - **Refactor: Merge `JacSerializer` into `Serializer`**: Removed the `JacSerializer` wrapper class from `runtimelib.server` and merged its API-response behavior into `Serializer` via a new `api_mode: bool = False` parameter. Call `Serializer.serialize(obj, api_mode=True)` to get clean API output with `_jac_type`, `_jac_id`, and `_jac_archetype` metadata on `Archetype` objects (previously done by `JacSerializer`). Storage backends continue to use `Serializer.serialize(obj, include_type=True)` unchanged. This eliminates a redundant wrapper class with no unique serialization logic.
-=======
-- **Fix: Display detailed syntax error messages**: Display detailed syntax error messages in `jac run` and `jac start` commands instead of generic import errors.
-
->>>>>>> main
 
 ## jaclang 0.10.1
 
-- **Generalized `Serializer` in `runtimelib.utils`**: Added a `Serializer` class providing bidirectional JSON-compatible serialization for all Jac/runtime objects (`Anchor`, `NodeAnchor`, `EdgeAnchor`, `Archetype`, `Permission`, `Access`, enums, UUIDs, etc.). `serialize(obj, include_type=False)` produces clean API output; `serialize(obj, include_type=True)` embeds `__type__`/`__module__` metadata for full round-trip `deserialize()`. Used by API responses (via `api_mode=True`) and jac-scale storage backends (replacing pickle).
 - **`jac purge` Command**: Added `jac purge` to clear the bytecode cache. Works even when the cache is corrupted.
 - **`format_build_error` Plugin Hook**: Added `format_build_error(error_output, project_dir, config)` hook to `JacMachineInterface`, allowing plugins to provide custom error formatting for client bundle build failures. The default implementation returns raw error output; plugins like `jac-client` can override to display structured diagnostics.
 - **Fix: MTIR scope key uses file stem for portability**: Fixed MTIR scope key generation to use only the file stem (filename without extension) instead of path-relative module names. This ensures consistent scope keys across different execution environments (local vs Docker) and enables compiled bytecode to be portable across different directory structures.
