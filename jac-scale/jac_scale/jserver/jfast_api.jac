@@ -156,6 +156,7 @@ class JFastApiServer(JServer[FastAPI]) {
         properties: (dict[str, Any] | None) = None,
         object_type: (str | None) = None
     ) -> type[Any];
+
     def _create_response_model(
         self: JFastApiServer, response_config: (dict[(str, Any)] | None) = None
     ) -> (type[BaseModel] | None);
