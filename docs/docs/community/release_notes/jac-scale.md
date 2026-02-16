@@ -2,12 +2,14 @@
 
 This document provides a summary of new features, improvements, and bug fixes in each version of **Jac-Scale**. For details on changes that might require updates to your existing code, please refer to the [Breaking Changes](../breaking-changes.md) page.
 
-## jac-scale 0.1.9 (Unreleased)
+## jac-scale 0.1.10 (Unreleased)
+
+## jac-scale 0.1.9 (Latest Release)
 
 - 1 Minor refactors/changes.
 - **Refactor: `JacSerializer` removed, use `Serializer(api_mode=True)`**: `JacSerializer` has been removed from `jaclang.runtimelib.server`. API serialization is now handled directly by `Serializer.serialize(obj, api_mode=True)` from `jaclang.runtimelib.utils`. Storage backends are unaffected; continue using `Serializer.serialize(obj, include_type=True)` for round-trip persistence.
 
-## jac-scale 0.1.8 (Latest Release)
+## jac-scale 0.1.8
 
 - **Remove Pickle Serialization**: Replaced `pickle`-based serialization in MongoDB and Redis backends with the new generalized `Serializer` from `jaclang.runtimelib.utils`. Data is now stored as JSON-compatible dicts with `include_type=True` for full round-trip reconstruction, eliminating Python-version-dependent binary blobs.
 - Internal: K8s integration tests now install jac plugins from fork PRs instead of always using main
