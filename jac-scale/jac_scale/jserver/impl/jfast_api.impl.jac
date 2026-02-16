@@ -166,10 +166,13 @@ impl JFastApiServer._get_python_type(
         pydantic_fields: dict[(str, Any)] = {};
         for (field_name, field_config) in properties.items() {
             field_type_str = field_config.get('type', 'str');
-            is_list = field_type_str.startswith('list') or field_type_str.startswith('List');
+            is_list = field_type_str.startswith('list')
+            or field_type_str.startswith('List');
             nested_props = field_config.get('properties');
             nested_obj_type = field_config.get('object_type', field_name.capitalize());
-            base_type = self._get_python_type(field_type_str, nested_props, nested_obj_type);
+            base_type = self._get_python_type(
+                field_type_str, nested_props, nested_obj_type
+            );
             if is_list and not nested_props {
                 field_type = `list;
             } elif is_list {
@@ -180,10 +183,16 @@ impl JFastApiServer._get_python_type(
             required = field_config.get('required', True);
             description = field_config.get('description', '');
             if required {
-                pydantic_fields[field_name] = (field_type, Field(..., description=description));
+                pydantic_fields[field_name] = (
+                    field_type,
+                    Field(..., description=description)
+                );
             } else {
                 default_value = field_config.get('default');
-                pydantic_fields[field_name] = ((field_type | None), Field(default_value, description=description));
+                pydantic_fields[field_name] = (
+                    (field_type | None),
+                    Field(default_value, description=description)
+                );
             }
         }
         model = create_model(model_name, **pydantic_fields);
@@ -291,9 +300,13 @@ impl JSONBodyParameterHandler.generate_body_model -> (type[BaseModel] | None) {
             inner_type = self.type_converter._get_python_type(
                 nested_model_name, param.properties, nested_model_name
             );
-            param_type = list[inner_type] if 'list' in param.data_type.lower() else inner_type;
+            param_type = list[inner_type]
+            if 'list' in param.data_type.lower()
+            else inner_type;
         } else {
-            param_type = self.type_converter._get_python_type(param.data_type, None, None);
+            param_type = self.type_converter._get_python_type(
+                param.data_type, None, None
+            );
         }
 
         if param.required {
