@@ -2690,7 +2690,10 @@ class TestJacScaleServeDevMode:
             {
                 "users": [
                     {"name": "Bob", "address": {"street": "456 Elm St", "zip": 10001}},
-                    {"name": "Charlie", "address": {"street": "789 Oak St", "zip": 20002}},
+                    {
+                        "name": "Charlie",
+                        "address": {"street": "789 Oak St", "zip": 20002},
+                    },
                 ]
             },
             token=token,
