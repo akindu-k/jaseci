@@ -97,11 +97,18 @@ obj ExecutionManager {
     ) -> dict[str, JsonValue];
 
     async def spawn_walker(
-        walker_cls: type[WalkerArchetype], fields: dict[(str, Any)], username: str
+        walker_cls: type[WalkerArchetype],
+        fields: dict[(str, Any)],
+        username: str,
+        field_schema: (dict[str, Any] | None) = None
     ) -> dict[str, JsonValue];
 
     async def report_collector(call_state: CallState) -> dict[str, JsonValue];
-    def _resolve_object_fields(cls: type, fields: dict[(str, Any)]) -> dict[str, Any];
+    def _resolve_object_fields(
+        cls: type,
+        fields: dict[(str, Any)],
+        field_schema: (dict[str, Any] | None) = None
+    ) -> dict[str, Any];
     def _get_list_item_type(type_hint: Any) -> (type | None);
 }
 
@@ -140,7 +147,7 @@ obj ModuleIntrospector {
     def is_auth_required_for_function(func_name: str) -> bool;
     def is_auth_required_for_walker(walker_name: str) -> bool;
     def _collect_client_globals -> dict[str, Any];
-    def _introspect_object_fields(obj_cls: type) -> dict[str, dict[str, Any]];
+    def _introspect_fields(cls: type) -> dict[str, dict[str, Any]];
 }
 
 """Build and send HTTP responses."""
