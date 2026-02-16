@@ -2640,3 +2640,60 @@ class TestJacScaleServeDevMode:
         # They get concatenated together in the stream
         expected = "Func 0Func 1"
         assert content == expected, f"Expected '{expected}', got '{content}'"
+
+    def test_nested_object_walker(self) -> None:
+        """Test that nested custom objects are correctly instantiated in walker args."""
+        import uuid
+
+        user = self._request(
+            "POST",
+            "/user/register",
+            {"username": f"nested_{uuid.uuid4().hex[:6]}", "password": "pass"},
+        )
+        token = user["token"]
+
+        result = self._request(
+            "POST",
+            "/walker/NestedWalker",
+            {
+                "user": {
+                    "name": "Alice",
+                    "address": {"street": "123 Main St", "zip": 90210},
+                    "tags": ["vip", "early-adopter"],
+                    "metadata": {"source": "test"},
+                }
+            },
+            token=token,
+        )
+
+        report = result["reports"][0]
+        assert report["name"] == "Alice"
+        assert report["street"] == "123 Main St"
+        assert report["zip"] == 90210
+        assert report["tags"] == ["vip", "early-adopter"]
+        assert report["metadata"] == {"source": "test"}
+
+    def test_nested_list_walker(self) -> None:
+        """Test that a list of nested custom objects is correctly instantiated."""
+        import uuid
+
+        user = self._request(
+            "POST",
+            "/user/register",
+            {"username": f"nestedlist_{uuid.uuid4().hex[:6]}", "password": "pass"},
+        )
+        token = user["token"]
+
+        result = self._request(
+            "POST",
+            "/walker/NestedListWalker",
+            {
+                "users": [
+                    {"name": "Bob", "address": {"street": "456 Elm St", "zip": 10001}},
+                    {"name": "Charlie", "address": {"street": "789 Oak St", "zip": 20002}},
+                ]
+            },
+            token=token,
+        )
+
+        assert result["reports"][0] == ["Bob", "Charlie"]

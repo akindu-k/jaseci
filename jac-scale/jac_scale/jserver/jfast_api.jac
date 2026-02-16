@@ -52,7 +52,7 @@ obj ParameterHandler {
 
     """Get the actual Python type from parameter type string."""
     def get_type(param: APIParameter) -> type[Any] {
-        return self.type_converter._get_python_type(param.data_type);
+        return self.type_converter._get_python_type(param.data_type, None, None);
     }
 
     """Get the type name for code generation."""
@@ -150,14 +150,10 @@ class JFastApiServer(JServer[FastAPI]) {
         dependencies: list[Any]
     ) -> Callable[..., Any];
 
-    def _get_python_type(self: JFastApiServer, type_string: str) -> type[Any];
+    def _get_python_type(self: JFastApiServer, type_string: str, properties: (dict[str, Any] | None) = None, object_type: (str | None) = None) -> type[Any];
     def _create_response_model(
         self: JFastApiServer, response_config: (dict[(str, Any)] | None) = None
     ) -> (type[BaseModel] | None);
-
-    def _create_nested_model(
-        self: JFastApiServer, model_name: str, properties: dict[str, Any]
-    ) -> type[BaseModel];
 
     def get_app(self: JFastApiServer) -> FastAPI;
     def run_server(
