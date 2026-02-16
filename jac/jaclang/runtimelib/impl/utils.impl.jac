@@ -299,7 +299,12 @@ impl Serializer._serialize_value(
     }
     # Anchor types (NodeAnchor, EdgeAnchor, Anchor)
     if isinstance(val, Anchor) {
-        result: dict[str, object] = {'__type__': type(val).__name__, '__module__': type(val).__module__} if include_type else {};
+        result: dict[str, object] = {
+            '__type__': type(val).__name__,
+            '__module__': type(val).__module__
+        }
+        if include_type
+        else {};
         result['id'] = str(val.id);
         result['root'] = str(val.root) if val.root else None;
         result['persistent'] = val.persistent;
@@ -309,8 +314,21 @@ impl Serializer._serialize_value(
         # Archetype (the user's node/edge/walker class)
         if val.is_populated() {
             arch = val.archetype;
-            arch_data: dict[str, object] = {'__type__': type(arch).__name__, '__module__': type(arch).__module__} if include_type else {};
-            arch_data |= {a: Serializer._serialize_value(getattr(arch, a), include_type, api_mode) for a in dir(arch) if not a.startswith('_') and a != '__jac__' and not callable(getattr(arch, a, None))};
+            arch_data: dict[str, object] = {
+                '__type__': type(arch).__name__,
+                '__module__': type(arch).__module__
+            }
+            if include_type
+            else {};
+            arch_data |= {
+                a: Serializer._serialize_value(
+                    getattr(arch, a), include_type, api_mode
+                )
+                for a in dir(arch)
+                if not a.startswith('_')
+                and a != '__jac__'
+                and not callable(getattr(arch, a, None))
+            };
             result['archetype'] = arch_data;
         }
         # NodeAnchor specific: edges (store only IDs to avoid cycles)
@@ -327,7 +345,13 @@ impl Serializer._serialize_value(
     }
     # Archetype (standalone, not wrapped in Anchor)
     if isinstance(val, Archetype) {
-        result: dict[str, object] = {'__type__': type(val).__name__, '__module__': type(val).__module__, '_jac_id': val.__jac__.id.hex if val?.__jac__ else None} if include_type else {};
+        result: dict[str, object] = {
+            '__type__': type(val).__name__,
+            '__module__': type(val).__module__,
+            '_jac_id': val.__jac__.id.hex if val?.__jac__ else None
+        }
+        if include_type
+        else {};
         # api_mode: inject _jac_ metadata for API consumers
         if api_mode {
             result['_jac_type'] = type(val).__name__;
@@ -336,13 +360,24 @@ impl Serializer._serialize_value(
             if isinstance(val, NodeArchetype)
             else 'walker' if isinstance(val, WalkerArchetype) else 'archetype';
         }
-        result |= {a: Serializer._serialize_value(getattr(val, a), include_type, api_mode) for a in dir(val) if not a.startswith('_') and a != '__jac__' and not callable(getattr(val, a, None))};
+        result |= {
+            a: Serializer._serialize_value(getattr(val, a), include_type, api_mode)
+            for a in dir(val)
+            if not a.startswith('_')
+            and a != '__jac__'
+            and not callable(getattr(val, a, None))
+        };
         return result;
     }
     # Generic object with __dict__
     if val?.__dict__ {
         with suppress(Exception) {
-            result: dict[str, object] = {'__type__': type(val).__name__, '__module__': type(val).__module__} if include_type else {};
+            result: dict[str, object] = {
+                '__type__': type(val).__name__,
+                '__module__': type(val).__module__
+            }
+            if include_type
+            else {};
             for (k, v) in val.__dict__.items() {
                 if not k.startswith('_') {
                     result[k] = Serializer._serialize_value(v, include_type, api_mode);
@@ -429,14 +464,18 @@ impl Serializer._get_class(module_name: str, class_name: str) -> (type | None) {
 
 """Helper to deserialize Anchor objects."""
 impl Serializer._deserialize_anchor(data: dict[str, object]) -> (Anchor | None) {
-    anchor_cls = {'NodeAnchor': NodeAnchor, 'EdgeAnchor': EdgeAnchor}.get(data.get('__type__', ''), Anchor);
+    anchor_cls = {'NodeAnchor': NodeAnchor, 'EdgeAnchor': EdgeAnchor}.get(
+        data.get('__type__', ''), Anchor
+    );
     try {
         anchor = object.__new__(anchor_cls);
         anchor.id = UUID(data['id']) if data.get('id') else None;
         anchor.root = UUID(data['root']) if data.get('root') else None;
         anchor.persistent = data.get('persistent', False);
         anchor.hash = 0;
-        anchor.access = Serializer._deserialize_permission(perm_data) if (perm_data := data.get('access')) else Permission();
+        anchor.access = Serializer._deserialize_permission(perm_data)
+        if (perm_data := data.get('access'))
+        else Permission();
         if (arch_data := data.get('archetype')) {
             anchor.archetype = Serializer._deserialize_archetype(arch_data, anchor);
         }
