@@ -19,6 +19,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Refactor: Merge `JacSerializer` into `Serializer`**: Removed the `JacSerializer` wrapper class from `runtimelib.server` and merged its API-response behavior into `Serializer` via a new `api_mode: bool = False` parameter. Call `Serializer.serialize(obj, api_mode=True)` to get clean API output with `_jac_type`, `_jac_id`, and `_jac_archetype` metadata on `Archetype` objects (previously done by `JacSerializer`). Storage backends continue to use `Serializer.serialize(obj, include_type=True)` unchanged. This eliminates a redundant wrapper class with no unique serialization logic.
 =======
 - **Fix: Display detailed syntax error messages**: Display detailed syntax error messages in `jac run` and `jac start` commands instead of generic import errors.
+
 >>>>>>> main
 
 ## jaclang 0.10.1
