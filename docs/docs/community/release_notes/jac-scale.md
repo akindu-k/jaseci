@@ -2,12 +2,14 @@
 
 This document provides a summary of new features, improvements, and bug fixes in each version of **Jac-Scale**. For details on changes that might require updates to your existing code, please refer to the [Breaking Changes](../breaking-changes.md) page.
 
-## jac-scale 0.1.9 (Unreleased)
+## jac-scale 0.1.10 (Unreleased)
+
+## jac-scale 0.1.9 (Latest Release)
 
 - **Remove Authorization header input from Swagger UI**: The `Authorization` header is no longer exposed as a visible text input field in Swagger UI for walker, function, and API key endpoints. Authentication tokens are now read transparently from the standard `Authorization` request header (accessible via the lock icon), consistent with the `update_username` and `update_password` endpoints.
 - 1 Minor refactors/changes.
 
-## jac-scale 0.1.8 (Latest Release)
+## jac-scale 0.1.8
 
 - Internal: K8s integration tests now install jac plugins from fork PRs instead of always using main
 - **.jac folder is excluded when creating the zip folder that is uploaded into jaseci deployment pods.Fasten up deployment**
