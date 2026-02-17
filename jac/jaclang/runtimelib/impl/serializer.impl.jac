@@ -244,7 +244,6 @@ impl Serializer._deserialize_anchor(data: dict[str, object]) -> (Anchor | None) 
         anchor.id = UUID(data['id']) if data.get('id') else None;
         anchor.root = UUID(data['root']) if data.get('root') else None;
         anchor.persistent = data.get('persistent', False);
-        anchor.hash = 0;
         anchor.access = Serializer._deserialize_permission(perm_data)
         if (perm_data := data.get('access'))
         else Permission();
