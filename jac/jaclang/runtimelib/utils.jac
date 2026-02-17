@@ -74,4 +74,3 @@ def to_uuid(id: (UUID | str)) -> UUID {
     }
     return UUID(str(id));
 }
-
