@@ -264,6 +264,8 @@ impl Archetype.__init_subclass__(cls: Any, **kwargs: object) -> None {
     if not cls.__dict__.get('__jac_base__', False) {
         import from jaclang { JacRuntimeInterface as _ }
         _.make_archetype(cls);
+        import from jaclang.runtimelib.serializer { Serializer }
+        Serializer.register(cls);
     }
 }
 

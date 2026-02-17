@@ -1,6 +1,6 @@
 import from jaclang.cli.console { console }
 import from jaclang.cli.banners { JAC_DISCORD_URL }
-import from jaclang.runtimelib.utils { Serializer }
+import from jaclang.runtimelib.serializer { Serializer }
 
 impl UserManager.postinit -> None {
     import sqlite3;

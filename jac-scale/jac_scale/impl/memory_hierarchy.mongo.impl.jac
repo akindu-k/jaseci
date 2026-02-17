@@ -6,7 +6,8 @@ import from uuid { UUID }
 import from pymongo { MongoClient, UpdateOne }
 import from pymongo.errors { ConnectionFailure }
 import from jaclang.jac0core.archetype { Anchor, NodeAnchor, Root }
-import from jaclang.runtimelib.utils { storage_key, to_uuid, Serializer }
+import from jaclang.runtimelib.utils { storage_key, to_uuid }
+import from jaclang.runtimelib.serializer { Serializer }
 
 glob logger = logging.getLogger(__name__);
 

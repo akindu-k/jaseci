@@ -1770,7 +1770,7 @@ class JacAPIServer {
         args: dict[(str, Any)],
         username: str
     ) -> dict[(str, Any)] {
-        import from jaclang.runtimelib.utils { Serializer }
+        import from jaclang.runtimelib.serializer { Serializer }
         introspector.load();
         available_exports = (
             `set(introspector._client_manifest.get('exports', []))
