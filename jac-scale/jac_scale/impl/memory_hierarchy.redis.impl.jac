@@ -16,7 +16,7 @@ impl RedisBackend.postinit -> None {
         try {
             self.redis_client = redis.from_url(self.redis_url);
         } except Exception as e {
-            logger.debug(f"Redis connection failed: {e}");
+            logger.error(f"Redis connection failed: {e}");
             self.redis_client = None;
         }
     }
@@ -58,7 +58,7 @@ impl RedisBackend.get(id: UUID) -> (Anchor | None) {
         data = json.loads(raw);
         return Serializer.deserialize(data);
     } except Exception as e {
-        logger.debug(f"Redis get failed: {e}");
+        logger.error(f"Redis get failed: {e}");
         return None;
     }
 }
@@ -73,7 +73,7 @@ impl RedisBackend.put(anchor: Anchor) -> None {
         key = storage_key(anchor.id);
         self.redis_client.set(key, json.dumps(data));
     } except Exception as e {
-        logger.debug(f"Redis put failed: {e}");
+        logger.error(f"Redis put failed: {e}");
     }
 }
 
@@ -86,7 +86,7 @@ impl RedisBackend.delete(id: UUID) -> None {
         key = storage_key(to_uuid(id));
         self.redis_client.delete(key);
     } except Exception as e {
-        logger.debug(f"Redis delete failed: {e}");
+        logger.error(f"Redis delete failed: {e}");
     }
 }
 
@@ -96,7 +96,7 @@ impl RedisBackend.close -> None {
         try {
             self.redis_client.close();
         } except Exception as e {
-            logger.warning(f"Error closing Redis connection: {e}");
+            logger.error(f"Error closing Redis connection: {e}");
         }
         self.redis_client = None;
     }

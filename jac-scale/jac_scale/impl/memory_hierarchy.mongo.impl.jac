@@ -19,7 +19,7 @@ impl MongoBackend.postinit -> None {
             self.db = self.client[self.db_name];
             self.collection = self.db[self.collection_name];
         } except Exception as e {
-            logger.debug(f"MongoDB connection failed: {e}");
+            logger.error(f"MongoDB connection failed: {e}");
             self.client = None;
         }
     }
@@ -61,7 +61,7 @@ impl MongoBackend.get(id: UUID) -> (Anchor | None) {
             return self._load_anchor(db_obj);
         }
     } except Exception as e {
-        logger.debug(f"MongoDB get failed: {e}");
+        logger.error(f"MongoDB get failed: {e}");
     }
     return None;
 }
@@ -80,7 +80,7 @@ impl MongoBackend.put(anchor: Anchor) -> None {
             upsert=True
         );
     } except Exception as e {
-        logger.debug(f"MongoDB put failed: {e}");
+        logger.error(f"MongoDB put failed: {e}");
     }
 }
 
@@ -93,7 +93,7 @@ impl MongoBackend.delete(id: UUID) -> None {
     try {
         self.collection.delete_one({'_id': str(_id)});
     } except Exception as e {
-        logger.debug(f"MongoDB delete failed: {e}");
+        logger.error(f"MongoDB delete failed: {e}");
     }
 }
 
@@ -103,7 +103,7 @@ impl MongoBackend.close -> None {
         try {
             self.client.close();
         } except Exception as e {
-            logger.warning(f"Error closing MongoDB connection: {e}");
+            logger.error(f"Error closing MongoDB connection: {e}");
         }
         self.client = None;
     }
@@ -138,7 +138,7 @@ impl MongoBackend.query(
             }
         }
     } except Exception as e {
-        logger.debug(f"MongoDB query failed: {e}");
+        logger.error(f"MongoDB query failed: {e}");
     }
 }
 
@@ -212,14 +212,14 @@ impl MongoBackend.bulk_put(anchors: Iterable[Anchor]) -> None {
                 )
             );
         } except Exception as e {
-            logger.debug(f"MongoDB bulk_put serialization failed: {e}");
+            logger.error(f"MongoDB bulk_put serialization failed: {e}");
         }
     }
     if ops {
         try {
             self.collection.bulk_write(ops);
         } except Exception as e {
-            logger.debug(f"MongoDB bulk_write failed: {e}");
+            logger.error(f"MongoDB bulk_write failed: {e}");
         }
     }
 }
@@ -233,7 +233,7 @@ impl MongoBackend._load_anchor(raw: dict[(str, Any)]) -> (Anchor | None) {
         data = raw['data'];
         return Serializer.deserialize(data);
     } except Exception as e {
-        logger.debug(f"MongoDB _load_anchor failed: {e}");
+        logger.error(f"MongoDB _load_anchor failed: {e}");
         return None;
     }
 }

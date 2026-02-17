@@ -17,9 +17,17 @@ impl Serializer._serialize_value(
     val: object, include_type: bool, api_mode: bool = False
 ) -> object {
     import from jaclang.jac0core.archetype {
-        Anchor, NodeAnchor, EdgeAnchor, Permission, Access
+        Anchor,
+        NodeAnchor,
+        EdgeAnchor,
+        Permission,
+        Access
     }
-    import from jaclang.jac0core.constructs { Archetype, NodeArchetype, WalkerArchetype }
+    import from jaclang.jac0core.constructs {
+        Archetype,
+        NodeArchetype,
+        WalkerArchetype
+    }
     # Primitives
     if val is None or isinstance(val, (str, int, float, bool)) {
         return val;
@@ -183,7 +191,7 @@ impl Serializer.deserialize(data: dict[str, object]) -> (object | None) {
             }
             return instance;
         } except Exception as e {
-            logger.debug(f"Failed to deserialize {type_name}: {e}");
+            logger.error(f"Failed to deserialize {type_name}: {e}");
             return None;
         }
     }
@@ -234,7 +242,10 @@ impl Serializer._get_class(module_name: str, class_name: str) -> (type | None) {
 """Helper to deserialize Anchor objects."""
 impl Serializer._deserialize_anchor(data: dict[str, object]) -> (Anchor | None) {
     import from jaclang.jac0core.archetype {
-        Anchor, NodeAnchor, EdgeAnchor, Permission
+        Anchor,
+        NodeAnchor,
+        EdgeAnchor,
+        Permission
     }
     anchor_cls = {'NodeAnchor': NodeAnchor, 'EdgeAnchor': EdgeAnchor}.get(
         data.get('__type__', ''), Anchor
@@ -261,7 +272,7 @@ impl Serializer._deserialize_anchor(data: dict[str, object]) -> (Anchor | None) 
         }
         return anchor;
     } except Exception as e {
-        logger.debug(f"Failed to deserialize anchor: {e}");
+        logger.error(f"Failed to deserialize anchor: {e}");
         return None;
     }
 }
@@ -317,7 +328,7 @@ impl Serializer._deserialize_archetype(
         arch.__jac__ = anchor;
         return arch;
     } except Exception as e {
-        logger.debug(f"Failed to deserialize archetype {type_name}: {e}");
+        logger.error(f"Failed to deserialize archetype {type_name}: {e}");
         return None;
     }
 }
