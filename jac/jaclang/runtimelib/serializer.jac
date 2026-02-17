@@ -1,4 +1,17 @@
 """Bidirectional serializer for Jac objects."""
+import from contextlib { suppress }
+import from enum { Enum, IntEnum }
+import from uuid { UUID }
+import from jaclang.jac0core.archetype {
+    Anchor,
+    NodeAnchor,
+    EdgeAnchor,
+    Permission,
+    Access,
+    AccessLevel
+}
+import from jaclang.jac0core.constructs { Archetype, NodeArchetype, WalkerArchetype }
+
 obj Serializer {
     """Registry of classes that may be deserialized.
 
