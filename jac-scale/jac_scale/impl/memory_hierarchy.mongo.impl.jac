@@ -18,7 +18,7 @@ impl MongoBackend.postinit -> None {
             self.db = self.client[self.db_name];
             self.collection = self.db[self.collection_name];
         } except Exception as e {
-            logger.error(f"MongoDB connection failed: {e}");
+            logger.warning(f"MongoDB connection failed: {e}");
             self.client = None;
         }
     }
