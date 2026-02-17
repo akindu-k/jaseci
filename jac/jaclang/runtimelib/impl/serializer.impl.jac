@@ -89,8 +89,8 @@ impl Serializer._serialize_value(
         }
         # EdgeAnchor specific: source, target, is_undirected
         if isinstance(val, EdgeAnchor) {
-            result['source'] = str(val.source.id);
-            result['target'] = str(val.target.id);
+            result['source'] = str(val.source.id) if val.source else None;
+            result['target'] = str(val.target.id) if val.target else None;
             result['is_undirected'] = val.is_undirected;
         }
         return result;
@@ -125,22 +125,32 @@ impl Serializer._serialize_value(
     }
     # Generic object with __dict__
     if val?.__dict__ {
-        with suppress(Exception) {
-            result: dict[str, object] = {
-                '__type__': type(val).__name__,
-                '__module__': type(val).__module__
-            }
-            if include_type
-            else {};
-            for (k, v) in val.__dict__.items() {
-                if not k.startswith('_') {
+        result: dict[str, object] = {
+            '__type__': type(val).__name__,
+            '__module__': type(val).__module__
+        }
+        if include_type
+        else {};
+        for (k, v) in val.__dict__.items() {
+            if not k.startswith('_') {
+                try {
                     result[k] = Serializer._serialize_value(v, include_type, api_mode);
+                } except Exception as field_err {
+                    logger.error(
+                        f"Failed to serialize field '{k}' on "
+                        f"{type(val).__module__}.{type(val).__name__}: {field_err}"
+                    );
+                    raise;
                 }
             }
-            return result;
         }
+        return result;
     }
-    # Fallback: string representation
+    logger.warning(
+        f"Falling back to str() for unhandled type "
+        f"{type(val).__module__}.{type(val).__name__}. "
+        f"Consider registering a custom serialization path."
+    );
     return str(val);
 }
 
@@ -174,6 +184,9 @@ impl Serializer.deserialize(data: dict[str, object]) -> (object | None) {
                 if not k.startswith('__') {
                     setattr(instance, k, Serializer._deserialize_value(v));
                 }
+            }
+            if callable(getattr(instance, '__jac_post_deserialize__', None)) {
+                instance.__jac_post_deserialize__();
             }
             return instance;
         } except Exception as e {
@@ -303,6 +316,9 @@ impl Serializer._deserialize_archetype(
             }
         }
         arch.__jac__ = anchor;
+        if callable(getattr(arch, '__jac_post_deserialize__', None)) {
+            arch.__jac_post_deserialize__();
+        }
         return arch;
     } except Exception as e {
         logger.error(f"Failed to deserialize archetype {type_name}: {e}");

@@ -1,5 +1,4 @@
 """Bidirectional serializer for Jac objects."""
-import from contextlib { suppress }
 import from enum { Enum, IntEnum }
 import from uuid { UUID }
 import from jaclang.jac0core.archetype {
@@ -37,7 +36,25 @@ obj Serializer {
         `obj: object, include_type: bool = False, api_mode: bool = False
     ) -> object;
 
-    """Deserialize data back to original object type."""
+    """Deserialize data back to original object type.
+
+    After field restoration, calls ``__jac_post_deserialize__(self)`` on the
+    reconstructed object if that method is defined.  Use this hook to
+    re-establish any invariants that ``__init__`` or ``__post_init__`` would
+    normally set up (e.g. derived caches, threading locks, or validated
+    computed fields) — all of which are bypassed when ``__new__`` is used for
+    reconstruction.
+
+    Example::
+
+        obj MyNode {
+            has count: int;
+
+            def __jac_post_deserialize__(self: MyNode) -> None {
+                self._cached_result = expensive_compute(self.count);
+            }
+        }
+    """
     static def deserialize(data: dict[str, object]) -> (object | None);
 
     """Serialize a value recursively."""
@@ -65,3 +82,15 @@ obj Serializer {
         data: dict[str, object], anchor: object
     ) -> (object | None);
 }
+
+# Install the registration hook onto Archetype once, at module load time.
+# Archetype.__init_subclass__ calls each hook in _subclass_hooks for every
+# new user-defined subclass. This keeps archetype.jac free of any knowledge
+# of serializer.jac, eliminating the circular import.
+glob _register_hook: object = Archetype._subclass_hooks.append(
+    lambda cls: type : (
+        Serializer.register(cls)
+        if not cls.__module__.startswith('jaclang.')
+        else None
+    )
+);

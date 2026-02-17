@@ -202,6 +202,7 @@ obj Archetype {
     with entry {
         _jac_entry_funcs_: ClassVar[list[ObjectSpatialFunction]] = [];
         _jac_exit_funcs_: ClassVar[list[ObjectSpatialFunction]] = [];
+        _subclass_hooks: ClassVar[list[Callable[[type], None]]] = [];
     }
 
     @cached_property
