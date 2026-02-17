@@ -140,7 +140,7 @@ impl Serializer._serialize_value(
                         f"Failed to serialize field '{k}' on "
                         f"{type(val).__module__}.{type(val).__name__}: {field_err}"
                     );
-                    raise;
+                    raise ;
                 }
             }
         }

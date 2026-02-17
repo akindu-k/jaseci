@@ -88,9 +88,10 @@ obj Serializer {
 # new user-defined subclass. This keeps archetype.jac free of any knowledge
 # of serializer.jac, eliminating the circular import.
 glob _register_hook: object = Archetype._subclass_hooks.append(
-    lambda cls: type : (
-        Serializer.register(cls)
-        if not cls.__module__.startswith('jaclang.')
-        else None
-    )
-);
+         lambda cls: type :
+             (
+                 Serializer.register(cls)
+                 if not cls.__module__.startswith('jaclang.')
+                 else None
+             )
+     );
