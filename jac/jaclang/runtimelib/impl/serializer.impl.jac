@@ -128,7 +128,7 @@ impl Serializer._serialize_value(
             else 'walker' if isinstance(val, WalkerArchetype) else 'archetype';
         }
         result |= {
-            a: Serializer._serialize_value(getattr(val, a), include_type, api_mode)
+            a: Serializer._serialize_value(getattr(val, a), include_type, api_mode=api_mode)
             for a in dir(val)
             if not a.startswith('_')
             and a != '__jac__'
@@ -183,7 +183,7 @@ impl Serializer.deserialize(data: dict[str, object]) -> (object | None) {
     cls = Serializer._get_class(module_name, type_name);
     if cls {
         try {
-            instance = object.__new__(cls);
+            instance = cls.__new__(cls);
             for (k, v) in data.items() {
                 if not k.startswith('__') {
                     setattr(instance, k, Serializer._deserialize_value(v));
@@ -251,7 +251,7 @@ impl Serializer._deserialize_anchor(data: dict[str, object]) -> (Anchor | None) 
         data.get('__type__', ''), Anchor
     );
     try {
-        anchor = object.__new__(anchor_cls);
+        anchor = anchor_cls.__new__(anchor_cls);
         anchor.id = UUID(data['id']) if data.get('id') else None;
         anchor.root = UUID(data['root']) if data.get('root') else None;
         anchor.persistent = data.get('persistent', False);
@@ -319,7 +319,7 @@ impl Serializer._deserialize_archetype(
         return None;
     }
     try {
-        arch = object.__new__(cls);
+            arch = cls.__new__(cls);
         for (k, v) in data.items() {
             if not k.startswith('__') {
                 setattr(arch, k, Serializer._deserialize_value(v));
