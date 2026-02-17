@@ -129,7 +129,7 @@ impl Serializer._serialize_value(
         }
         result |= {
             a: Serializer._serialize_value(
-                getattr(val, a), include_type, api_mode=api_mode
+                getattr(val, a), include_type, api_mode=bool(api_mode)
             )
             for a in dir(val)
             if not a.startswith('_')
