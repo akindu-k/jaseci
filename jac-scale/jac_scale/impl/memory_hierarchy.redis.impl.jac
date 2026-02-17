@@ -6,7 +6,6 @@ import from collections.abc { Callable, Generator, Iterable }
 import from uuid { UUID }
 import from jaclang.jac0core.archetype { Anchor, Root }
 import from jaclang.runtimelib.utils { storage_key, to_uuid }
-import from jaclang.runtimelib.serializer { Serializer }
 
 glob logger = logging.getLogger(__name__);
 

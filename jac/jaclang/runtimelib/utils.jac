@@ -1,19 +1,15 @@
 """Helper for construct."""
 import ast as ast3;
 import sys;
-import logging;
 import from collections.abc { Callable, Iterator }
-import from contextlib { contextmanager, suppress }
+import from contextlib { contextmanager }
 import from types { UnionType }
 import from typing { TYPE_CHECKING }
 import from uuid { UUID }
 import jaclang.jac0core.unitree as uni;
-
 import from jaclang.jac0core.helpers {
     read_file_with_encoding as read_file_with_encoding
 }
-
-glob logger = logging.getLogger(__name__);
 
 with entry {
     if TYPE_CHECKING {

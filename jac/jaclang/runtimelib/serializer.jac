@@ -1,5 +1,3 @@
-"""Bidirectional JSON serializer for Jac runtime objects."""
-
 """Bidirectional serializer for Jac objects."""
 obj Serializer {
     """Registry of classes that may be deserialized.
