@@ -1,9 +1,4 @@
 """Bidirectional JSON serializer for Jac runtime objects."""
-import logging;
-import from contextlib { suppress }
-import from uuid { UUID }
-
-glob logger = logging.getLogger(__name__);
 
 """Bidirectional serializer for Jac objects."""
 obj Serializer {
