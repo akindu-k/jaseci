@@ -128,7 +128,9 @@ impl Serializer._serialize_value(
             else 'walker' if isinstance(val, WalkerArchetype) else 'archetype';
         }
         result |= {
-            a: Serializer._serialize_value(getattr(val, a), include_type, api_mode=api_mode)
+            a: Serializer._serialize_value(
+                getattr(val, a), include_type, api_mode=api_mode
+            )
             for a in dir(val)
             if not a.startswith('_')
             and a != '__jac__'
@@ -319,7 +321,7 @@ impl Serializer._deserialize_archetype(
         return None;
     }
     try {
-            arch = cls.__new__(cls);
+        arch = cls.__new__(cls);
         for (k, v) in data.items() {
             if not k.startswith('__') {
                 setattr(arch, k, Serializer._deserialize_value(v));
