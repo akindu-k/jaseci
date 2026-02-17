@@ -1,5 +1,5 @@
 """Bidirectional serializer for Jac objects."""
-import from enum { Enum, IntEnum }
+import from enum { Enum }
 import from uuid { UUID }
 import from jaclang.jac0core.archetype {
     Anchor,

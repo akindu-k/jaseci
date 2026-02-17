@@ -22,7 +22,7 @@ impl Serializer._serialize_value(
         return str(val);
     }
     # Enum -> value (int or str)
-    if isinstance(val, (Enum, IntEnum)) {
+    if isinstance(val, Enum) {
         return val.value;
     }
     # List/tuple
