@@ -294,7 +294,9 @@ impl JFastApiServer._create_endpoint_function(
                     try {
                         query_params = dict(request.query_params);
                         if needs_request_no_params {
-                            result = await callback(request=request, **query_params);
+                            result = await callback(
+                                **{'request': request, ** query_params}
+                            );
                         } else {
                             result = await callback(**query_params);
                         }
@@ -314,7 +316,7 @@ impl JFastApiServer._create_endpoint_function(
                     try {
                         query_params = dict(request.query_params);
                         if needs_request_no_params {
-                            result = callback(request=request, **query_params);
+                            result = callback(**{'request': request, ** query_params});
                         } else {
                             result = callback(**query_params);
                         }
@@ -330,32 +332,66 @@ impl JFastApiServer._create_endpoint_function(
                 return sync_endpoint_wrapper;
             }
         } elif inspect.iscoroutinefunction(callback) {
-            async def async_endpoint_wrapper__1 -> EndpointResponse {
-                import from jaclang.runtimelib.transport { TransportResponse }
-                try {
-                    result = await callback();
-                    # Automatically convert TransportResponse to JSONResponse (like HTTPTransport.send)
-                    if isinstance(result, TransportResponse) {
-                        return _convert_transport_response_to_json_response(result);
+            if needs_request_no_params {
+                async def async_endpoint_wrapper__1(
+                    request: Request
+                ) -> EndpointResponse {
+                    import from jaclang.runtimelib.transport { TransportResponse }
+                    try {
+                        result = await callback(**{'request': request});
+                        # Automatically convert TransportResponse to JSONResponse (like HTTPTransport.send)
+                        if isinstance(result, TransportResponse) {
+                            return _convert_transport_response_to_json_response(result);
+                        }
+                        return result;
+                    } except Exception as e {
+                        raise e from HTTPException(status_code=500, detail=str(e)) ;
                     }
-                    return result;
-                } except Exception as e {
-                    raise e from HTTPException(status_code=500, detail=str(e)) ;
+                }
+            } else {
+                async def async_endpoint_wrapper__1 -> EndpointResponse {
+                    import from jaclang.runtimelib.transport { TransportResponse }
+                    try {
+                        result = await callback();
+                        # Automatically convert TransportResponse to JSONResponse (like HTTPTransport.send)
+                        if isinstance(result, TransportResponse) {
+                            return _convert_transport_response_to_json_response(result);
+                        }
+                        return result;
+                    } except Exception as e {
+                        raise e from HTTPException(status_code=500, detail=str(e)) ;
+                    }
                 }
             }
             return async_endpoint_wrapper__1;
         } else {
-            def sync_endpoint_wrapper__1 -> EndpointResponse {
-                import from jaclang.runtimelib.transport { TransportResponse }
-                try {
-                    result = callback();
-                    # Automatically convert TransportResponse to JSONResponse (like HTTPTransport.send)
-                    if isinstance(result, TransportResponse) {
-                        return _convert_transport_response_to_json_response(result);
+            if needs_request_no_params {
+                def sync_endpoint_wrapper__1(request: Request) -> EndpointResponse {
+                    import from jaclang.runtimelib.transport { TransportResponse }
+                    try {
+                        result = callback(**{'request': request});
+                        # Automatically convert TransportResponse to JSONResponse (like HTTPTransport.send)
+                        if isinstance(result, TransportResponse) {
+                            return _convert_transport_response_to_json_response(result);
+                        }
+                        return result;
+                    } except Exception as e {
+                        raise e from HTTPException(status_code=500, detail=str(e)) ;
                     }
-                    return result;
-                } except Exception as e {
-                    raise e from HTTPException(status_code=500, detail=str(e)) ;
+                }
+            } else {
+                def sync_endpoint_wrapper__1 -> EndpointResponse {
+                    import from jaclang.runtimelib.transport { TransportResponse }
+                    try {
+                        result = callback();
+                        # Automatically convert TransportResponse to JSONResponse (like HTTPTransport.send)
+                        if isinstance(result, TransportResponse) {
+                            return _convert_transport_response_to_json_response(result);
+                        }
+                        return result;
+                    } except Exception as e {
+                        raise e from HTTPException(status_code=500, detail=str(e)) ;
+                    }
                 }
             }
             return sync_endpoint_wrapper__1;
