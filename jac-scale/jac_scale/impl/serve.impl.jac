@@ -589,10 +589,7 @@ impl JacAPIServer.create_function_parameters(
             param_type = ParameterType.PATH;
         } elif ('UploadFile' in field_type or 'uploadfile' in field_type.lower()) {
             param_type = ParameterType.FILE;
-        } elif (
-            method == HTTPMethod.GET
-            and not ('UploadFile' in field_type or 'uploadfile' in field_type.lower())
-        ) {
+        } elif method == HTTPMethod.GET {
             param_type = ParameterType.QUERY;
         } else {
             param_type = ParameterType.BODY;
@@ -749,18 +746,12 @@ impl JacAPIServer.create_walker_parameters(
         }
         field_type = walker_fields[field_name]['type'];
         # Determine parameter type: path params first, then file, then query/body by method
-        if (field_name == '_jac_spawn_node') {
-            param_type = ParameterType.PATH;
-        } elif field_name in path_param_names {
-            # User-declared path parameters from @restspec path template
+        if field_name == '_jac_spawn_node' or field_name in path_param_names {
             param_type = ParameterType.PATH;
         } elif ('UploadFile' in field_type or 'uploadfile' in field_type.lower()) {
             # Support UploadFile type for file uploads
             param_type = ParameterType.FILE;
-        } elif (
-            method == HTTPMethod.GET
-            and not ('UploadFile' in field_type or 'uploadfile' in field_type.lower())
-        ) {
+        } elif method == HTTPMethod.GET {
             param_type = ParameterType.QUERY;
         } else {
             param_type = ParameterType.BODY;
