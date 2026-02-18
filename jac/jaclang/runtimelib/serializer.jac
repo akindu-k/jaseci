@@ -1,5 +1,6 @@
 """Bidirectional serializer for Jac objects."""
 import from enum { Enum }
+import from typing { cast }
 import from uuid { UUID }
 import from jaclang.jac0core.archetype {
     Anchor,
@@ -9,7 +10,13 @@ import from jaclang.jac0core.archetype {
     Access,
     AccessLevel
 }
-import from jaclang.jac0core.constructs { Archetype, NodeArchetype, WalkerArchetype }
+import from jaclang.jac0core.constructs {
+    Archetype,
+    NodeArchetype,
+    WalkerArchetype,
+    Root,
+    GenericEdge
+}
 
 obj Serializer {
     """Registry of classes that may be deserialized.
@@ -94,4 +101,6 @@ glob _register_hook: object = Archetype._subclass_hooks.append(
                  if not cls.__module__.startswith('jaclang.')
                  else None
              )
-     );
+     ),
+     _register_root: object = Serializer.register(cast(type, Root)),
+     _register_generic_edge: object = Serializer.register(cast(type, GenericEdge));
