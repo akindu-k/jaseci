@@ -572,9 +572,9 @@ impl JacAPIServer.create_function_parameters(
     func_obj = self.get_functions()[func_name];
     restspec = func_obj.restspec if func_obj?.restspec else None;
     spec_path = restspec.path if restspec else None;
-    path_param_names: set[str] = set(
-        re.findall(r'\{(\w+)(?::[^}]*)?\}', spec_path)
-    ) if spec_path else set();
+    path_param_names: set[str] = set(re.findall(r'\{(\w+)(?::[^}]*)?\}', spec_path))
+    if spec_path
+    else set();
     func_fields = self.introspector.introspect_callable(
         self.get_functions()[func_name]
     )['parameters'];
@@ -727,9 +727,9 @@ impl JacAPIServer.create_walker_parameters(
     walker_cls = self.get_walkers()[walker_name];
     restspec = walker_cls.restspec if walker_cls?.restspec else None;
     spec_path = restspec.path if restspec else None;
-    path_param_names: set[str] = set(
-        re.findall(r'\{(\w+)(?::[^}]*)?\}', spec_path)
-    ) if spec_path else set();
+    path_param_names: set[str] = set(re.findall(r'\{(\w+)(?::[^}]*)?\}', spec_path))
+    if spec_path
+    else set();
     walker_fields = self.introspector.introspect_walker(
         self.get_walkers()[walker_name]
     )['fields'];
