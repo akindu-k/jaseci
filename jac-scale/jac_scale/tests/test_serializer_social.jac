@@ -5,13 +5,13 @@ import from jac_scale.tests.fixtures.social_graph { User, Post }
 test "serialize user node" {
     # Create a user node
     u = User(name="Alice", role="admin", age=30);
-    
+
     # Serialize
     serialized = Serializer.serialize(u, include_type=True);
-    
+
     # Deserialize
     deserialized = Serializer.deserialize(serialized);
-    
+
     # Verify
     assert deserialized.name == "Alice";
     assert deserialized.role == "admin";
@@ -22,13 +22,13 @@ test "serialize user node" {
 test "serialize post node" {
     # Create a post node
     p = Post(title="Hello", content="World");
-    
+
     # Serialize
     serialized = Serializer.serialize(p, include_type=True);
-    
+
     # Deserialize
     deserialized = Serializer.deserialize(serialized);
-    
+
     # Verify
     assert deserialized.title == "Hello";
     assert deserialized.content == "World";
