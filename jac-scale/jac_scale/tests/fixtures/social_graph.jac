@@ -16,7 +16,7 @@ node Post {
         content: str;
 }
 
-walker BuildGraph {
+walker:pub BuildGraph {
     """Build a small social graph and persist each node via kvstore MongoDB."""
     has mongo_uri: str;
 
@@ -31,14 +31,14 @@ walker BuildGraph {
         p3 = bob ++> Post(title='Getting started', content='Learning Jac today');
 
         # Persist each node's fields in MongoDB via kvstore
-        for user in [-->User] {
+        for user in [-->](?:User) {
             db.set(
                 user.name,
                 {'name': user.name, 'role': user.role, 'age': user.age},
                 'users'
             );
         }
-        for post in [-->User-->Post] {
+        for post in [[-->](?:User)-->](?:Post) {
             db.set(post.title, {'title': post.title, 'content': post.content}, 'posts');
         }
 
@@ -46,7 +46,7 @@ walker BuildGraph {
     }
 }
 
-walker QueryGraph {
+walker:pub QueryGraph {
     """Retrieve persisted nodes from kvstore and report them."""
     has mongo_uri: str;
 
