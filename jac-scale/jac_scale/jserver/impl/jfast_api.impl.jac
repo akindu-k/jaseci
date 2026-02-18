@@ -289,13 +289,15 @@ impl JFastApiServer._create_endpoint_function(
     if not parameters {
         if accepts_kwargs {
             if inspect.iscoroutinefunction(callback) {
-                async def async_endpoint_wrapper(request: Request) -> EndpointResponse {
+                async def async_endpoint_wrapper(
+                    __jac_request__: Request
+                ) -> EndpointResponse {
                     import from jaclang.runtimelib.transport { TransportResponse }
                     try {
-                        query_params = dict(request.query_params);
+                        query_params = dict(__jac_request__.query_params);
                         if needs_request_no_params {
                             result = await callback(
-                                **{'request': request, ** query_params}
+                                **{'request': __jac_request__, ** query_params}
                             );
                         } else {
                             result = await callback(**query_params);
@@ -311,12 +313,14 @@ impl JFastApiServer._create_endpoint_function(
                 }
                 return async_endpoint_wrapper;
             } else {
-                def sync_endpoint_wrapper(request: Request) -> EndpointResponse {
+                def sync_endpoint_wrapper(__jac_request__: Request) -> EndpointResponse {
                     import from jaclang.runtimelib.transport { TransportResponse }
                     try {
-                        query_params = dict(request.query_params);
+                        query_params = dict(__jac_request__.query_params);
                         if needs_request_no_params {
-                            result = callback(**{'request': request, ** query_params});
+                            result = callback(
+                                **{'request': __jac_request__, ** query_params}
+                            );
                         } else {
                             result = callback(**query_params);
                         }
@@ -334,11 +338,11 @@ impl JFastApiServer._create_endpoint_function(
         } elif inspect.iscoroutinefunction(callback) {
             if needs_request_no_params {
                 async def async_endpoint_wrapper__1(
-                    request: Request
+                    __jac_request__: Request
                 ) -> EndpointResponse {
                     import from jaclang.runtimelib.transport { TransportResponse }
                     try {
-                        result = await callback(**{'request': request});
+                        result = await callback(**{'request': __jac_request__});
                         # Automatically convert TransportResponse to JSONResponse (like HTTPTransport.send)
                         if isinstance(result, TransportResponse) {
                             return _convert_transport_response_to_json_response(result);
@@ -366,10 +370,12 @@ impl JFastApiServer._create_endpoint_function(
             return async_endpoint_wrapper__1;
         } else {
             if needs_request_no_params {
-                def sync_endpoint_wrapper__1(request: Request) -> EndpointResponse {
+                def sync_endpoint_wrapper__1(
+                    __jac_request__: Request
+                ) -> EndpointResponse {
                     import from jaclang.runtimelib.transport { TransportResponse }
                     try {
-                        result = callback(**{'request': request});
+                        result = callback(**{'request': __jac_request__});
                         # Automatically convert TransportResponse to JSONResponse (like HTTPTransport.send)
                         if isinstance(result, TransportResponse) {
                             return _convert_transport_response_to_json_response(result);
@@ -422,15 +428,15 @@ impl JFastApiServer._create_endpoint_function(
     param_mapping: dict[(str, str)] = {};
     needs_request = 'request' in sig.parameters;
     if accepts_kwargs {
-        param_strs.append('request: Request');
-        param_mapping['__request__'] = 'request';
+        param_strs.append('__jac_request__: Request');
+        param_mapping['__request__'] = '__jac_request__';
         # If the callback also explicitly accepts a request parameter, map it
         if needs_request {
-            param_mapping['request'] = 'request';
+            param_mapping['request'] = '__jac_request__';
         }
     } elif needs_request {
-        param_strs.append('request: Request');
-        param_mapping['request'] = 'request';
+        param_strs.append('__jac_request__: Request');
+        param_mapping['request'] = '__jac_request__';
     }
     # Create handler map
     has_file_params = len(file_params) > 0;
@@ -497,12 +503,14 @@ impl JFastApiServer._create_endpoint_function(
         }
         for name in param_mapping {
             if (name not in ('body_data', '__request__')) {
-                callback_args_lines.append(f"        callback_args['{name}'] = {name}");
+                callback_args_lines.append(
+                    f"        callback_args['{name}'] = {param_mapping[name]}"
+                );
             }
         }
     } else {
         callback_args_lines = [
-            f"        callback_args['{name}'] = {name}"
+            f"        callback_args['{name}'] = {param_mapping[name]}"
             for name in param_mapping
             if (name != '__request__')
         ];
@@ -519,7 +527,7 @@ impl JFastApiServer._create_endpoint_function(
         extra_query_params_code = f"""
         # Extract additional query parameters not explicitly declared
         declared_params = set({declared_params_str})
-        for key, value in request.query_params.items():
+        for key, value in __jac_request__.query_params.items():
             if key not in declared_params:
                 callback_args[key] = value
 """;
