@@ -590,9 +590,7 @@ impl JacAPIServer.create_function_parameters(
         if spec_path
         else set()
     );
-    func_fields = self.introspector.introspect_callable(
-        self.get_functions()[func_name]
-    )['parameters'];
+    func_fields = self.introspector.introspect_callable(func_obj)['parameters'];
     for field_name in func_fields {
         field_type = func_fields[field_name]['type'];
         if field_name in path_param_names {
