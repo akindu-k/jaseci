@@ -22,6 +22,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - 3 Minor refactors/changes.
 - **Fix: Lexer `<` Comparison vs JSX Tag Disambiguation**: Fixed an infinite loop where `i<points` in a for-loop caused the lexer to enter JSX tag mode. The lexer now tracks the previous token to distinguish `<` as a comparison operator (after values) from a JSX opening tag (after keywords like `return`, operators, or delimiters).
 - **Fix: Quoted JSX Text Produces Invalid JS**: Fixed JSX text containing quote characters (e.g., `<p>"text"</p>`) generating invalid double-double-quoted JavaScript (`""text""`). Inner quotes are now properly escaped in the emitted JS string literals.
+- **Modern Generics: `type` Aliases & Inline Type Parameters**: Added PEP 695-style `type` alias statements (`type JsonPrimitive = str | int | float | bool | None;`) and inline generic type parameters on archetypes (`obj Result[T, E = Exception] { ... }`). Supports bounded type vars (`T: Comparable`), default type values, and recursive type aliases. Compiles to native Python 3.12 `ast.TypeAlias` and `ast.TypeVar` nodes.
 - 2 Minor refactors/changes.
 
 ## jaclang 0.10.2 (Latest Release)
