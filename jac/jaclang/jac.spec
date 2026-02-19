@@ -276,7 +276,7 @@ element_stmt ::=
         | enum
         | STRING test
         | test
-        | STRING ("@" atomic_chain)* "async"* "abs"?
+        | STRING ("@" atomic_chain)* "async"*
           (archetype | enum | impl_def | ability)
         | STRING enum
         | ability
@@ -451,7 +451,7 @@ import_stmt ::=
     ) ";"
 
 archetype ::=
-    ("@" atomic_chain)* "async"? "abs"? access_tag NAME ("[" type_params "]")?
+    ("@" atomic_chain)* "async"? access_tag NAME ("[" type_params "]")?
     ("(" (atomic_chain ("," atomic_chain)*)? ")")? ("{" archetype_member* "}" | ";")
 
 archetype_member ::=

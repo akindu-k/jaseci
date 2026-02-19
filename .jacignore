@@ -127,6 +127,7 @@ jac_formatter_pass.impl.jac
 jfast_api.impl.jac
 jsx_lt_comparison_bug.cl.jac
 jsx_text_quotes_bug.cl.jac
+jsx_unterminated_hang.jac
 lang_tools.impl.jac
 level_genarator.jac
 level.impl.jac
