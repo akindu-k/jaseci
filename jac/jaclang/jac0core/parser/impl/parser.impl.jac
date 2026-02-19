@@ -669,7 +669,6 @@ impl Parser.synchronize{
             TokenKind.KW_TEST,
             TokenKind.KW_GLOBAL,
             TokenKind.KW_IMPL,
-            TokenKind.KW_ABSTRACT,
             TokenKind.KW_ASYNC,
             TokenKind.KW_WITH,
             TokenKind.KW_TRY,
@@ -3286,16 +3285,6 @@ impl Parser.parse_element_stmt{
         TokenKind.KW_EDGE,
         TokenKind.KW_WALKER,
         TokenKind.KW_CLASS
-    )
-    or (
-        self.check(TokenKind.KW_ABSTRACT)
-        and self.check_peek_any(
-            TokenKind.KW_OBJECT,
-            TokenKind.KW_NODE,
-            TokenKind.KW_EDGE,
-            TokenKind.KW_WALKER,
-            TokenKind.KW_CLASS
-        )
     ) {
         return self.parse_archetype();
     }
@@ -3326,10 +3315,9 @@ impl Parser.parse_element_stmt{
         TokenKind.KW_EDGE,
         TokenKind.KW_WALKER,
         TokenKind.KW_CLASS,
-        TokenKind.KW_ABSTRACT,
         TokenKind.KW_IMPL
     ) {
-        # Need to look ahead past decorators/async/abs to determine if ability, archetype, enum, or impl
+        # Need to look ahead past decorators/async to determine if ability, archetype, enum, or impl
         save_pos = self.pos;
         self.advance();  # skip STRING
         while self.check(TokenKind.DECOR_OP) {
@@ -3337,9 +3325,6 @@ impl Parser.parse_element_stmt{
             self.parse_atomic_chain();
         }
         while self.check(TokenKind.KW_ASYNC) {
-            self.advance();
-        }
-        if self.check(TokenKind.KW_ABSTRACT) {
             self.advance();
         }
         is_ability = self.check_any(TokenKind.KW_DEF, TokenKind.KW_CAN);
@@ -3459,7 +3444,7 @@ impl Parser.parse_element_stmt{
         while self.check(TokenKind.KW_ASYNC) {
             self.advance();
         }
-        # Check for abs prefix - valid before archetypes, NOT before abilities
+        # Check for abs prefix - not valid as a prefix modifier
         has_abs_prefix = self.check(TokenKind.KW_ABSTRACT);
         if has_abs_prefix {
             self.advance();
@@ -3469,12 +3454,10 @@ impl Parser.parse_element_stmt{
         is_enum = self.check(TokenKind.KW_ENUM);
         is_impl = self.check(TokenKind.KW_IMPL);
         self.pos = save_pos;  # Restore position
-        if has_abs_prefix and is_ability {
-            self.error(
-                "'abs' is not a valid prefix for abilities (use 'abs' before archetype keywords only)"
-            );
+        if has_abs_prefix {
+            self.error("'abs' is not a valid prefix modifier");
         }
-        if is_ability and not has_abs_prefix {
+        if is_ability {
             return self.parse_ability();
         } elif is_enum {
             return self.parse_enum();
@@ -5055,10 +5038,6 @@ impl Parser.parse_archetype -> Archetype {
         is_async = True;
         async_uni = self.make_uni_token(self.previous());
     }
-    is_abstract = False;
-    if self.match_tok(TokenKind.KW_ABSTRACT) {
-        is_abstract = True;
-    }
     arch_tok = self.advance();
     arch_type = self.make_uni_token(arch_tok);
     access = self.parse_access_tag();
@@ -5247,16 +5226,6 @@ impl Parser.parse_archetype_member{
         TokenKind.KW_EDGE,
         TokenKind.KW_WALKER,
         TokenKind.KW_CLASS
-    )
-    or (
-        self.check(TokenKind.KW_ABSTRACT)
-        and self.check_peek_any(
-            TokenKind.KW_OBJECT,
-            TokenKind.KW_NODE,
-            TokenKind.KW_EDGE,
-            TokenKind.KW_WALKER,
-            TokenKind.KW_CLASS
-        )
     ) {
         archetype = self.parse_archetype();
         if doc {

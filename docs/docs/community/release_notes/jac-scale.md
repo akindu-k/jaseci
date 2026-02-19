@@ -2,12 +2,14 @@
 
 This document provides a summary of new features, improvements, and bug fixes in each version of **Jac-Scale**. For details on changes that might require updates to your existing code, please refer to the [Breaking Changes](../breaking-changes.md) page.
 
-## jac-scale 0.1.10 (Unreleased)
+## jac-scale 0.1.11 (Unreleased)
+
+## jac-scale 0.1.10 (Latest Release)
 
 - **support horizontal scaling**:  based on average cpu usage k8s pods are horizontally scaled
 - **Client Build Error Diagnostics**: Build errors now display formatted diagnostic output with error codes, source snippets, and quick fix suggestions instead of raw Vite/Rollup output. Uses the `jac-client` diagnostic engine for consistent error formatting across `jac start` and `jac build`.
 
-## jac-scale 0.1.9 (Latest Release)
+## jac-scale 0.1.9
 
 - **Remove Authorization header input from Swagger UI**: The `Authorization` header is no longer exposed as a visible text input field in Swagger UI for walker, function, and API key endpoints. Authentication tokens are now read transparently from the standard `Authorization` request header (accessible via the lock icon), consistent with the `update_username` and `update_password` endpoints.
 - 1 Minor refactors/changes.
@@ -31,6 +33,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **fix**: Return 401 instead of 500 for deleted users with valid JWT tokens.
 - Docs update: return type `any` -> `JsxElement`
 - **1 Small Refactors**
+- **promethius and grafana deployment**: Jac-scale automatically deploys promethius and grafana and connect with metrics endpoint.
 
 ## jac-scale 0.1.7
 
