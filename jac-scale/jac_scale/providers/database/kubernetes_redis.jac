@@ -26,6 +26,20 @@ class KubernetesRedisProvider(DatabaseProvider) {
         redis_name = f"{self.app_name}-redis";
         redis_port = 6379;
         redis_service_name = f"{redis_name}-service";
+        redis_config_name = f"{redis_name}-config";
+
+        # Load redis.conf file
+        import from pathlib { Path }
+        config_file_path = Path(__file__).parent / 'redis.conf';
+        redis_conf_content = config_file_path.read_text();
+
+        # Create ConfigMap for redis.conf
+        redis_configmap = {
+            'apiVersion': 'v1',
+            'kind': 'ConfigMap',
+            'metadata': {'name': redis_config_name},
+            'data': {'redis.conf': redis_conf_content}
+        };
 
         redis_deployment = {
             'apiVersion': 'apps/v1',
@@ -42,11 +56,24 @@ class KubernetesRedisProvider(DatabaseProvider) {
                                 'name': 'redis',
                                 'image': 'redis:7.2',
                                 'ports': [{'containerPort': redis_port}],
-                                'args': ['--save', '', '--appendonly', 'no'],
+                                'command': ['redis-server', '/etc/redis/redis.conf'],
+                                'volumeMounts': [
+                                    {
+                                        'name': 'redis-config',
+                                        'mountPath': '/etc/redis',
+                                        'readOnly': True
+                                    }
+                                ],
                                 'resources': {
                                     'requests': {'cpu': '100m', 'memory': '128Mi'},
                                     'limits': {'cpu': '500m', 'memory': '256Mi'}
                                 }
+                            }
+                        ],
+                        'volumes': [
+                            {
+                                'name': 'redis-config',
+                                'configMap': {'name': redis_config_name}
                             }
                         ]
                     }
@@ -69,6 +96,7 @@ class KubernetesRedisProvider(DatabaseProvider) {
         self.connection_string = f"redis://{redis_service_name}:{redis_port}/0";
 
         return {
+            'configmap': redis_configmap,
             'deployment': redis_deployment,
             'service': redis_service,
             'connection_string': self.connection_string,

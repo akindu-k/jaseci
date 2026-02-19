@@ -503,6 +503,7 @@ class KubernetesTarget(DeploymentTarget) {
         if self.k8s_config.redis_enabled {
             redis_name = f"{app_name}-redis";
             redis_service_name = f"{redis_name}-service";
+            redis_config_name = f"{redis_name}-config";
             redis_provider = DatabaseProviderFactory.create(
                 'kubernetes_redis', self, {'app_name': app_name}
             );
@@ -510,6 +511,21 @@ class KubernetesTarget(DeploymentTarget) {
             self.env_list.append(
                 {'name': 'REDIS_URL', 'value': redis_result['connection_string']}
             );
+            # Deploy ConfigMap
+            try {
+                core_v1.read_namespaced_config_map(
+                    name=redis_config_name, namespace=namespace
+                );
+            } except ApiException as e {
+                if (e.status == 404) {
+                    core_v1.create_namespaced_config_map(
+                        namespace=namespace, body=redis_result['configmap']
+                    );
+                } else {
+                    raise ;
+                }
+            }
+            # Deploy Deployment
             try {
                 apps_v1.read_namespaced_deployment(
                     name=redis_name, namespace=namespace
@@ -523,6 +539,7 @@ class KubernetesTarget(DeploymentTarget) {
                     raise ;
                 }
             }
+            # Deploy Service
             try {
                 core_v1.read_namespaced_service(
                     name=redis_service_name, namespace=namespace
