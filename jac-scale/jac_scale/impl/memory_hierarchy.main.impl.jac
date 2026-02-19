@@ -56,14 +56,11 @@ impl ScaleTieredMemory.commit(anchor: (Any | None) = None) -> None {
         if not isinstance(anchor, Anchor) or not anchor.persistent {
             return;
         }
-
         typed_anchor = cast(Anchor, anchor);
-
         # Early return if no write access
         if not Jac.check_write_access(typed_anchor) {
             return;
         }
-
         try {
             self.l3.put(typed_anchor);
         } except Exception as e {
