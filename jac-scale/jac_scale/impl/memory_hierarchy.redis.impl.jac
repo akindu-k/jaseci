@@ -1,19 +1,9 @@
 """Redis CacheBackend Implementation."""
-import redis;
-import logging;
-import os;
-import from collections.abc { Callable, Generator, Iterable }
-import from pickle { dumps, loads }
-import from uuid { UUID }
-import from jaclang.jac0core.archetype { Anchor, Root }
-import from jaclang.runtimelib.utils { storage_key, to_uuid }
-
-glob logger = logging.getLogger(__name__);
 
 """Post-initialization: connect to Redis."""
 impl RedisBackend.postinit -> None {
     if self.redis_url is None {
-        self.redis_url = os.environ.get('REDIS_URL') or self.redis_url;
+        self.redis_url = _db_config.get('redis_url');
     }
     if self.redis_url and self.redis_client is None {
         try {
@@ -28,7 +18,7 @@ impl RedisBackend.postinit -> None {
 """Check if Redis is available and connected."""
 impl RedisBackend.is_available -> bool {
     if not self.redis_url {
-        self.redis_url = os.environ.get('REDIS_URL') or self.redis_url;
+        self.redis_url = _db_config.get('redis_url');
     }
     if not self.redis_url {
         return False;

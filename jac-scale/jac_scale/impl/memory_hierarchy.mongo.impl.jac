@@ -1,21 +1,9 @@
 """MongoDB PersistenceBackend Implementation."""
-import logging;
-import os;
-import from collections.abc { Callable, Generator, Iterable }
-import from pickle { dumps, loads }
-import from typing { Any, cast }
-import from uuid { UUID }
-import from pymongo { MongoClient, UpdateOne }
-import from pymongo.errors { ConnectionFailure }
-import from jaclang.jac0core.archetype { Anchor, NodeAnchor, Root }
-import from jaclang.runtimelib.utils { storage_key, to_uuid }
-
-glob logger = logging.getLogger(__name__);
 
 """Post-initialization: connect to MongoDB."""
 impl MongoBackend.postinit -> None {
     if self.mongo_url is None {
-        self.mongo_url = os.environ.get('MONGODB_URI') or self.mongo_url;
+        self.mongo_url = _db_config.get('mongodb_uri');
     }
     if self.client is None and self.mongo_url {
         try {
@@ -32,7 +20,7 @@ impl MongoBackend.postinit -> None {
 """Check if MongoDB is available and connected."""
 impl MongoBackend.is_available -> bool {
     if not self.mongo_url {
-        self.mongo_url = os.environ.get('MONGODB_URI') or self.mongo_url;
+        self.mongo_url = _db_config.get('mongodb_uri');
     }
     if not self.mongo_url {
         return False;

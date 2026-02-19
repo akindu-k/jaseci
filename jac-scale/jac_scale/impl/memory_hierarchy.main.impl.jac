@@ -2,10 +2,6 @@
 
 Storage configuration comes from environment variables or jac.toml.
 """
-import logging;
-import from jaclang.runtimelib.memory { SqliteMemory }
-
-glob logger = logging.getLogger(__name__);
 
 """Initialize ScaleTieredMemory with distributed backends."""
 impl ScaleTieredMemory.init(use_cache: bool = True) -> None {
@@ -56,13 +52,20 @@ impl ScaleTieredMemory.commit(anchor: (Any | None) = None) -> None {
         return;
     }
     if anchor is not None {
+        # Early return if anchor is not valid for persistence
+        if not isinstance(anchor, Anchor) or not anchor.persistent {
+            return;
+        }
+
+        typed_anchor = cast(Anchor, anchor);
+
+        # Early return if no write access
+        if not Jac.check_write_access(typed_anchor) {
+            return;
+        }
+
         try {
-            if isinstance(anchor, Anchor) and anchor.persistent {
-                typed_anchor = cast(Anchor, anchor);
-                if Jac.check_write_access(typed_anchor) {
-                    self.l3.put(typed_anchor);
-                }
-            }
+            self.l3.put(typed_anchor);
         } except Exception as e {
             logger.warning(f"ScaleTieredMemory.commit(anchor) failed: {e}");
         }
