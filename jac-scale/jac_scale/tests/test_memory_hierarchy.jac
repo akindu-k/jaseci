@@ -159,7 +159,7 @@ test "read and write" {
 
     try {
         db = mongo_client["jac_db"];
-        collection = db["anchors"];
+        collection = db["_anchors"];
 
         mongo_doc_initial_count = collection.count_documents({});
         assert mongo_doc_initial_count == 2 , (

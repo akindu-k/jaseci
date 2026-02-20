@@ -78,7 +78,7 @@ obj MongoBackend(PersistentMemory) {
         db: Any by postinit,
         collection: Any by postinit,
         db_name: str = 'jac_db',
-        collection_name: str = 'anchors',
+        collection_name: str = '_anchors',
         mongo_url: str = _db_config['mongodb_uri'];
 
     def postinit -> None;
