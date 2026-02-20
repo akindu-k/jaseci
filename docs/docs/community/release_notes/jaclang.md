@@ -66,7 +66,6 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **RD Parser Spec Convergence**: Improved strictness of jac parser and specification.
 - 4 Minor refactors/changes.
 
-
 ## jaclang 0.10.1
 
 - **`jac purge` Command**: Added `jac purge` to clear the bytecode cache. Works even when the cache is corrupted.
