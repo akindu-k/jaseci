@@ -9,5 +9,3 @@ loglevel notice
 lazyfree-lazy-eviction yes
 lazyfree-lazy-expire yes
 lazyfree-lazy-server-del yes
-
-
