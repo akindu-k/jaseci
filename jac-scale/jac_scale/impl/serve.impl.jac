@@ -573,18 +573,6 @@ impl JacAPIServer.create_function_parameters(
     func_name: str, method: HTTPMethod = HTTPMethod.POST
 ) -> list[APIParameter] {
     parameters: list[APIParameter] = [];
-    if self.introspector.is_auth_required_for_function(func_name) {
-        parameters.append(
-            APIParameter(
-                name='Authorization',
-                data_type='string',
-                required=False,
-                default=None,
-                description='Bearer token for authentication',
-                type=ParameterType.HEADER
-            )
-        );
-    }
     # Extract path parameter names from restspec path
     func_obj = self.get_functions()[func_name];
     restspec = func_obj.restspec if func_obj?.restspec else None;
@@ -721,18 +709,6 @@ impl JacAPIServer.create_walker_parameters(
     walker_name: str, invoke_on_root: bool, method: HTTPMethod = HTTPMethod.POST
 ) -> list[APIParameter] {
     parameters: list[APIParameter] = [];
-    if self.introspector.is_auth_required_for_walker(walker_name) {
-        parameters.append(
-            APIParameter(
-                name='Authorization',
-                data_type='string',
-                required=False,
-                default=None,
-                description='Bearer token for authentication',
-                type=ParameterType.HEADER
-            )
-        );
-    }
     # Extract path parameter names from restspec path (e.g. /items/{item_id} -> {"item_id"})
     walker_cls = self.get_walkers()[walker_name];
     restspec = walker_cls.restspec if walker_cls?.restspec else None;
