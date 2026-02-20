@@ -1,0 +1,97 @@
+# ============================================================================
+# Redis Configuration for Jac Scale L2 Cache
+# ============================================================================
+# This configuration is optimized for use as a distributed L2 cache layer
+# in the Jac Scale memory hierarchy. Redis serves as an intermediate cache
+# between volatile in-memory storage (L1) and persistent storage (L3).
+#
+# Memory Hierarchy:
+#   L1: Volatile Memory (in-process dict)
+#   L2: Redis Cache (this configuration) - distributed, shared across pods
+#   L3: Persistent Storage (MongoDB/SQLite)
+#
+# Configuration values are templated and populated from jac.toml at deployment.
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# MEMORY MANAGEMENT
+# ----------------------------------------------------------------------------
+# maxmemory: Maximum memory Redis can use before evicting keys
+# This value is populated from jac.toml database.redis_max_memory
+# Default: 200mb (should be < 80% of container memory limit)
+maxmemory {redis_max_memory}
+
+# maxmemory-policy: Eviction policy when maxmemory is reached
+# Options:
+#   - allkeys-lru: Evict any key using LRU (Least Recently Used)
+#   - volatile-lru: Evict keys with TTL using LRU
+#   - allkeys-lfu: Evict any key using LFU (Least Frequently Used)
+#   - volatile-lfu: Evict keys with TTL using LFU
+#   - allkeys-random: Evict random keys
+#   - volatile-random: Evict random keys with TTL
+#   - volatile-ttl: Evict keys with shortest TTL
+#   - noeviction: Return errors when memory limit is reached
+# This value is populated from jac.toml database.redis_eviction_policy
+maxmemory-policy {redis_eviction_policy}
+
+# maxmemory-samples: Number of keys to sample for LRU/LFU algorithms
+# Higher values = more accurate eviction, but slightly slower
+# Range: 1-10, Default: 5
+# This value is populated from jac.toml database.redis_eviction_samples
+maxmemory-samples {redis_eviction_samples}
+
+# ----------------------------------------------------------------------------
+# PERSISTENCE (DISABLED FOR CACHE USE)
+# ----------------------------------------------------------------------------
+# Redis is used purely as a cache, not as primary storage.
+# All persistent data is stored in L3 (MongoDB/SQLite).
+# Disabling persistence improves performance and reduces I/O.
+
+# Disable RDB snapshots
+save ""
+
+# Disable AOF (Append-Only File)
+appendonly no
+
+# ----------------------------------------------------------------------------
+# NETWORK & CONNECTION
+# ----------------------------------------------------------------------------
+# TCP keepalive: Send TCP ACKs to detect dead connections
+# 0 = disabled, >0 = send ACK every N seconds
+tcp-keepalive 300
+
+# Client timeout: Close connection after N seconds of idle
+# 0 = never timeout (recommended for cache to avoid reconnection overhead)
+timeout 0
+
+# ----------------------------------------------------------------------------
+# LOGGING
+# ----------------------------------------------------------------------------
+# Log verbosity levels: debug, verbose, notice, warning
+# notice = production-appropriate level
+loglevel notice
+
+# ----------------------------------------------------------------------------
+# PERFORMANCE TUNING
+# ----------------------------------------------------------------------------
+# Disable slow log for cache (optional - enable if debugging performance)
+# slowlog-log-slower-than 10000
+# slowlog-max-len 128
+
+# Enable lazy freeing for better performance under high load
+lazyfree-lazy-eviction yes
+lazyfree-lazy-expire yes
+lazyfree-lazy-server-del yes
+
+# ----------------------------------------------------------------------------
+# SECURITY
+# ----------------------------------------------------------------------------
+# Note: Redis is deployed within Kubernetes cluster network
+# Authentication is not enabled as it's not exposed externally
+# For production with external access, enable requirepass:
+# requirepass your_secure_password_here
+
+# Disable dangerous commands (optional)
+# rename-command FLUSHDB ""
+# rename-command FLUSHALL ""
+# rename-command CONFIG ""

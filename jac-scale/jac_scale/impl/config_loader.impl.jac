@@ -30,7 +30,11 @@ impl JacScaleConfig.get_default_config(self: JacScaleConfig) -> dict[str, Any] {
         'database': {
             'mongodb_uri': None,
             'redis_url': None,
-            'shelf_db_path': '.jac/data/anchor_store.db'
+            'shelf_db_path': '.jac/data/anchor_store.db',
+            # Redis cache configuration
+            'redis_max_memory': '200mb',
+            'redis_eviction_policy': 'allkeys-lru',
+            'redis_eviction_samples': 5
         },
         'kubernetes': {
             'app_name': 'jaseci',
@@ -121,7 +125,10 @@ impl JacScaleConfig.get_database_config(self: JacScaleConfig) -> dict[str, Any] 
     return {
         'mongodb_uri': os.environ.get('MONGODB_URI') or db_config.get('mongodb_uri'),
         'redis_url': os.environ.get('REDIS_URL') or db_config.get('redis_url'),
-        'shelf_db_path': db_config.get('shelf_db_path', '.jac/data/anchor_store.db')
+        'shelf_db_path': db_config.get('shelf_db_path', '.jac/data/anchor_store.db'),
+        'redis_max_memory': db_config.get('redis_max_memory', '200mb'),
+        'redis_eviction_policy': db_config.get('redis_eviction_policy', 'allkeys-lru'),
+        'redis_eviction_samples': int(db_config.get('redis_eviction_samples', 5))
     };
 }
 
