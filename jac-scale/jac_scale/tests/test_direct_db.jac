@@ -286,13 +286,9 @@ test "cache aside pattern" {
 
 # ===== FIND_NODES =====
 test "find_nodes basic" {
-    import from pymongo { MongoClient }
-    import from jac_scale.db { Db, DatabaseType }
     import from jaclang.runtimelib.serializer { Serializer }
 
-    # Create MongoDB connection
-    client = MongoClient(MONGO_URI);
-    db = Db(client=client, db_name='test_find_nodes', db_type=DatabaseType.MONGODB);
+    db = kvstore(db_name="test_find_nodes", db_type="mongodb", uri=MONGO_URI);
 
     # Create test nodes manually
     alice = TestNode(name="Alice", age=30, status="active");
@@ -382,11 +378,8 @@ test "_anchors collection is read-only" {
     }
     assert raised , "Expected PermissionError for delete() on _anchors";
 
-    # Verify that read operations still work
-    # find_nodes should work on _anchors
     results = db.find_nodes('SomeNodeType');
     assert isinstance(results, list);
 
     cleanup_connections();
 }
-# Start containers
