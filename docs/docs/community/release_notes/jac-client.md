@@ -4,7 +4,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-client 0.2.20 (Unreleased)
 
-- 1 minor refactor/change.
+- 2 minor refactor/change.
 
 ## jac-client 0.2.19 (Latest Release)
 
