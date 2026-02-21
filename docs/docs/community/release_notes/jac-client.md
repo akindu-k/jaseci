@@ -4,6 +4,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-client 0.2.20 (Unreleased)
 
+- 1 minor refactor/change.
+
 ## jac-client 0.2.19 (Latest Release)
 
 - **Debug Mode Enabled by Default**: Debug mode is now `true` by default for a better development experience. Raw error output is displayed automatically without needing to configure `debug = true` in `jac.toml`. To disable, set `debug = false` in the `[plugins.client]` section. A warning is shown when running `jac start` in production mode (without `--dev`) with debug enabled, recommending to disable it for production deployments.
