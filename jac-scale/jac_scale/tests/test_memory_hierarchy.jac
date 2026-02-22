@@ -229,3 +229,103 @@ test "read and write" {
         }
     }
 }
+
+test "MongoDB data persists after server restart" {
+    if not JAC_FILE.exists() {
+        raise FileNotFoundError(f"Missing Jac file: {JAC_FILE}") ;
+    }
+
+    # Clean up session file from previous runs
+    session_file = FIXTURES_DIR / ".jac" / "data" / "todo_app.session.users.json";
+    if session_file.exists() {
+        os.remove(session_file);
+    }
+
+    # Start Mongo container (no Redis to isolate MongoDB behavior)
+    mongo_container = MongoDbContainer("mongo:latest");
+    mongo_container.start();
+
+    mongo_uri = mongo_container.get_connection_url();
+    mongo_client = MongoClient(mongo_uri);
+
+    os.environ["MONGODB_URI"] = mongo_uri;
+    os.environ.pop("REDIS_URL", None);
+
+    assert "jac_db" not in mongo_client.list_database_names();
+
+    port = get_free_port();
+    base_url = f"http://localhost:{port}";
+
+    server1 = start_server(FIXTURES_DIR, JAC_FILE, port);
+
+    try {
+        db = mongo_client["jac_db"];
+        collection = db["anchors"];
+
+        # Register user and create data
+        token = register_user(base_url, "testuser", "pass123");
+
+        # Create tasks
+        post_request(base_url, "/walker/CreateTask", {"id": 100, "title": "Task 100"}, token);
+        post_request(base_url, "/walker/CreateTask", {"id": 101, "title": "Task 101"}, token);
+
+        # Verify data exists before restart
+        tasks_before = post_request(base_url, "/walker/GetAllTasks", {}, token);
+        assert len(tasks_before) == 2 , "Should have 2 tasks before restart";
+
+        # Verify MongoDB has the data
+        doc_count_before = collection.count_documents({"type": "Task"});
+        assert doc_count_before == 2 , f"MongoDB should have 2 Task documents, got {doc_count_before}";
+
+        # Stop server #1
+        server1.terminate();
+        with contextlib.suppress(Exception) {
+            server1.wait(timeout=5);
+        }
+        time.sleep(1);
+
+        # Start server #2 (restart)
+        server2 = start_server(FIXTURES_DIR, JAC_FILE, port);
+
+        # Retrieve data after restart
+        tasks_after = post_request(base_url, "/walker/GetAllTasks", {}, token);
+
+        # Assert: Data should be retrievable after restart
+        assert len(tasks_after) == 2 , (
+            f"Expected 2 tasks after restart, got {len(tasks_after)}. "
+            f"MongoDB data was not retrieved after server restart."
+        );
+
+        task_ids = {task["id"] for task in tasks_after};
+        assert 100 in task_ids , "Task 100 not found after restart";
+        assert 101 in task_ids , "Task 101 not found after restart";
+
+        # Verify MongoDB still has the data
+        doc_count_after = collection.count_documents({"type": "Task"});
+        assert doc_count_after == 2 , f"Expected 2 Task documents in MongoDB after restart, got {doc_count_after}";
+
+        # Teardown server2
+        server2.terminate();
+        with contextlib.suppress(Exception) {
+            server2.wait(timeout=5);
+        }
+    } finally {
+        # Cleanup
+        system_dbs = {"admin", "config", "local"};
+        for db_name in mongo_client.list_database_names() {
+            if db_name not in system_dbs {
+                mongo_client.drop_database(db_name);
+            }
+        }
+
+        mongo_container.stop();
+
+        time.sleep(0.5);
+        gc.collect();
+
+        session_file = FIXTURES_DIR / ".jac" / "data" / "todo_app.session.users.json";
+        if session_file.exists() {
+            os.remove(session_file);
+        }
+    }
+}
