@@ -328,6 +328,18 @@ impl NaIRGenPass._codegen_if_else_expr(nd: uni.IfElseExpr) -> (ir.Value | None) 
             if isinstance(then_val.type, ir.DoubleType)
             or isinstance(else_val.type, ir.DoubleType) {
                 (then_val, else_val) = self._promote_to_float(then_val, else_val);
+            } elif isinstance(then_val.type, ir.IntType)
+            and isinstance(else_val.type, ir.IntType) {
+                # Widen the narrower int to match the wider one
+                if then_val.type.width > else_val.type.width {
+                    else_val = self.builder.zext(
+                        else_val, then_val.type, name="ternary.widen"
+                    );
+                } else {
+                    then_val = self.builder.zext(
+                        then_val, else_val.type, name="ternary.widen"
+                    );
+                }
             }
         }
         phi = self.builder.phi(then_val.type, name="ternary.result");

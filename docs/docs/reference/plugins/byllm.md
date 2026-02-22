@@ -20,7 +20,23 @@ pip install byllm[video]
 
 ## Model Configuration
 
-### Basic Setup
+### Default (Zero-Config)
+
+`llm` is a **built-in name** in Jac -- just use `by llm()` directly with no imports:
+
+```jac
+def summarize(text: str) -> str by llm();
+
+with entry {
+    print(summarize("Jac is a programming language..."));
+}
+```
+
+The default model is `gpt-4o-mini`. Configure it via `jac.toml` (see [Default Model Configuration](#default-model-configuration) below).
+
+### Custom Model (Override)
+
+For per-file customization, override the builtin with an explicit `Model`:
 
 ```jac
 import from byllm.lib { Model }
@@ -65,52 +81,49 @@ glob llm = Model(
 byLLM uses [LiteLLM](https://docs.litellm.ai/docs/providers) for model integration, providing access to 100+ providers.
 
 === "OpenAI"
-    ```jac
-    import from byllm.lib { Model }
-
-    glob llm = Model(model_name="gpt-4o");
+    ```toml
+    [plugins.byllm.model]
+    default_model = "gpt-4o"
     ```
     ```bash
     export OPENAI_API_KEY="sk-..."
     ```
 
 === "Anthropic"
-    ```jac
-    import from byllm.lib { Model }
-
-    glob llm = Model(model_name="claude-sonnet-4-6");
+    ```toml
+    [plugins.byllm.model]
+    default_model = "claude-sonnet-4-6"
     ```
     ```bash
     export ANTHROPIC_API_KEY="sk-ant-..."
     ```
 
 === "Google Gemini"
-    ```jac
-    import from byllm.lib { Model }
-
-    glob llm = Model(model_name="gemini/gemini-2.0-flash");
+    ```toml
+    [plugins.byllm.model]
+    default_model = "gemini/gemini-2.0-flash"
     ```
     ```bash
     export GOOGLE_API_KEY="..."
     ```
 
 === "Ollama (Local)"
-    ```jac
-    import from byllm.lib { Model }
-
-    glob llm = Model(model_name="ollama/llama3:70b");
+    ```toml
+    [plugins.byllm.model]
+    default_model = "ollama/llama3:70b"
     ```
     No API key needed - runs locally. See [Ollama](https://ollama.ai/).
 
 === "HuggingFace"
-    ```jac
-    import from byllm.lib { Model }
-
-    glob llm = Model(model_name="huggingface/meta-llama/Llama-3.3-70B-Instruct");
+    ```toml
+    [plugins.byllm.model]
+    default_model = "huggingface/meta-llama/Llama-3.3-70B-Instruct"
     ```
     ```bash
     export HUGGINGFACE_API_KEY="hf_..."
     ```
+
+You can also override per-file with `glob llm = Model(...)` (see [Custom Model (Override)](#custom-model-override)).
 
 **Provider Model Name Formats:**
 
@@ -129,6 +142,66 @@ byLLM uses [LiteLLM](https://docs.litellm.ai/docs/providers) for model integrati
 
 ## Project Configuration
 
+### Default Model Configuration
+
+The builtin `llm` is configured via `jac.toml`. This controls the model used by any `by llm()` call that doesn't explicitly override `llm`:
+
+```toml
+[plugins.byllm.model]
+default_model = "gpt-4o-mini"    # Model to use (any LiteLLM-supported model)
+api_key = ""                      # API key (env vars take precedence)
+base_url = ""                     # Custom API endpoint URL
+proxy = false                     # Enable proxy mode (uses OpenAI client)
+verbose = false                   # Log LLM calls to stderr
+
+[plugins.byllm.call_params]
+temperature = 0.7                 # Model creativity (0.0-2.0)
+max_tokens = 0                    # Max response tokens (0 = no limit)
+
+[plugins.byllm.litellm]
+local_cost_map = true             # Use local cost map
+drop_params = true                # Drop unsupported params per provider
+```
+
+**`[plugins.byllm.model]` options:**
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `default_model` | str | `"gpt-4o-mini"` | LiteLLM model identifier (e.g. `"gpt-4o"`, `"claude-sonnet-4-6"`, `"gemini/gemini-2.0-flash"`) |
+| `api_key` | str | `""` | API key for the provider. Environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.) take precedence |
+| `base_url` | str | `""` | Custom API endpoint URL (for proxy or self-hosted models) |
+| `proxy` | bool | `false` | Enable proxy mode (uses OpenAI client instead of LiteLLM) |
+| `verbose` | bool | `false` | Log LLM calls and parameters to stderr |
+
+**`[plugins.byllm.call_params]` options:**
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `temperature` | float | `0.7` | Creativity/randomness (0.0-2.0, lower is more deterministic) |
+| `max_tokens` | int | `0` | Maximum response tokens (0 = no limit / model default) |
+
+**`[plugins.byllm.litellm]` options:**
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `local_cost_map` | bool | `true` | Use local cost map instead of fetching from remote |
+| `drop_params` | bool | `true` | Silently drop parameters unsupported by the chosen provider |
+
+**Minimal setup** -- just set your API key and go:
+
+```bash
+export OPENAI_API_KEY="sk-..."
+```
+
+```jac
+# No imports needed -- llm is a builtin
+def greet(name: str) -> str by llm();
+
+with entry {
+    print(greet("Alice"));
+}
+```
+
 ### System Prompt Override
 
 Override the default system prompt globally via `jac.toml`:
@@ -143,22 +216,6 @@ The system prompt is automatically applied to all `by llm()` function calls, pro
 - Centralized control over LLM behavior across your project
 - Consistent personality without repeating prompts in code
 - Easy updates without touching source code
-
-**Example:**
-
-```jac
-import from byllm.lib { Model }
-
-glob llm = Model(model_name="gpt-4o");
-
-def greet(name: str) -> str by llm();
-
-with entry {
-    # Uses system prompt from jac.toml
-    result = greet("Alice");
-    print(result);
-}
-```
 
 ### HTTP Client for Custom Endpoints
 
@@ -411,9 +468,7 @@ byLLM supports image and video inputs through the `Image` and `Video` types. The
 Import and use the `Image` type for image inputs:
 
 ```jac
-import from byllm.lib { Model, Image }
-
-glob llm = Model(model_name="gpt-4o");
+import from byllm.lib { Image }
 
 """Describe what you see in this image."""
 def describe_image(img: Image) -> str by llm();
@@ -468,9 +523,7 @@ with entry {
 Image inputs combine with all return types -- primitives, enums, objects, and lists:
 
 ```jac
-import from byllm.lib { Model, Image }
-
-glob llm = Model(model_name="gpt-4o");
+import from byllm.lib { Image }
 
 obj LineItem {
     has description: str;
@@ -503,9 +556,7 @@ with entry {
 The `Video` type processes videos by extracting frames at a configurable rate:
 
 ```jac
-import from byllm.lib { Model, Video }
-
-glob llm = Model(model_name="gpt-4o");
+import from byllm.lib { Video }
 
 """Describe what happens in this video."""
 def explain_video(video: Video) -> str by llm();
@@ -532,9 +583,7 @@ Lower `fps` values extract fewer frames, reducing token usage. Higher values pro
 #### Structured Output from Videos
 
 ```jac
-import from byllm.lib { Model, Video }
-
-glob llm = Model(model_name="gpt-4o");
+import from byllm.lib { Video }
 
 obj VideoAnalysis {
     has summary: str;
@@ -552,9 +601,7 @@ def analyze_video(video: Video) -> VideoAnalysis by llm();
 Image and video inputs work with tool calling:
 
 ```jac
-import from byllm.lib { Model, Image }
-
-glob llm = Model(model_name="gpt-4o");
+import from byllm.lib { Image }
 
 """Search for products matching the description."""
 def search_products(query: str) -> list[str] {
@@ -779,10 +826,7 @@ byLLM validates that responses match the declared return type, coercing when pos
 ??? example "Resume Parser"
 
     ```jac
-    import from byllm.lib { Model }
     import from typing { Optional }
-
-    glob llm = Model(model_name="gpt-4o-mini");
 
     obj Education {
         has degree: str;
@@ -988,9 +1032,7 @@ Implement AI features in Jac and import seamlessly into Python:
 
 === "ai.jac"
     ```jac
-    import from byllm.lib { Model, Image }
-
-    glob llm = Model(model_name="gpt-4o");
+    import from byllm.lib { Image }
 
     obj Person {
         has full_name: str;

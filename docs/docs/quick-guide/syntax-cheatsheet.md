@@ -1284,7 +1284,7 @@ cl {
         async def add_todo(text: str) -> None {
             result = root spawn AddTodo(title=text);
             if result.reports {
-                todos = todos.concat([result.reports[0]]);
+                todos = todos + [result.reports[0]];
             }
         }
 

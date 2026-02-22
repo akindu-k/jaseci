@@ -1839,7 +1839,10 @@ class JacAPIServer {
                 key: JacSerializer.serialize(value) for (key, value) in args.items()
             },
             'globals': globals_payload,
-            'argOrder': arg_order
+            'argOrder': arg_order,
+            'endpointEffects': introspector._client_manifest.get(
+                'endpoint_effects', {}
+            )
         };
         safe_initial_json = json.dumps(initial_state).replace('</', '<\\/');
         page = f'<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><title>{html.escape(
@@ -2015,6 +2018,30 @@ allowed
         raise NotImplementedError(
             "The 'by' operator is not yet implemented. This feature is reserved for future use."
         ) ;
+    }
+
+    """Return the default LLM model for use with 'by llm()' syntax.
+
+        The builtin 'llm' name resolves to this method via the plugin hook
+        system. Base implementation returns a minimal stub with call_params={}
+        and __call__ returning self, which works with the random-value fallback
+        in call_llm. Plugins (e.g. byllm) override this to return a configured
+        Model instance based on jac.toml settings.
+        """
+    static def default_llm -> object {
+        _cache = getattr(JacByLLM, '_default_llm_instance', None);
+        if (_cache is not None) {
+            return _cache;
+        }
+        def _stub_call(_self: object, **kwargs: object) -> object {
+            return _self;
+        }
+        _StubCls = `type(
+            '_DefaultLLM', (object, ), {'call_params': {}, '__call__': _stub_call}
+        );
+        instance = _StubCls();
+        JacByLLM._default_llm_instance = instance;
+        return instance;
     }
 
     """Add MTIR to the node's MTIR map."""

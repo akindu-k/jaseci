@@ -252,6 +252,10 @@ impl NaIRGenPass._to_bool(val: ir.Value) -> ir.Value {
             "!=", val, ir.Constant(val.type, 0.0), name="tobool"
         );
     }
+    if isinstance(val.type, ir.PointerType) {
+        null_ptr = ir.Constant(val.type, None);
+        return self.builder.icmp_unsigned("!=", val, null_ptr, name="tobool");
+    }
     return val;
 }
 
@@ -361,6 +365,20 @@ impl NaIRGenPass._emit_binary_op(
                 is_zero, "ZeroDivisionError", "float modulo by zero"
             );
             return self.builder.frem(left, right, name="fmod");
+        } elif op == Tok.FLOOR_DIV {
+            # Float floor division: fdiv then floor
+            fzero = ir.Constant(ir.DoubleType(), 0.0);
+            is_zero = self.builder.fcmp_ordered(
+                "==", right, fzero, name="ffloordiv.zero.chk"
+            );
+            self._emit_runtime_raise(
+                is_zero, "ZeroDivisionError", "float floor division by zero"
+            );
+            raw = self.builder.fdiv(left, right, name="ffloordiv.raw");
+            floor_fn = self._get_or_declare_extern(
+                "floor", ir.DoubleType(), [ir.DoubleType()]
+            );
+            return self.builder.call(floor_fn, [raw], name="ffloordiv");
         }
     } else {
         i64 = ir.IntType(64);
@@ -482,6 +500,14 @@ impl NaIRGenPass._emit_comparison(
                 return self.builder.icmp_signed("==", cmp_result, zero, name="streq");
             } elif op == Tok.NE {
                 return self.builder.icmp_signed("!=", cmp_result, zero, name="strne");
+            } elif op == Tok.LT {
+                return self.builder.icmp_signed("<", cmp_result, zero, name="strlt");
+            } elif op == Tok.GT {
+                return self.builder.icmp_signed(">", cmp_result, zero, name="strgt");
+            } elif op == Tok.LTE {
+                return self.builder.icmp_signed("<=", cmp_result, zero, name="strle");
+            } elif op == Tok.GTE {
+                return self.builder.icmp_signed(">=", cmp_result, zero, name="strge");
             }
             return None;
         }

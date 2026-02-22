@@ -245,7 +245,7 @@ cl {
 
     def:pub app() -> JsxElement {
         items = lodash.sortBy(["c", "a", "b"]);
-        return <ul>{items.map(lambda i: any -> any { return <li>{i}</li>; })}</ul>;
+        return <ul>{[<li>{i}</li> for i in items]}</ul>;
     }
 }
 ```

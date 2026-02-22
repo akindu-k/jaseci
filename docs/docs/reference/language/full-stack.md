@@ -582,7 +582,7 @@ cl {
         async def addTodo(text: str) -> None {
             result = root spawn AddTodo(title=text);
             if result.reports {
-                todos = todos.concat([result.reports[0]]);
+                todos = todos + [result.reports[0]];
             }
         }
 
@@ -619,7 +619,7 @@ cl {
         async def handle_add(title: str) -> None {
             result = root spawn add_task(title=title);
             if result.reports and result.reports.length > 0 {
-                tasks = tasks.concat([result.reports[0]]);
+                tasks = tasks + [result.reports[0]];
             }
         }
 

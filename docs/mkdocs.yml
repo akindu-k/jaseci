@@ -12,7 +12,7 @@ nav:
       - Welcome: "quick-guide/index.md"
       - Installation: "quick-guide/install.md"
       - Core Concepts: "quick-guide/what-makes-jac-different.md"
-      - Learn by Building - AI Day Planner: "tutorials/first-app/build-ai-day-planner.md"
+      - Build to Learn - AI Day Planner: "tutorials/first-app/build-ai-day-planner.md"
       - Syntax Cheatsheet: "quick-guide/syntax-cheatsheet.md"
       - Jac vs Traditional Stack: "quick-guide/jac-vs-traditional-stack.md"
       - FAQ: "quick-guide/faq.md"
@@ -62,19 +62,11 @@ nav:
           - Appendices: "reference/language/appendices.md"
           - Walker Responses: "reference/language/walker-responses.md"
           - Graph Operations: "reference/language/graph-operations.md"
-      - Examples:
-          - Overview: "tutorials/examples/index.md"
-          - LittleX (Twitter Clone): "tutorials/examples/littlex.md"
-          - EmailBuddy (AI Assistant): "tutorials/examples/emailbuddy.md"
-          - RAG Chatbot: "tutorials/examples/rag-chatbot.md"
-          - RPG Level Generator: "tutorials/examples/rpg.md"
-      - Troubleshooting: "tutorials/troubleshooting.md"
 
   - Community:
       - Contributing: "community/contributing.md"
       - Breaking Changes: "community/breaking-changes.md"
-      - Contributors: "community/contributors.md"
-      - Top Voices: "community/top_voices.md"
+      - PR Leaderboard: "community/contributors.md"
       - Release Notes:
           - Jaclang: "community/release_notes/jaclang.md"
           - byLLM: "community/release_notes/byllm.md"
@@ -82,7 +74,6 @@ nav:
           - jac-scale: "community/release_notes/jac-scale.md"
           - "(Deprecated) jac-cloud": "community/release_notes/jac-cloud.md"
       - Internals:
-          - Contributing Guide: "community/internals/contrib.md"
           - Import Patterns: "community/internals/jac_import_patterns.md"
           - UniIR Nodes: "community/internals/uniir_node.md"
 
@@ -240,7 +231,6 @@ plugins:
         learn/jac-ref/appendices.md: reference/language/appendices.md
 
         # Contributor Hub redirects
-        internals/contrib.md: community/contributing.md
         communityhub/breaking_changes.md: community/breaking-changes.md
         communityhub/release_notes/jaclang.md: community/release_notes/jaclang.md
         communityhub/release_notes/byllm.md: community/release_notes/byllm.md

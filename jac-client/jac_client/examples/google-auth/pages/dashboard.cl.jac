@@ -3,7 +3,7 @@ import from '..lib.auth' { AuthContext }
 
 def:pub Dashboard -> JsxElement {
     ctx = useContext(AuthContext);
-    console.log("DASHBOARD CTX:", ctx);
+    print("DASHBOARD CTX:", ctx);
 
     return
         <div style={{padding: '2rem', maxWidth: '800px', margin: '0 auto'}}>
