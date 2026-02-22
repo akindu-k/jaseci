@@ -398,7 +398,7 @@ impl EsastGenPass.exit_bool(nd: uni.Bool) -> None {
 
 """Process inner comprehension (for x in items if cond) - handled by parent comprehension."""
 impl EsastGenPass.exit_inner_compr(nd: uni.InnerCompr) -> None {
-    # InnerCompr is handled by the parent ListCompr/SetCompr/GenCompr
+    # InnerCompr is handled by the parent ListCompr/SetCompr/GenCompr/DictCompr
     ;
 }
 
@@ -407,9 +407,18 @@ impl EsastGenPass.exit_list_compr(nd: uni.ListCompr) -> None {
     self._build_compr_chain(nd);
 }
 
-"""Process set comprehension: {expr for x in items if cond} -> items.filter(x => cond).map(x => expr)."""
+"""Process set comprehension: {expr for x in items if cond} -> new Set(items.filter(x => cond).map(x => expr))."""
 impl EsastGenPass.exit_set_compr(nd: uni.SetCompr) -> None {
     self._build_compr_chain(nd);
+    if nd.gen.es_ast {
+        nd.gen.es_ast = self.sync_loc(
+            es.NewExpression(
+                callee=self.sync_loc(es.Identifier(name='Set'), jac_node=nd),
+                arguments=[cast(es.Expression, nd.gen.es_ast)]
+            ),
+            jac_node=nd
+        );
+    }
 }
 
 """Process generator comprehension: (expr for x in items if cond) -> items.filter(x => cond).map(x => expr)."""
@@ -417,85 +426,199 @@ impl EsastGenPass.exit_gen_compr(nd: uni.GenCompr) -> None {
     self._build_compr_chain(nd);
 }
 
-"""Build filter().map() chain for comprehensions."""
+"""Process dict comprehension: {k: v for (k,v) in pairs if cond} -> Object.fromEntries(pairs.filter(...).map(...))."""
+impl EsastGenPass.exit_dict_compr(nd: uni.DictCompr) -> None {
+    # Build the output expression as [key, value] array
+    key_expr = cast(es.Expression, nd.kv_pair.key.gen.es_ast)
+    if nd.kv_pair.key
+    else None;
+    val_expr = cast(es.Expression, nd.kv_pair.value.gen.es_ast);
+    if not key_expr or not val_expr {
+        nd.gen.es_ast = self.sync_loc(es.ObjectExpression(properties=[]), jac_node=nd);
+        return;
+    }
+    # Output expression is [key, value] for Object.fromEntries
+    out_expr = self.sync_loc(
+        es.ArrayExpression(elements=[key_expr, val_expr]), jac_node=nd.kv_pair
+    );
+    # Build the filter/map chain
+    chain = self._build_compr_expr(nd.compr, out_expr, nd);
+    if not chain {
+        nd.gen.es_ast = self.sync_loc(es.ObjectExpression(properties=[]), jac_node=nd);
+        return;
+    }
+    # Wrap in Object.fromEntries(...)
+    nd.gen.es_ast = self.sync_loc(
+        es.CallExpression(
+            callee=self.sync_loc(
+                es.MemberExpression(
+                    object=self.sync_loc(es.Identifier(name='Object'), jac_node=nd),
+                    property=self.sync_loc(
+                        es.Identifier(name='fromEntries'), jac_node=nd
+                    ),
+                    computed=False
+                ),
+                jac_node=nd
+            ),
+            arguments=[chain]
+        ),
+        jac_node=nd
+    );
+}
+
+"""Build filter().map() chain for list/set/gen comprehensions."""
 impl EsastGenPass._build_compr_chain(nd: uni.ListCompr) -> None {
-    # Start with the output expression
     out_expr = cast(es.Expression, nd.out_expr.gen.es_ast);
     if not out_expr {
         nd.gen.es_ast = self.sync_loc(es.ArrayExpression(elements=[]), jac_node=nd);
         return;
     }
-    # Process comprehensions (currently only support single compr, nested would be more complex)
     if not nd.compr or len(nd.compr) == 0 {
         nd.gen.es_ast = self.sync_loc(
             es.ArrayExpression(elements=[out_expr]), jac_node=nd
         );
         return;
     }
-    compr = nd.compr[0];
-    collection = cast(es.Expression, compr.collection.gen.es_ast);
-    target = cast(es.Expression, compr.target.gen.es_ast);
-    if not collection or not target {
+    result = self._build_compr_expr(nd.compr, out_expr, nd);
+    if result {
+        nd.gen.es_ast = result;
+    } else {
         nd.gen.es_ast = self.sync_loc(es.ArrayExpression(elements=[]), jac_node=nd);
-        return;
     }
-    # Build params for arrow function (the iteration variable)
-    param = self.sync_loc(
-        es.Identifier(name=target.name if isinstance(target, es.Identifier) else 'x'),
-        jac_node=compr.target
-    );
-    result = collection;
-    # Add filter() calls for each conditional
-    if compr.conditional {
-        for cond in compr.conditional {
-            cond_expr = cast(es.Expression, cond.gen.es_ast);
-            if cond_expr {
-                filter_arrow = self.sync_loc(
-                    es.ArrowFunctionExpression(
-                        params=[param], body=cond_expr, expression=True
-                    ),
-                    jac_node=cond
-                );
-                filter_call = self.sync_loc(
-                    es.CallExpression(
-                        callee=self.sync_loc(
-                            es.MemberExpression(
-                                object=result,
-                                property=self.sync_loc(
-                                    es.Identifier(name='filter'), jac_node=cond
-                                ),
-                                computed=False
-                            ),
-                            jac_node=cond
+}
+
+"""Build the filter/map/flatMap chain for a list of InnerCompr nodes.
+
+For single loop: collection.filter(x => cond).map(x => expr)
+For nested loops: outer.flatMap(x => inner.filter(y => cond).map(y => expr))
+"""
+impl EsastGenPass._build_compr_expr(
+    comprs: list[uni.InnerCompr], out_expr: es.Expression, nd: uni.UniNode
+) -> (es.Expression | None) {
+    if not comprs or len(comprs) == 0 {
+        return None;
+    }
+    # Build from innermost compr outward
+    # Start with the innermost comprehension using .map(out_expr)
+    # Then wrap each outer comprehension with .flatMap(inner_chain)
+    result: (es.Expression | None) = None;
+    i = len(comprs) - 1;
+    while i >= 0 {
+        compr = comprs[i];
+        collection = cast(es.Expression, compr.collection.gen.es_ast);
+        target = cast(es.Expression, compr.target.gen.es_ast);
+        if not collection or not target {
+            return None;
+        }
+        param = self._compr_param(target, compr.target);
+        # Start with the collection
+        chain = collection;
+        # Add .filter() for each conditional
+        if compr.conditional {
+            for cond in compr.conditional {
+                cond_expr = cast(es.Expression, cond.gen.es_ast);
+                if cond_expr {
+                    filter_arrow = self.sync_loc(
+                        es.ArrowFunctionExpression(
+                            params=[param], body=cond_expr, expression=True
                         ),
-                        arguments=[filter_arrow]
-                    ),
-                    jac_node=cond
-                );
-                result = filter_call;
+                        jac_node=cond
+                    );
+                    chain = self.sync_loc(
+                        es.CallExpression(
+                            callee=self.sync_loc(
+                                es.MemberExpression(
+                                    object=chain,
+                                    property=self.sync_loc(
+                                        es.Identifier(name='filter'), jac_node=cond
+                                    ),
+                                    computed=False
+                                ),
+                                jac_node=cond
+                            ),
+                            arguments=[filter_arrow]
+                        ),
+                        jac_node=cond
+                    );
+                }
             }
         }
-    }
-    # Add map() call for the output expression
-    map_arrow = self.sync_loc(
-        es.ArrowFunctionExpression(params=[param], body=out_expr, expression=True),
-        jac_node=nd.out_expr
-    );
-    map_call = self.sync_loc(
-        es.CallExpression(
-            callee=self.sync_loc(
-                es.MemberExpression(
-                    object=result,
-                    property=self.sync_loc(es.Identifier(name='map'), jac_node=nd),
-                    computed=False
+        if i == len(comprs) - 1 {
+            # Innermost: use .map(param => out_expr)
+            map_arrow = self.sync_loc(
+                es.ArrowFunctionExpression(
+                    params=[param], body=out_expr, expression=True
                 ),
                 jac_node=nd
-            ),
-            arguments=[map_arrow]
-        ),
-        jac_node=nd
-    );
-    nd.gen.es_ast = map_call;
+            );
+            result = self.sync_loc(
+                es.CallExpression(
+                    callee=self.sync_loc(
+                        es.MemberExpression(
+                            object=chain,
+                            property=self.sync_loc(
+                                es.Identifier(name='map'), jac_node=nd
+                            ),
+                            computed=False
+                        ),
+                        jac_node=nd
+                    ),
+                    arguments=[map_arrow]
+                ),
+                jac_node=nd
+            );
+        } else {
+            # Outer: use .flatMap(param => inner_chain)
+            flat_arrow = self.sync_loc(
+                es.ArrowFunctionExpression(
+                    params=[param], body=cast(es.Expression, result), expression=True
+                ),
+                jac_node=nd
+            );
+            result = self.sync_loc(
+                es.CallExpression(
+                    callee=self.sync_loc(
+                        es.MemberExpression(
+                            object=chain,
+                            property=self.sync_loc(
+                                es.Identifier(name='flatMap'), jac_node=nd
+                            ),
+                            computed=False
+                        ),
+                        jac_node=nd
+                    ),
+                    arguments=[flat_arrow]
+                ),
+                jac_node=nd
+            );
+        }
+        i -= 1;
+    }
+    return cast(es.Expression, result);
+}
+
+"""Extract arrow function parameter from a comprehension target.
+
+Handles simple identifiers (x =>) and tuple destructuring (([k, v]) =>).
+"""
+impl EsastGenPass._compr_param(target: es.Expression, jac_node: uni.UniNode) -> es.Node {
+    if isinstance(target, es.Identifier) {
+        return self.sync_loc(es.Identifier(name=target.name), jac_node=jac_node);
+    }
+    if isinstance(target, es.ArrayExpression) {
+        # Tuple target like (k, v) → ArrayPattern([k, v]) for destructuring
+        elements: list[(es.Node | None)] = [];
+        for elem in target.elements {
+            if isinstance(elem, es.Identifier) {
+                elements.append(
+                    self.sync_loc(es.Identifier(name=elem.name), jac_node=jac_node)
+                );
+            }
+        }
+        return self.sync_loc(es.ArrayPattern(elements=elements), jac_node=jac_node);
+    }
+    # Fallback
+    return self.sync_loc(es.Identifier(name='x'), jac_node=jac_node);
 }
 
 """Process key-value pair."""

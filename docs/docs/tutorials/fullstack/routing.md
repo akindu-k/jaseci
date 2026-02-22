@@ -745,13 +745,14 @@ cl {
         return <div>
             <h1>Products</h1>
             <ul>
-                {products.map(lambda p: any -> any {
-                    return <li key={p["id"]}>
+                {[
+                    <li key={p["id"]}>
                         <Link to={f"/products/{p['id']}"}>
                             {p["name"]}
                         </Link>
-                    </li>;
-                })}
+                    </li>
+                    for p in products
+                ]}
             </ul>
         </div>;
     }

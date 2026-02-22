@@ -225,9 +225,11 @@ def:pub FeaturesTest -> JsxElement {
         try {
             item_id spawn delete_test_data();
             # Remove from local state
-            testData = testData.filter(
-                lambda item: any  -> bool { return item._jac_id != item_id; }
-            );
+            testData = [
+                item
+                for item in testData
+                if item._jac_id != item_id
+            ];
             alert("Data deleted successfully!");
         } except Exception as e {
             print("Error deleting data:", e);
@@ -255,11 +257,11 @@ def:pub FeaturesTest -> JsxElement {
         loading = true;
         try {
             # Parse number list
-            numbers = numberList.split(",").filter(
-                lambda x: str  -> bool { return x.strip().isdigit(); }
-            ).map(
-                lambda x: str  -> int { return int(x.strip()); }
-            );
+            numbers = [
+                int(x.strip())
+                for x in numberList.split(",")
+                if x.strip().isdigit()
+            ];
 
             response = root spawn test_list_operations(numbers=numbers);
             result = response.reports[0];
@@ -407,56 +409,52 @@ def:pub FeaturesTest -> JsxElement {
                         and <p style={{"color": "#9ca3af", "fontStyle": "italic"}}>
                             No data yet. Create some!
                         </p>}
-                        {testData.map(
-                            lambda item: any  -> JsxElement { return
-                                <div
-                                    key={item._jac_id}
-                                    style={{
-                                        "backgroundColor": "#f9fafb",
-                                        "padding": "12px",
-                                        "borderRadius": "6px",
-                                        "marginTop": "8px",
-                                        "display": "flex",
-                                        "justifyContent": "space-between",
-                                        "alignItems": "center"
-                                    }}
-                                >
-                                    <div>
-                                        <div
-                                            style={{
-                                                "fontWeight": "600",
-                                                "color": "#1f2937"
-                                            }}
-                                        >
-                                            {item.message}
-                                        </div>
-                                        <div
-                                            style={{
-                                                "fontSize": "12px",
-                                                "color": "#6b7280"
-                                            }}
-                                        >
-                                            Count:{item.count}| Created:{item.created_at}
-                                        </div>
+                        {[
+                            <div
+                                key={item._jac_id}
+                                style={{
+                                    "backgroundColor": "#f9fafb",
+                                    "padding": "12px",
+                                    "borderRadius": "6px",
+                                    "marginTop": "8px",
+                                    "display": "flex",
+                                    "justifyContent": "space-between",
+                                    "alignItems": "center"
+                                }}
+                            >
+                                <div>
+                                    <div
+                                        style={{
+                                            "fontWeight": "600",
+                                            "color": "#1f2937"
+                                        }}
+                                    >
+                                        {item.message}
                                     </div>
-                                    <div style={{"display": "flex", "gap": "8px"}}>
-                                        <TestButton
-                                            text="Edit"
-                                            onClick={lambda -> None { handleUpdate(
-                                                item._jac_id
-                                            );}}
-                                            variant="secondary"
-                                        />
-                                        <TestButton
-                                            text="Delete"
-                                            onClick={lambda -> None { handleDelete(
-                                                item._jac_id
-                                            );}}
-                                            variant="secondary"
-                                        />
+                                    <div
+                                        style={{"fontSize": "12px", "color": "#6b7280"}}
+                                    >
+                                        Count:{item.count}| Created:{item.created_at}
                                     </div>
-                                </div>; }
-                        )}
+                                </div>
+                                <div style={{"display": "flex", "gap": "8px"}}>
+                                    <TestButton
+                                        text="Edit"
+                                        onClick={lambda -> None { handleUpdate(
+                                            item._jac_id
+                                        );}}
+                                        variant="secondary"
+                                    />
+                                    <TestButton
+                                        text="Delete"
+                                        onClick={lambda -> None { handleDelete(
+                                            item._jac_id
+                                        );}}
+                                        variant="secondary"
+                                    />
+                                </div>
+                            </div> for item in testData
+                        ]}
                     </div>
                 </div>
             </TestCard>
@@ -479,15 +477,14 @@ def:pub FeaturesTest -> JsxElement {
                                 "marginTop": "8px"
                             }}
                         >
-                            {list(string_demos.keys()).map(
-                                lambda key: str  -> JsxElement { return
-                                    <div key={key} style={{"marginBottom": "5px"}}>
-                                        <span style={{"fontWeight": "600"}}>
-                                            {key}:
-                                        </span>
-                                        {string_demos[key]}
-                                    </div>; }
-                            )}
+                            {[
+                                <div key={key} style={{"marginBottom": "5px"}}>
+                                    <span style={{"fontWeight": "600"}}>
+                                        {key}:
+                                    </span>
+                                    {string_demos[key]}
+                                </div> for key in list(string_demos.keys())
+                            ]}
                         </div>
                     </div>
                     # Walker-based test

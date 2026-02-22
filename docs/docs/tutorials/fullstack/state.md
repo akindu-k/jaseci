@@ -105,14 +105,15 @@ cl {
             <button onClick={lambda -> None { add_todo(); }}>Add</button>
 
             <ul>
-                {todos.map(lambda todo: any -> any {
-                    return <li key={todo["id"]}>
+                {[
+                    <li key={todo["id"]}>
                         {todo["text"]}
                         <button onClick={lambda -> None { remove_todo(todo["id"]); }}>
                             X
                         </button>
-                    </li>;
-                })}
+                    </li>
+                    for todo in todos
+                ]}
             </ul>
         </div>;
     }
@@ -150,9 +151,7 @@ cl {
         }
 
         return <ul>
-            {data.map(lambda item: any -> any {
-                return <li key={item.id}>{item.name}</li>;
-            })}
+            {[<li key={item.id}>{item.name}</li> for item in data]}
         </ul>;
     }
 }
@@ -181,7 +180,7 @@ cl {
                 onChange={lambda e: any -> None { query = e.target.value; }}
             />
             <ul>
-                {results.map(lambda r: any -> any { return <li>{r}</li>; })}
+                {[<li>{r}</li> for r in results]}
             </ul>
         </div>;
     }
