@@ -795,3 +795,167 @@ test "convert to js import path preserves js format" {
     assert convert_to_js_import_path("react") == "react";
     assert convert_to_js_import_path("lodash") == "lodash";
 }
+
+# ============================================================================
+# Comprehension → JavaScript Tests
+# ============================================================================
+test "compr list basic map" {
+    js_code = compile_fixture_to_js("comprehensions.cl.jac", FIXTURES);
+
+    # list_compr_map: [x * 2 for x in items] → items.map(x => (x * 2))
+    assert ".map(" in js_code , "List comprehension should generate .map() call";
+    assert "x =>" in js_code , "Arrow function should use comprehension variable";
+}
+
+test "compr list filter only" {
+    js_code = compile_fixture_to_js("comprehensions.cl.jac", FIXTURES);
+
+    # list_compr_filter: [x for x in items if x > 0] → items.filter(x => (x > 0))
+    assert ".filter(" in js_code , "Filtered comprehension should generate .filter() call";
+    assert "(x > 0)" in js_code , "Filter condition should be preserved";
+}
+
+test "compr list map and filter" {
+    js_code = compile_fixture_to_js("comprehensions.cl.jac", FIXTURES);
+
+    # list_compr_map_filter: [x * 2 for x in items if x > 0]
+    #   → items.filter(x => (x > 0)).map(x => (x * 2))
+    assert ".filter(" in js_code and ".map(" in js_code , (
+        "Map+filter comprehension should chain .filter().map()"
+    );
+}
+
+test "compr list multiple filters" {
+    js_code = compile_fixture_to_js("comprehensions.cl.jac", FIXTURES);
+
+    # list_compr_multi_filter: [x for x in items if x > 0 if x < 100]
+    #   → items.filter(x => (x > 0)).filter(x => (x < 100))
+    assert "(x < 100)" in js_code , ("Second filter condition should appear in output");
+}
+
+test "compr list method call" {
+    js_code = compile_fixture_to_js("comprehensions.cl.jac", FIXTURES);
+
+    # list_compr_method: [x.strip() for x in items] → items.map(x => x.strip())
+    assert ".strip()" in js_code , (
+        "Method call in comprehension output should be preserved"
+    );
+}
+
+test "compr list ternary output" {
+    js_code = compile_fixture_to_js("comprehensions.cl.jac", FIXTURES);
+
+    # list_compr_ternary: [x if x > 0 else 0 for x in items]
+    #   → items.map(x => (x > 0) ? x : 0)
+    assert "?" in js_code and ":" in js_code , (
+        "Ternary in comprehension output should generate JS conditional"
+    );
+}
+
+test "compr set basic" {
+    js_code = compile_fixture_to_js("comprehensions.cl.jac", FIXTURES);
+
+    # set_compr_basic: {x * 2 for x in items} → new Set(items.map(x => (x * 2)))
+    assert "new Set(" in js_code , (
+        "Set comprehension should wrap result in new Set()"
+    );
+    assert "new Set(items.map(" in js_code , (
+        "Set comprehension should be new Set(items.map(...))"
+    );
+}
+
+test "compr set with filter" {
+    js_code = compile_fixture_to_js("comprehensions.cl.jac", FIXTURES);
+
+    # set_compr_filter: {x for x in items if x > 0}
+    #   → new Set(items.filter(x => (x > 0)).map(x => x))
+    #   or → new Set(items.filter(x => (x > 0)))
+    assert "new Set(" in js_code , (
+        "Filtered set comprehension should wrap in new Set()"
+    );
+}
+
+test "compr dict basic" {
+    js_code = compile_fixture_to_js("comprehensions.cl.jac", FIXTURES);
+
+    # dict_compr_basic: {k: v for (k, v) in pairs}
+    #   → Object.fromEntries(pairs.map(([k, v]) => [k, v]))
+    assert "Object.fromEntries(" in js_code , (
+        "Dict comprehension should use Object.fromEntries()"
+    );
+}
+
+test "compr dict with filter" {
+    js_code = compile_fixture_to_js("comprehensions.cl.jac", FIXTURES);
+
+    # dict_compr_filter: {k: v for (k, v) in pairs if v > 0}
+    #   → Object.fromEntries(pairs.filter(([k, v]) => (v > 0)).map(([k, v]) => [k, v]))
+    assert "Object.fromEntries(" in js_code , (
+        "Filtered dict comprehension should use Object.fromEntries()"
+    );
+    assert ".filter(" in js_code , (
+        "Filtered dict comprehension should chain .filter()"
+    );
+}
+
+test "compr dict transform" {
+    js_code = compile_fixture_to_js("comprehensions.cl.jac", FIXTURES);
+
+    # dict_compr_transform: {k: v * 2 for (k, v) in pairs}
+    #   → Object.fromEntries(pairs.map(([k, v]) => [k, (v * 2)]))
+    assert "Object.fromEntries(" in js_code , (
+        "Dict comprehension with transform should use Object.fromEntries()"
+    );
+    assert "(v * 2)" in js_code , (
+        "Dict comprehension should include value transform expression"
+    );
+}
+
+test "compr generator basic" {
+    js_code = compile_fixture_to_js("comprehensions.cl.jac", FIXTURES);
+
+    # gen_compr_basic: list((x * 2 for x in items)) → items.map(x => (x * 2))
+    # Generator expressions produce eager arrays in JS
+    assert ".map(" in js_code , ("Generator expression should generate .map() call");
+}
+
+test "compr generator filter" {
+    js_code = compile_fixture_to_js("comprehensions.cl.jac", FIXTURES);
+
+    # gen_compr_filter: list((x for x in items if x > 0))
+    #   → items.filter(x => (x > 0))
+    assert ".filter(" in js_code , (
+        "Filtered generator expression should generate .filter() call"
+    );
+}
+
+test "compr nested basic" {
+    js_code = compile_fixture_to_js("comprehensions.cl.jac", FIXTURES);
+
+    # nested_compr_basic: [x + y for x in a for y in b]
+    #   → a.flatMap(x => b.map(y => (x + y)))
+    assert ".flatMap(" in js_code , (
+        "Nested comprehension should generate .flatMap() for outer loop"
+    );
+}
+
+test "compr nested with filter" {
+    js_code = compile_fixture_to_js("comprehensions.cl.jac", FIXTURES);
+
+    # nested_compr_filter: [x + y for x in a for y in b if x != y]
+    #   → a.flatMap(x => b.filter(y => (x !== y)).map(y => (x + y)))
+    assert ".flatMap(" in js_code , (
+        "Filtered nested comprehension should use .flatMap()"
+    );
+    assert "!==" in js_code , ("!= comparison should become !== in JavaScript");
+}
+
+test "compr balanced syntax" {
+    js_code = compile_fixture_to_js("comprehensions.cl.jac", FIXTURES);
+    assert_balanced_syntax(js_code, "comprehensions.cl.jac");
+}
+
+test "compr no jac keywords" {
+    js_code = compile_fixture_to_js("comprehensions.cl.jac", FIXTURES);
+    assert_no_jac_keywords(js_code, "comprehensions.cl.jac");
+}

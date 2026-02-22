@@ -686,7 +686,7 @@ Here's a key insight: **`await add_task(text)`** calls the server function as if
     async def add_new_task -> None {
         if task_text.strip() {
             task = await add_task(task_text.strip());
-            tasks = tasks.concat([task]);
+            tasks = tasks + [task];
             task_text = "";
         }
     }
@@ -730,7 +730,7 @@ cl def:pub app -> JsxElement {
     async def add_new_task -> None {
         if task_text.strip() {
             task = await add_task(task_text.strip());
-            tasks = tasks.concat([task]);
+            tasks = tasks + [task];
             task_text = "";
         }
     }
@@ -777,27 +777,26 @@ cl def:pub app -> JsxElement {
     async def add_new_task -> None {
         if task_text.strip() {
             task = await add_task(task_text.strip());
-            tasks = tasks.concat([task]);
+            tasks = tasks + [task];
             task_text = "";
         }
     }
 
     async def toggle(id: str) -> None {
         await toggle_task(id);
-        tasks = tasks.map(
-            lambda t: any -> any {
-                return {"id": t.id, "title": t.title, "done": not t.done}
-                if t.id == id else t;
-            }
-        );
+        tasks = [
+            {"id": t.id, "title": t.title, "done": not t.done}
+            if t.id == id else t
+            for t in tasks
+        ];
     }
 
     async def remove(id: str) -> None {
         await delete_task(id);
-        tasks = tasks.filter(lambda t: any -> bool { return t.id != id; });
+        tasks = [t for t in tasks if t.id != id];
     }
 
-    remaining = len(tasks.filter(lambda t: any -> bool { return not t.done; }));
+    remaining = len([t for t in tasks if not t.done]);
 
     return
         <div class="container">
@@ -839,9 +838,9 @@ cl def:pub app -> JsxElement {
 
 A few things to notice:
 
-- **`tasks.map(lambda ...)`** transforms each item in the list (like JavaScript's `.map()`)
-- **`tasks.filter(lambda ...)`** keeps only matching items
-- **`tasks.concat([task])`** creates a new list with the item appended
+- **List comprehensions** transform and filter lists inline (e.g., `[expr for t in tasks]`, `[t for t in tasks if cond]`)
+- **Conditional comprehensions** update matching items (e.g., `[updated if t.id == id else t for t in tasks]`)
+- **`tasks + [task]`** creates a new list with the item appended
 - **`async`** marks methods that call the server (since network calls are asynchronous)
 
 **Add Styles**
@@ -919,27 +918,26 @@ h1 { text-align: center; margin-bottom: 24px; color: #333; }
         async def add_new_task -> None {
             if task_text.strip() {
                 task = await add_task(task_text.strip());
-                tasks = tasks.concat([task]);
+                tasks = tasks + [task];
                 task_text = "";
             }
         }
 
         async def toggle(id: str) -> None {
             await toggle_task(id);
-            tasks = tasks.map(
-                lambda t: any -> any {
-                    return {"id": t.id, "title": t.title, "done": not t.done}
-                    if t.id == id else t;
-                }
-            );
+            tasks = [
+                {"id": t.id, "title": t.title, "done": not t.done}
+                if t.id == id else t
+                for t in tasks
+            ];
         }
 
         async def remove(id: str) -> None {
             await delete_task(id);
-            tasks = tasks.filter(lambda t: any -> bool { return t.id != id; });
+            tasks = [t for t in tasks if t.id != id];
         }
 
-        remaining = len(tasks.filter(lambda t: any -> bool { return not t.done; }));
+        remaining = len([t for t in tasks if not t.done]);
 
         return
             <div class="container">
@@ -1006,7 +1004,7 @@ That last point is important. The data persisted because nodes live in the graph
 - **`await func()`** -- transparent server calls from the client (no HTTP code)
 - **`async`** -- marks functions that perform asynchronous operations
 - **JSX syntax** -- `{expression}`, `{[... for x in list]}`, event handlers with lambdas
-- **`.map()`, `.filter()`, `.concat()`** -- list operations for immutable state updates
+- **List comprehensions and `+` operator** -- `[expr for x in list]`, `[x for x in list if cond]`, and `list + [item]` for immutable state updates
 
 !!! example "Try It Yourself"
     Add a "Clear All" button below the task count that deletes every task. You'll need a new `def:pub clear_all_tasks` endpoint on the server and an `async` method in the component that calls it and resets the `tasks` list.
@@ -1273,27 +1271,26 @@ cl def:pub app -> JsxElement {
     async def add_new_task -> None {
         if task_text.strip() {
             task = await add_task(task_text.strip());
-            tasks = tasks.concat([task]);
+            tasks = tasks + [task];
             task_text = "";
         }
     }
 
     async def toggle(id: str) -> None {
         await toggle_task(id);
-        tasks = tasks.map(
-            lambda t: any -> any {
-                return {
-                    "id": t.id, "title": t.title,
-                    "done": not t.done, "category": t.category
-                }
-                if t.id == id else t;
+        tasks = [
+            {
+                "id": t.id, "title": t.title,
+                "done": not t.done, "category": t.category
             }
-        );
+            if t.id == id else t
+            for t in tasks
+        ];
     }
 
     async def remove(id: str) -> None {
         await delete_task(id);
-        tasks = tasks.filter(lambda t: any -> bool { return t.id != id; });
+        tasks = [t for t in tasks if t.id != id];
     }
 
     async def generate_meal_list -> None {
@@ -1310,7 +1307,7 @@ cl def:pub app -> JsxElement {
         meal_text = "";
     }
 
-    remaining = len(tasks.filter(lambda t: any -> bool { return not t.done; }));
+    remaining = len([t for t in tasks if not t.done]);
     total_cost = 0.0;
     for ing in ingredients { total_cost = total_cost + ing.cost; }
 
@@ -1598,27 +1595,26 @@ h2 { margin: 0 0 16px 0; font-size: 1.2rem; color: #444; }
         async def add_new_task -> None {
             if task_text.strip() {
                 task = await add_task(task_text.strip());
-                tasks = tasks.concat([task]);
+                tasks = tasks + [task];
                 task_text = "";
             }
         }
 
         async def toggle(id: str) -> None {
             await toggle_task(id);
-            tasks = tasks.map(
-                lambda t: any -> any {
-                    return {
-                        "id": t.id, "title": t.title,
-                        "done": not t.done, "category": t.category
-                    }
-                    if t.id == id else t;
+            tasks = [
+                {
+                    "id": t.id, "title": t.title,
+                    "done": not t.done, "category": t.category
                 }
-            );
+                if t.id == id else t
+                for t in tasks
+            ];
         }
 
         async def remove(id: str) -> None {
             await delete_task(id);
-            tasks = tasks.filter(lambda t: any -> bool { return t.id != id; });
+            tasks = [t for t in tasks if t.id != id];
         }
 
         async def generate_meal_list -> None {
@@ -1635,7 +1631,7 @@ h2 { margin: 0 0 16px 0; font-size: 1.2rem; color: #444; }
             meal_text = "";
         }
 
-        remaining = len(tasks.filter(lambda t: any -> bool { return not t.done; }));
+        remaining = len([t for t in tasks if not t.done]);
         total_cost = 0.0;
         for ing in ingredients { total_cost = total_cost + ing.cost; }
 
@@ -2102,9 +2098,7 @@ All the complete files are in the collapsible sections below. Create each file, 
 
         if isLoggedIn {
             totalCost = getTotal();
-            remaining = len(tasks.filter(
-                lambda t: any -> bool { return not t.done; }
-            ));
+            remaining = len([t for t in tasks if not t.done]);
             return
                 <div class="container">
                     <div class="header">
@@ -2313,30 +2307,25 @@ All the complete files are in the collapsible sections below. Create each file, 
     impl app.addTask -> None {
         if not taskText.strip() { return; }
         task = await add_task(taskText.strip());
-        tasks = tasks.concat([task]);
+        tasks = tasks + [task];
         taskText = "";
     }
 
     impl app.toggleTask(id: str) -> None {
         await toggle_task(id);
-        tasks = tasks.map(
-            lambda t: any -> any {
-                if t.id == id {
-                    return {
-                        "id": t.id, "title": t.title,
-                        "done": not t.done, "category": t.category
-                    };
-                }
-                return t;
+        tasks = [
+            {
+                "id": t.id, "title": t.title,
+                "done": not t.done, "category": t.category
             }
-        );
+            if t.id == id else t
+            for t in tasks
+        ];
     }
 
     impl app.deleteTask(id: str) -> None {
         await delete_task(id);
-        tasks = tasks.filter(
-            lambda t: any -> bool { return t.id != id; }
-        );
+        tasks = [t for t in tasks if t.id != id];
     }
 
     impl app.handleLogin -> None {
@@ -3131,9 +3120,7 @@ All the complete files are in the collapsible sections below. Create each file, 
 
         if isLoggedIn {
             totalCost = getTotal();
-            remaining = len(tasks.filter(
-                lambda t: any -> bool { return not t.done; }
-            ));
+            remaining = len([t for t in tasks if not t.done]);
             return
                 <div class="container">
                     <div class="header">
@@ -3344,35 +3331,30 @@ All the complete files are in the collapsible sections below. Create each file, 
         if not taskText.strip() { return; }
         response = root spawn AddTask(title=taskText);
         newTask = response.reports[0];
-        tasks = tasks.concat([{
+        tasks = tasks + [{
             "id": newTask.id,
             "title": newTask.title,
             "done": newTask.done,
             "category": newTask.category
-        }]);
+        }];
         taskText = "";
     }
 
     impl app.toggleTask(id: str) -> None {
         root spawn ToggleTask(task_id=id);
-        tasks = tasks.map(
-            lambda t: any -> any {
-                if t.id == id {
-                    return {
-                        "id": t.id, "title": t.title,
-                        "done": not t.done, "category": t.category
-                    };
-                }
-                return t;
+        tasks = [
+            {
+                "id": t.id, "title": t.title,
+                "done": not t.done, "category": t.category
             }
-        );
+            if t.id == id else t
+            for t in tasks
+        ];
     }
 
     impl app.deleteTask(id: str) -> None {
         root spawn DeleteTask(task_id=id);
-        tasks = tasks.filter(
-            lambda t: any -> bool { return t.id != id; }
-        );
+        tasks = [t for t in tasks if t.id != id];
     }
 
     impl app.handleLogin -> None {

@@ -338,7 +338,7 @@ cl {
             }
             result = root spawn create_task(title=title.trim());
             if result.reports {
-                tasks = tasks.concat([result.reports[0]]);
+                tasks = tasks + [result.reports[0]];
             }
             title = "";
         }

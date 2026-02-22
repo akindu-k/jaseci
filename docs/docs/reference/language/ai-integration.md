@@ -18,6 +18,9 @@ Jac's AI integration goes beyond simple API calls. With "Meaning Typed Programmi
 >
 > **Required Plugin:** `pip install byllm`
 
+!!! tip "Builtin `llm`"
+    The `llm` name is a **built-in** -- it is automatically available without imports. By default it uses the model configured in your `jac.toml` under `[plugins.byllm.model]` (defaults to `gpt-4o-mini`). You can override it in any file with `glob llm = Model(...)` for custom configuration. See [byLLM Reference](../plugins/byllm.md#default-model-configuration) for details.
+
 ## Meaning Typed Programming
 
 Meaning Typed Programming (MTP) is Jac's core AI paradigm. Your function signature -- the name, parameter names, and types -- becomes the specification. The LLM reads this "meaning" and generates appropriate behavior. This works because well-named functions already describe their intent; MTP just makes that intent executable.

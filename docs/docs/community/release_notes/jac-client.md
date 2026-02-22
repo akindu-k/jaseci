@@ -4,7 +4,11 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-client 0.2.20 (Unreleased)
 
-- 2 minor refactor/change.
+- **Idiomatic Comprehensions in Examples**: Replaced all `.map(lambda ...)` / `.filter(lambda ...)` calls with list comprehensions across all example apps (basic-full-stack, full-stack-with-auth, all-in-one, early-exit).
+- **Automatic Endpoint Caching**: The client runtime now automatically caches responses from reader endpoints (walkers and server functions) and invalidates caches when writer endpoints are called, using compiler-provided `endpoint_effects` metadata. Includes an LRU cache (500 entries, 60s TTL), request deduplication for concurrent identical calls, and automatic cache clearing on auth state changes. No manual `jacInvalidate()` or cache annotations needed.
+- **HMR Server-Side Reloading Refactor**: Improved HMR functionality with better handling of `.impl.jac` files and optimized caching to avoid unnecessary recompilations during development
+
+- 3 minor refactor/change.
 
 ## jac-client 0.2.19 (Latest Release)
 

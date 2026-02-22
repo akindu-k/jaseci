@@ -168,9 +168,7 @@ cl {
         }
 
         return <ul>
-            {tasks.map(lambda task: any -> any {
-                return <li key={task["id"]}>{task["title"]}</li>;
-            })}
+            {[<li key={task["id"]}>{task["title"]}</li> for task in tasks]}
         </ul>;
     }
 }
@@ -215,7 +213,7 @@ cl {
             if new_title.trim() {
                 result = root spawn add_task(title=new_title.trim());
                 if result.reports and result.reports.length > 0 {
-                    tasks = tasks.concat([result.reports[0]]);
+                    tasks = tasks + [result.reports[0]];
                 }
                 new_title = "";
             }
@@ -225,12 +223,11 @@ cl {
         async def handle_toggle(task_id: str) -> None {
             result = root spawn toggle_task(task_id=task_id);
             if result.reports and result.reports[0]["success"] {
-                tasks = tasks.map(lambda t: any -> any {
-                    if t["id"] == task_id {
-                        return {**t, "completed": not t["completed"]};
-                    }
-                    return t;
-                });
+                tasks = [
+                    {**t, "completed": not t["completed"]}
+                    if t["id"] == task_id else t
+                    for t in tasks
+                ];
             }
         }
 
@@ -238,9 +235,7 @@ cl {
         async def handle_delete(task_id: str) -> None {
             result = root spawn delete_task(task_id=task_id);
             if result.reports and result.reports[0]["success"] {
-                tasks = tasks.filter(lambda t: any -> bool {
-                    return t["id"] != task_id;
-                });
+                tasks = [t for t in tasks if t["id"] != task_id];
             }
         }
 
@@ -262,8 +257,8 @@ cl {
             {loading and <p>Loading...</p>}
 
             <ul className="task-list">
-                {tasks.map(lambda task: any -> any {
-                    return <li key={task["id"]}>
+                {[
+                    <li key={task["id"]}>
                         <input
                             type="checkbox"
                             checked={task["completed"]}
@@ -275,8 +270,9 @@ cl {
                         <button onClick={lambda -> None { handle_delete(task["id"]); }}>
                             Delete
                         </button>
-                    </li>;
-                })}
+                    </li>
+                    for task in tasks
+                ]}
             </ul>
         </div>;
     }
@@ -485,7 +481,7 @@ cl {
             if input_text.trim() {
                 result = root spawn add_task(title=input_text.trim());
                 if result.reports and result.reports.length > 0 {
-                    tasks = tasks.concat([result.reports[0]]);
+                    tasks = tasks + [result.reports[0]];
                 }
                 input_text = "";
             }
@@ -495,12 +491,7 @@ cl {
             result = root spawn toggle_task(task_id=task_id);
             if result.reports and result.reports.length > 0 {
                 updated = result.reports[0];
-                tasks = tasks.map(lambda t: any -> any {
-                    if t.id == task_id {
-                        return updated;
-                    }
-                    return t;
-                });
+                tasks = [updated if t.id == task_id else t for t in tasks];
             }
         }
 
@@ -523,15 +514,16 @@ cl {
 
             {not loading and (
                 <ul>
-                    {tasks.map(lambda t: any -> any {
-                        return <li
+                    {[
+                        <li
                             key={t.id}
                             style={{"textDecoration": t.completed and "line-through"}}
                             onClick={lambda -> None { toggle(t.id); }}
                         >
                             {t.title}
-                        </li>;
-                    })}
+                        </li>
+                        for t in tasks
+                    ]}
                 </ul>
             )}
         </div>;
