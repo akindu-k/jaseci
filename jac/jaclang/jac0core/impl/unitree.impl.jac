@@ -893,6 +893,7 @@ impl Module.init(
     self.stub_only = stub_only;
     self.impl_mod: list[Module] = [];
     self.test_mod: list[Module] = [];
+    self.variant_mod: list[Module] = [];
     self.src_terminals: list[Token] = terminals;
     self.is_raised_from_py: bool = False;
     self.has_syntax_errors: bool = False;

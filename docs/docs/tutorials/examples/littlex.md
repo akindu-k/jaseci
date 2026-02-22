@@ -39,7 +39,7 @@ Social networks are naturally graph-shaped. Jac's OSP model makes building them 
 ## Prerequisites
 
 - Jac installed (`pip install jaseci`)
-- Completed [What Makes Jac Different](../../quick-guide/what-makes-jac-different.md) and [Part 1: Todo App](../first-app/part1-todo-app.md)
+- Completed [What Makes Jac Different](../../quick-guide/what-makes-jac-different.md) and [Build an AI Day Planner](../first-app/build-ai-day-planner.md)
 - Basic understanding of Jac syntax
 
 **Key concepts used:**
@@ -47,8 +47,8 @@ Social networks are naturally graph-shaped. Jac's OSP model makes building them 
 | Concept | Where to Learn |
 |---------|----------------|
 | Nodes & edges | [What Makes Jac Different](../../quick-guide/what-makes-jac-different.md), [OSP Tutorial](../language/osp.md) |
-| Walkers & `report` | [OSP Tutorial](../language/osp.md), [Part 3](../first-app/part3-multi-user.md) |
-| `jac start` API | [Part 1: Todo App](../first-app/part1-todo-app.md) |
+| Walkers & `report` | [OSP Tutorial](../language/osp.md), [Day Planner](../first-app/build-ai-day-planner.md#part-6-multi-user-support) |
+| `jac start` API | [Day Planner](../first-app/build-ai-day-planner.md#part-4-building-the-backend) |
 | Typed edges | [OSP Tutorial](../language/osp.md#edges-named-relationships) |
 
 ---
@@ -195,6 +195,47 @@ walker load_feed {
     }
 }
 ```
+
+??? example "Try it: Standalone graph demo (no server needed)"
+    ```jac
+    import from datetime { datetime }
+
+    node Profile {
+        has username: str;
+    }
+
+    node Tweet {
+        has content: str,
+            created_at: str = "";
+    }
+
+    edge Post {}
+    edge Follow {}
+
+    with entry {
+        # Create profiles
+        alice = Profile(username="alice");
+        bob = Profile(username="bob");
+        root ++> alice;
+        root ++> bob;
+
+        # Alice follows Bob
+        alice +>: Follow() :+> bob;
+
+        # Both post tweets
+        t1 = Tweet(content="Hello from Alice!", created_at=datetime.now().isoformat());
+        alice +>: Post() :+> t1;
+
+        t2 = Tweet(content="Bob here!", created_at=datetime.now().isoformat());
+        bob +>: Post() :+> t2;
+
+        # Query Alice's feed (own + followed)
+        feed = [alice ->:Post:->] + [p ->:Post:-> for p in [alice ->:Follow:->]];
+        for tweet in feed {
+            print(f"  {tweet.content}");
+        }
+    }
+    ```
 
 ---
 

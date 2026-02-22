@@ -167,6 +167,9 @@ jac test -d tests/ -m 3
 jac test main.jac -t calculator_add -v
 ```
 
+!!! tip "File naming"
+    Avoid naming `.jac` files with a `test_` prefix (e.g., `test_utils.jac`), as this can conflict with Python's module import system. Use descriptive names like `utils_tests.jac` or `my_app.jac` instead.
+
 ---
 
 ## Test Output
@@ -320,6 +323,10 @@ test "graph connections" {
     # Test connections
     assert len([root -->]) == 1;
     assert len([kitchen -->]) == 1;
+    assert len([living -->]) == 1;
+    assert len([bedroom -->]) == 0;
+
+    # Test connectivity
     assert living in [kitchen ->:Door:->];
     assert bedroom in [living ->:Door:->];
 }
@@ -346,6 +353,10 @@ test "divide by zero" {
     } except ZeroDivisionError {
         assert True;  # Expected
     }
+}
+
+test "divide negative" {
+    assert divide(-10, 2) == -5;
 }
 ```
 
@@ -396,6 +407,11 @@ test "user valid" {
 
 test "user invalid email" {
     user = User(name="Alice", email="invalid");
+    assert not user.is_valid();
+}
+
+test "user empty name" {
+    user = User(name="", email="alice@example.com");
     assert not user.is_valid();
 }
 ```
@@ -624,5 +640,4 @@ test "calculation no message" {
 
 ## Related Resources
 
-- [Testing Tutorial](../tutorials/language/testing.md)
 - [CLI Reference](cli/index.md)
