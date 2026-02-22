@@ -4,8 +4,15 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.10.6 (Unreleased)
 
+- **Fix: Duplicate `__jacCallFunction` Import in `.cl.jac` with `.impl.jac`**: Fixed the ES codegen emitting duplicate `import { __jacCallFunction } from "@jac/runtime"` when both a `.cl.jac` file and its `.impl.jac` annex use `sv import`. Child module imports are now deduplicated by source path during merge.
+- **Variant Module Annexing (`.sv.jac`, `.cl.jac`, `.na.jac`)**: A module can now be split across variant files that are automatically discovered, compiled, and merged. Given `main.jac`, any sibling `main.sv.jac`, `main.cl.jac`, or `main.na.jac` files are annexed as variant modules with their respective code contexts (SERVER, CLIENT, NATIVE).
+- **Fix: Bare Impl Files Not Matched to Variant Modules**: Fixed `discover_annex_files` rejecting bare annex files (e.g., `foo.impl.jac`) when the source is a variant (e.g., `foo.cl.jac`) with no plain `foo.jac` head. Bare annex files now match any variant source unless a bare `.jac` head exists that would claim them.
+- **Fix: Bare-Dot Relative Import (`from . import x`) Not Resolved**: Fixed `import from . { x }` silently resolving to `UnknownType`. The import path is now computed directly from the current file's directory, ensuring sibling modules are correctly found and type-checked.
 - **Fix:**: update the jac-check command to print the file names of the files that failed to have clean error message.
 - **Refactor: Merge `JacSerializer` into `Serializer`**: Removed the `JacSerializer` wrapper class from `runtimelib.server` and merged its API-response behavior into `Serializer` via a new `api_mode: bool = False` parameter. Call `Serializer.serialize(obj, api_mode=True)` to get clean API output with `_jac_type`, `_jac_id`, and `_jac_archetype` metadata on `Archetype` objects (previously done by `JacSerializer`). Storage backends continue to use `Serializer.serialize(obj, include_type=True)` unchanged. Import from `jaclang.runtimelib.serializer`. This eliminates a redundant wrapper class with no unique serialization logic.
+- **ES Codegen: Near-Complete Primitive Test Coverage (92%)**: Added cross-backend equivalence tests for 110 additional primitive emitter interfaces (275/299 total), covering float operators, complex arithmetic, bytes methods (with full `_jac.bytes` runtime namespace), set/frozenset algebra and operators, and extra builtins. Fixed column-aware `expandtabs` for str and bytes, `complex.pow`/`complex.eq` mixed-type handling, and `ascii()` quoting to match Python semantics.
+- 3 Minor refactors/chages
+- **Fix: Walker `result.reports` in CLI Mode**: Fixed `report` keyword not populating `result.reports` when running walkers via `jac run` or `jac test`.
 
 ## jaclang 0.10.5 (Latest Release)
 
@@ -21,6 +28,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **ES Codegen: Expanded Primitive Coverage**: Added `bool()` with Python truthiness semantics (empty list/dict/set are falsy), `range()` builtin (supports `for i in range(n)`), `slice()` constructor, `bytearray()` constructor, dedicated `BoolEmitter` for correct `&`/`|`/`^` bool-returning bitwise ops, enhanced `format()` with format-spec support (`f`, `d`, `b`, `o`, `x`, `e`, `%`, width, alignment), and fixed `int()` to handle booleans and floats correctly via `Math.trunc(Number(x))`.
 - **Fix: Lexer Infinite Loop on Malformed JSX**: Fixed three infinite-loop scenarios where the lexer would hang forever when hitting EOF inside a non-NORMAL mode (JSX content, JSX tag, or f-string). Added a stuck detector in `tokenize()` that forces EOF when the lexer stops advancing or overshoots the source, preventing `jac run`, `jac start`, and `jac js` from hanging on malformed input (e.g., unterminated JSX like `<div>hello` with no closing tag).
 - **Fix: Bare `<` in JSX Content No Longer Hangs Lexer**: A `<` character in JSX content that does not start a valid tag (e.g., `<--`) is now consumed as text instead of causing an infinite loop. The text scanner only breaks on `<` when the next character forms a real JSX construct (`</`, `<>`, or `<` + identifier).
+- **Fix: Grammar Extraction Accuracy**: Fixed multiple issues in `jac grammar` output: `atomic_chain` and `jsx_attributes` now show `*` repetition, `compare` no longer duplicates operators, `assignment_with_target` correctly extracts ternary expressions, excessive top-level `?` wrapping is stripped from multi-branch rules, f-string tokens use proper quoting, and added `GPlus` (one-or-more `+`) grammar expression type.
 - 1 Minor refactors/chages
 
 ## jaclang 0.10.3

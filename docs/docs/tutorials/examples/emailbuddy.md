@@ -32,15 +32,15 @@ EmailBuddy demonstrates three key Jac principles:
 
 ## Prerequisites & Key Concepts
 
-- Completed [Part 2: Add AI](../first-app/part2-ai-features.md) (AI integration basics)
+- Completed [Build an AI Day Planner](../first-app/build-ai-day-planner.md) (AI integration basics)
 - Familiar with [OSP Tutorial](../language/osp.md) (nodes, edges, walkers)
 
 | Concept | Where to Learn |
 |---------|----------------|
-| `by llm()` functions | [byLLM Quickstart](../ai/quickstart.md), [Part 2](../first-app/part2-ai-features.md) |
+| `by llm()` functions | [byLLM Quickstart](../ai/quickstart.md), [Day Planner](../first-app/build-ai-day-planner.md#part-5-making-it-smart-with-ai) |
 | Agentic patterns | [Agentic AI Tutorial](../ai/agentic.md) |
 | Nodes & graph modeling | [OSP Tutorial](../language/osp.md) |
-| Walker APIs | [Part 3](../first-app/part3-multi-user.md) |
+| Walker APIs | [Day Planner](../first-app/build-ai-day-planner.md#part-6-multi-user-support) |
 
 ---
 
@@ -269,6 +269,30 @@ def summarize(
 ```
 
 This prevents the context window from overflowing as the walker explores more nodes.
+
+??? example "Try it: AI classification standalone"
+    ```jac
+    import from byllm.lib { Model }
+
+    glob llm = Model(model_name="gpt-4o-mini");
+
+    enum EmailCategory {
+        WORK = "work",
+        PERSONAL = "personal",
+        SPAM = "spam"
+    }
+
+    def classify_email(subject: str, body: str) -> EmailCategory by llm();
+    sem classify_email = "Classify the email based on its subject and body content";
+
+    with entry {
+        result = classify_email(
+            subject="Q3 Budget Review Meeting",
+            body="Please review the attached budget spreadsheet before Friday's meeting."
+        );
+        print(f"Category: {result}");
+    }
+    ```
 
 ---
 

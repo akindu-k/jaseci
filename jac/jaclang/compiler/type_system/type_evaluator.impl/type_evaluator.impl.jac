@@ -573,25 +573,6 @@ impl TypeEvaluator._get_type_of_symbol(symbol: uni.Symbol) -> TypeBase {
         # This actually defined in the function getTypeForDeclaration();
         # Pyright has DeclarationType.Variable.
         case uni.Name():
-            # ---- Handle SepcialForm in typing.pyi ----
-            # NOTE: This is different from pyright, that does get the same logic in
-            # getTypeOfAnnotation() which we don't have.
-            if node_.loc.mod_path {
-                node_mod_path = Path(node_.loc.mod_path).resolve();
-                typing_stub_path = Path(self._TYPING_STUB_FILE_PATH).resolve();
-                builtins_stub_path = Path(self._BUILTINS_STUB_FILE_PATH).resolve();
-                if node_mod_path in (typing_stub_path, builtins_stub_path) {
-                    match node_.sym_name {
-                        case "Final":
-                            return self.prefetch.final_class;
-
-                        case "LiteralString":
-                            return self.prefetch.literal_string_class;
-
-                    }
-                }
-            }
-
             # ---- Handle tuple/list unpacking targets ----
             # When a Name is inside a TupleVal/ListVal that is the target
             # of an Assignment, infer its type from the RHS tuple element.
@@ -898,6 +879,10 @@ impl TypeEvaluator.get_type_of_magic_method_call(
                     }
                 }
                 # Validate arguments for each overloaded function.
+                # Prefer overloads with concrete (non-Unknown) return types
+                # to avoid broken overloads (e.g. LiteralString) shadowing
+                # correct ones (e.g. str.__add__(str) -> str).
+                _fallback_result: TypeBase | None = None;
                 for fn in overloaded_fns {
                     arg_param_match = self.match_args_to_params(
                         arg_nodes, node_for_error, fn, checking_overload=True
@@ -906,9 +891,17 @@ impl TypeEvaluator.get_type_of_magic_method_call(
                         if self.validate_arg_types(
                             arg_param_match, checking_overload=True
                         ) {
-                            return fn.return_type or types.UnknownType();
+                            if not isinstance(fn.return_type, types.UnknownType) {
+                                return fn.return_type or types.UnknownType();
+                            }
+                            if _fallback_result is None {
+                                _fallback_result = fn.return_type;
+                            }
                         }
                     }
+                }
+                if _fallback_result is not None {
+                    return _fallback_result;
                 }
                 # If we reached here, none of the overloads matched.
                 # Return None to allow fallback to reverse magic method (e.g., __radd__).
@@ -1221,6 +1214,11 @@ impl TypeEvaluator._load_stub_module(path: str) -> uni.Module {
     if not os.path.exists(path) {
         raise FileNotFoundError(f"Stub file not found at {path}") ;
     }
+    # Convert to absolute path so this function and _import_module_from_path share the same hub key.
+    resolved_path = str(Path(path).resolve());
+    if resolved_path in self.program.mod.hub {
+        return self.program.mod.hub[resolved_path];
+    }
     file_content = read_file_with_encoding(path);
     uni_source = uni.Source(file_content, path);
     mod = PyastBuildPass(
@@ -1228,7 +1226,7 @@ impl TypeEvaluator._load_stub_module(path: str) -> uni.Module {
         prog=self.program,
     ).ir_out;
     SymTabBuildPass(ir_in=mod, prog=self.program);
-    self.program.mod.hub[path] = mod;
+    self.program.mod.hub[resolved_path] = mod;
     return mod;
 }
 

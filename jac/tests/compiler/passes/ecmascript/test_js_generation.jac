@@ -54,25 +54,33 @@ def assert_balanced_syntax(js_code: str, fixture_name: str) -> None {
 }
 
 def assert_no_jac_keywords(js_code: str, fixture_name: str) -> None {
-    """Verify Jac-specific keywords are absent from generated JavaScript."""
+    """Verify Jac-specific keywords are absent from generated JavaScript.
+
+    Uses regex word-boundary matching so that Jac keywords appearing as
+    JS variable names (e.g. ``let has = false;`` inside the _jac runtime)
+    do not trigger false positives.
+    """
+    import re;
+
+    # Each entry: (keyword, pattern that matches Jac *statement* usage)
+    # e.g. ``has varname`` at the start of a statement, not ``let has = ...``
     jac_keywords = [
-        "can ",
-        "has ",
-        "obj ",
-        "walker ",
-        "node ",
-        "edge ",
-        "visit ",
-        "spawn ",
-        "disengage ",
-        "here ",
-        "root ",
+        ("can", r"(?<![.\w])can\s+\w+\s*[\({]"),
+        ("has", r"(?<![.\w])has\s+\w+\s*[:=;]"),
+        ("obj", r"(?<![.\w])obj\s+\w+"),
+        ("walker", r"(?<![.\w])walker\s+\w+"),
+        ("node", r"(?<![.\w])node\s+\w+"),
+        ("edge", r"(?<![.\w])edge\s+\w+"),
+        ("visit", r"(?<![.\w])visit\s"),
+        ("spawn", r"(?<![.\w])spawn\s"),
+        ("disengage", r"(?<![.\w])disengage\b"),
+        ("here", r"(?<![.\w])here\b"),
 
     ];
 
-    for kw in jac_keywords {
-        assert kw not in js_code , (
-            f"Jac keyword '{kw.strip()}' leaked into JavaScript for {fixture_name}"
+    for (kw_name, pattern) in jac_keywords {
+        assert not re.search(pattern, js_code) , (
+            f"Jac keyword '{kw_name}' leaked into JavaScript for {fixture_name}"
         );
     }
 }
@@ -674,6 +682,28 @@ test "separated defpub generates rpc stubs" {
             "RPC stub for '" + func_name + "' should be an async function"
         );
     }
+
+    assert_balanced_syntax(js_code, fixture);
+}
+
+test "cl.jac with impl.jac does not duplicate __jacCallFunction import" {
+    # When a .cl.jac file has a separate .impl.jac file, both the main pass
+    # and the child pass for the impl module may independently inject
+    # __jacCallFunction from @jac/runtime. The import must appear only once.
+    fixture = "defpub_impl_dedup.cl.jac";
+    js_code = compile_fixture_to_js(fixture, FIXTURES);
+
+    # The import must be present
+    import_line = 'import { __jacCallFunction } from "@jac/runtime";';
+    assert import_line in js_code , (
+        "__jacCallFunction import from @jac/runtime is required"
+    );
+
+    # It must appear exactly once (no duplicates)
+    import_count = js_code.count(import_line);
+    assert import_count == 1 , (
+        f"Expected exactly 1 __jacCallFunction import, found {import_count}"
+    );
 
     assert_balanced_syntax(js_code, fixture);
 }
