@@ -67,6 +67,11 @@ impl __jacSpawn(left: str, right: str = "", fields: dict = {}) -> any {
         url, {"method": "POST", "headers": headers, "body": JSON.stringify(fields)}
     );
     if not response.ok {
+        if response.status == 401 {
+            __removeLocalStorage("jac_token");
+            window.location.reload();
+            return {};
+        }
         error_text = await response.text();
         walker_name = f"{left}/{right}" if right else left;
         raise Exception(f"Walker {walker_name} failed: {error_text}") ;

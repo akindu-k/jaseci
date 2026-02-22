@@ -33,6 +33,19 @@ myapp/
     └── main.css
 ```
 
+### The `.cl.jac` Convention
+
+Files ending in `.cl.jac` are automatically treated as client-side code -- no `cl { }` wrapper needed:
+
+```jac
+# components/Header.cl.jac -- automatically client-side
+def:pub Header() -> JsxElement {
+    return <header>My App</header>;
+}
+```
+
+This is equivalent to wrapping the contents in `cl { }` in a regular `.jac` file.
+
 ---
 
 ## Client Blocks
@@ -684,6 +697,8 @@ content = ["./src/**/*.{jac,tsx,jsx}"]
 | `jac setup desktop` | One-time desktop target setup (Tauri) |
 | `jac setup pwa` | One-time PWA setup (icons directory) |
 | `jac add --npm <pkg>` | Add npm package |
+| `jac add --npm --dev <pkg>` | Add npm dev dependency |
+| `jac add --npm` | Install all npm dependencies from jac.toml |
 | `jac remove --npm <pkg>` | Remove npm package |
 
 ### jac build
@@ -754,6 +769,7 @@ jac-client extends several core commands:
 | `jac create` | `--skip` | Skip npm package installation |
 | `jac start` | `--client <target>` | Client build target for dev server |
 | `jac add` | `--npm` | Add npm (client-side) dependency |
+| `jac add` | `--npm --dev` | Add npm dev dependency |
 | `jac remove` | `--npm` | Remove npm (client-side) dependency |
 
 ---

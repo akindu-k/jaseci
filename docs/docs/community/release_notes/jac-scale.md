@@ -4,6 +4,12 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.1.12 (Unreleased)
 
+- **SSO Frontend Callback Redirect**: SSO callback endpoints now support automatic redirection to frontend applications. Configure `client_auth_callback_url` in `jac.toml` to redirect with token/error parameters instead of returning JSON, enabling seamless browser-based OAuth flows.
+
+## jac-scale 0.1.6 (Latest Release)
+
+## jac-scale 0.1.9 (Latest Release)
+
 - **Refactor: Modular JacAPIServer Architecture**: Split the monolithic `serve.impl.jac` into three focused impl files using mixin composition:
   - `serve.core.impl.jac`: Auth, user management, JWT, API keys, server start/postinit
   - `serve.endpoints.impl.jac`: Walker, function, webhook, WebSocket endpoint registration
@@ -49,7 +55,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 ## jac-scale 0.1.7
 
 - **KWESC_NAME syntax changed from `<>` to backtick**: Updated keyword-escaped names from `<>` prefix to backtick prefix to match the jaclang grammar change.
-- **Update syntax for TYPE_OP removal**: Replaced backtick type operator syntax (`` `root ``) with `Root` and filter syntax (`` (`?Type) ``) with `(?:Type)` across all docs, tests, examples, and README.
+- **Update syntax for TYPE_OP removal**: Replaced backtick type operator syntax (`` `root ``) with `Root` and filter syntax (``(`?Type)``) with `(?:Type)` across all docs, tests, examples, and README.
 
 ## jac-scale 0.1.6
 
