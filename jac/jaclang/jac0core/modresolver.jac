@@ -29,7 +29,15 @@ def get_jac_search_paths(base_path: (str | None) = None) -> list[str] {
             paths.append(user_dir);
         }
     }
-    return `list(`dict.fromkeys(filter(None, paths)));
+    return `list(
+        `dict.fromkeys(
+            [
+                p
+                for p in paths
+                if p
+            ]
+        )
+    );
 }
 
 """Construct a list of paths to search for Python modules."""
@@ -39,7 +47,15 @@ def get_py_search_paths(base_path: (str | None) = None) -> list[str] {
         paths.append(base_path);
     }
     paths.append(os.getcwd());
-    return `list(`dict.fromkeys(filter(None, paths)));
+    return `list(
+        `dict.fromkeys(
+            [
+                p
+                for p in paths
+                if p
+            ]
+        )
+    );
 }
 
 def _candidate_from(base: str, parts: list[str]) -> (tuple[(str, str)] | None) {
@@ -84,6 +100,23 @@ def resolve_module(target: str, base_path: str) -> tuple[(str, str)] {
     if (os.path.exists(other_target) and os.path.isfile(other_target)) {
         return (os.path.normpath(other_target), 'other');
     }
+    # Check typeshed FIRST for non-relative imports (before Python stdlib fallback)
+    if not target.startswith('.') {
+        parts = target.split('.');
+        level = 0;
+        while ((level < len(parts)) and (parts[level] == '')) {
+            level += 1;
+        }
+        actual_parts = parts[level:];
+        typeshed_paths = get_typeshed_paths();
+        for typeshed_dir in typeshed_paths {
+            res = _candidate_from_typeshed(typeshed_dir, actual_parts);
+            if res {
+                return res;
+            }
+        }
+    }
+    # Fallback to Python's importlib for modules not in typeshed
     if not target.startswith('.') {
         try {
             spec = importlib.util.find_spec(target);
@@ -120,19 +153,6 @@ def resolve_module(target: str, base_path: str) -> tuple[(str, str)] {
         res = _candidate_from(sp, actual_parts);
         if res {
             return res;
-        }
-    }
-    typeshed_paths = get_typeshed_paths();
-    for typeshed_dir in typeshed_paths {
-        res = _candidate_from_typeshed(typeshed_dir, actual_parts);
-        if res {
-            return res;
-        }
-    }
-    if typeshed_paths {
-        stub_pyi_path = os.path.join(typeshed_paths[0], *actual_parts) + '.pyi';
-        if os.path.isfile(stub_pyi_path) {
-            return (stub_pyi_path, 'pyi');
         }
     }
     base_dir = base_path if os.path.isdir(base_path) else os.path.dirname(base_path);

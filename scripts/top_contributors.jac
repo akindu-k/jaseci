@@ -166,7 +166,7 @@ def generate_html_table(contributors: list[dict[str, Any]], days: int) -> str {
     );
     lines.append("<table>");
     lines.append(
-        "<thead><tr><th>Contributor</th><th>Commits</th><th>Active Days</th></tr></thead>"
+        "<thead><tr><th>Contributor</th><th>PRs</th><th>Active Days</th></tr></thead>"
     );
     lines.append("<tbody>");
     for contributor in contributors {
