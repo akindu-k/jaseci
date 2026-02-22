@@ -10,7 +10,6 @@ ScaleTieredMemory extends TieredMemory by swapping in these backends.
 Falls back to jaclang's SqliteMemory when MongoDB is unavailable.
 """
 import logging;
-import os;
 import redis;
 import from collections.abc { Callable, Generator, Iterable }
 import from pickle { dumps, loads }
