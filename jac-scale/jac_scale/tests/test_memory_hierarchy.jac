@@ -266,8 +266,12 @@ test "MongoDB data persists after server restart" {
         token = register_user(base_url, "testuser", "pass123");
 
         # Create tasks
-        post_request(base_url, "/walker/CreateTask", {"id": 100, "title": "Task 100"}, token);
-        post_request(base_url, "/walker/CreateTask", {"id": 101, "title": "Task 101"}, token);
+        post_request(
+            base_url, "/walker/CreateTask", {"id": 100, "title": "Task 100"}, token
+        );
+        post_request(
+            base_url, "/walker/CreateTask", {"id": 101, "title": "Task 101"}, token
+        );
 
         # Verify data exists before restart
         tasks_before = post_request(base_url, "/walker/GetAllTasks", {}, token);
@@ -311,7 +315,7 @@ test "MongoDB data persists after server restart" {
         }
     } finally {
         # Cleanup
-        system_dbs = {"admin", "config", "local"};
+        system_dbs = {"admin","config","local"};
         for db_name in mongo_client.list_database_names() {
             if db_name not in system_dbs {
                 mongo_client.drop_database(db_name);
