@@ -1839,7 +1839,10 @@ class JacAPIServer {
                 key: JacSerializer.serialize(value) for (key, value) in args.items()
             },
             'globals': globals_payload,
-            'argOrder': arg_order
+            'argOrder': arg_order,
+            'endpointEffects': introspector._client_manifest.get(
+                'endpoint_effects', {}
+            )
         };
         safe_initial_json = json.dumps(initial_state).replace('</', '<\\/');
         page = f'<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><title>{html.escape(

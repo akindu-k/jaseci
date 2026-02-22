@@ -210,6 +210,7 @@ obj EsastGenPass(BaseAstGenPass[es.Statement]) {
         nd: uni.BinaryExpr, parts: SpawnCallParts
     ) -> es.AwaitExpression;
 
+    def _analyze_body_effects(body_nodes: Sequence[uni.UniNode]) -> dict;
     def _collect_stmt_body(body: (Sequence[uni.UniNode] | None)) -> list[es.Statement];
     def _get_ast_or_default(
         nd: (uni.UniNode | None),
