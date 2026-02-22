@@ -241,7 +241,7 @@ test "MongoDB data persists after server restart" {
         os.remove(session_file);
     }
 
-    # Start Mongo container (no Redis to isolate MongoDB behavior)
+    # Start Mongo container
     mongo_container = MongoDbContainer("mongo:latest");
     mongo_container.start();
 
@@ -249,8 +249,6 @@ test "MongoDB data persists after server restart" {
     mongo_client = MongoClient(mongo_uri);
 
     os.environ["MONGODB_URI"] = mongo_uri;
-    os.environ.pop("REDIS_URL", None);
-
     assert "jac_db" not in mongo_client.list_database_names();
 
     port = get_free_port();
@@ -277,9 +275,15 @@ test "MongoDB data persists after server restart" {
         tasks_before = post_request(base_url, "/walker/GetAllTasks", {}, token);
         assert len(tasks_before) == 2 , "Should have 2 tasks before restart";
 
+        time.sleep(0.5);
+
         # Verify MongoDB has the data
         doc_count_before = collection.count_documents({"type": "Task"});
-        assert doc_count_before == 2 , f"MongoDB should have 2 Task documents, got {doc_count_before}";
+        total_docs = collection.count_documents({});
+        assert doc_count_before == 2 , (
+            f"MongoDB should have 2 Task documents, got {doc_count_before}. "
+            f"Total documents in MongoDB: {total_docs}"
+        );
 
         # Stop server #1
         server1.terminate();
