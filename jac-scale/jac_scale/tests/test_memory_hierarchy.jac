@@ -260,8 +260,18 @@ test "MongoDB data persists after server restart" {
         db = mongo_client["jac_db"];
         collection = db["anchors"];
 
+        mongo_doc_initial_count = collection.count_documents({});
+        assert mongo_doc_initial_count == 2 , (
+            "Initial docs should be 2 (super root, guest_user)"
+        );
+
         # Register user and create data
         token = register_user(base_url, "testuser", "pass123");
+
+        mongo_doc_after_user_creation_count = collection.count_documents({});
+        assert mongo_doc_after_user_creation_count == 3 , (
+            "After user creation docs should be 3 (super root, guest_user, created user)"
+        );
 
         # Create tasks
         post_request(
@@ -271,46 +281,43 @@ test "MongoDB data persists after server restart" {
             base_url, "/walker/CreateTask", {"id": 101, "title": "Task 101"}, token
         );
 
-        # Verify data exists before restart
-        tasks_before = post_request(base_url, "/walker/GetAllTasks", {}, token);
-        assert len(tasks_before) == 2 , "Should have 2 tasks before restart";
-
-        time.sleep(0.5);
-
-        # Verify MongoDB has the data
-        doc_count_before = collection.count_documents({"type": "Task"});
-        total_docs = collection.count_documents({});
-        assert doc_count_before == 2 , (
-            f"MongoDB should have 2 Task documents, got {doc_count_before}. "
-            f"Total documents in MongoDB: {total_docs}"
+        mongo_doc_count_after_task_creation = collection.count_documents({});
+        assert mongo_doc_count_after_task_creation == 7 , (
+            "After task creation docs should be 7 (prev 3 + 2 anchors per task)"
         );
 
-        # Stop server #1
+        # Verify data exists in API before restart
+        tasks_before = post_request(base_url, "/walker/GetAllTasks", {}, token);
+        assert len(tasks_before) == 2 , "Should have 2 tasks in API before restart";
+
+        # Stop server #1 - this triggers commit() on close, persisting to MongoDB
         server1.terminate();
         with contextlib.suppress(Exception) {
             server1.wait(timeout=5);
         }
         time.sleep(1);
 
-        # Start server #2 (restart)
+        # Start server #2 (restart) - THE KEY TEST
         server2 = start_server(FIXTURES_DIR, JAC_FILE, port);
 
-        # Retrieve data after restart
+        # Verify MongoDB data persisted after restart
+        mongo_doc_count_after_restart = collection.count_documents({});
+        assert mongo_doc_count_after_restart == 7 , (
+            f"MongoDB docs should persist after restart. Expected 7, got {mongo_doc_count_after_restart}"
+        );
+
+        # Retrieve data after restart - this is what the fix enables
         tasks_after = post_request(base_url, "/walker/GetAllTasks", {}, token);
 
         # Assert: Data should be retrievable after restart
         assert len(tasks_after) == 2 , (
             f"Expected 2 tasks after restart, got {len(tasks_after)}. "
-            f"MongoDB data was not retrieved after server restart."
+            f"Data created before restart should be accessible after restart."
         );
 
         task_ids = {task["id"] for task in tasks_after};
         assert 100 in task_ids , "Task 100 not found after restart";
         assert 101 in task_ids , "Task 101 not found after restart";
-
-        # Verify MongoDB still has the data
-        doc_count_after = collection.count_documents({"type": "Task"});
-        assert doc_count_after == 2 , f"Expected 2 Task documents in MongoDB after restart, got {doc_count_after}";
 
         # Teardown server2
         server2.terminate();
