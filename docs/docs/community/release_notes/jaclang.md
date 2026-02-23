@@ -2,11 +2,16 @@
 
 This document provides a summary of new features, improvements, and bug fixes in each version of **Jaclang**. For details on changes that might require updates to your existing code, please refer to the [Breaking Changes](../breaking-changes.md) page.
 
-## jaclang 0.10.6 (Unreleased)
+## jaclang 0.11.1 (Unreleased)
+
+- **Remove Vendored pluggy and interegular**: Replaced the vendored `pluggy` library (~1,700 lines) with a lightweight custom plugin system (`jaclang/plugin.py`, ~200 lines) that provides the same hook spec/impl/dispatch API. Removed the unused vendored `interegular` library (~2,200 lines).
+
+## jaclang 0.11.0 (Latest Release)
 
 - **Automatic Endpoint Caching**: The compiler now statically analyzes walker and server function bodies to classify endpoints as readers or writers, and propagates this metadata (`endpoint_effects`) through the `ClientManifest` to the client runtime. Reader endpoints are automatically cached on the client side, and writer endpoints auto-invalidate overlapping reader caches based on shared node types -- zero developer configuration required.
 - **HMR Server-Side Reloading Refactor**: Improved HMR functionality with better handling of `.impl.jac` files and optimized caching to avoid unnecessary recompilations during development
 - **Builtin `llm` Name**: `llm` is now a builtin name in the Jac runtime, enabling `by llm()` syntax without requiring an explicit import or `glob llm` declaration. The runtime provides a stub default that plugins (e.g. byllm) override with a fully configured LLM model.
+- **Fix: Impl Block Variables Lose Type Info Across Files**: Fixed a bug where variables declared with `has` (e.g., `has tasks: list = []`) in a component lost their type annotation when referenced from a separate `.impl.jac` file. The shadowed symbol fixup was also optimized from O(N*M) to O(N+M) by batching lookups and traversing impl body nodes in a single pass.
 - **Fix: Duplicate `__jacCallFunction` Import in `.cl.jac` with `.impl.jac`**: Fixed the ES codegen emitting duplicate `import { __jacCallFunction } from "@jac/runtime"` when both a `.cl.jac` file and its `.impl.jac` annex use `sv import`. Child module imports are now deduplicated by source path during merge.
 - **Variant Module Annexing (`.sv.jac`, `.cl.jac`, `.na.jac`)**: A module can now be split across variant files that are automatically discovered, compiled, and merged. Given `main.jac`, any sibling `main.sv.jac`, `main.cl.jac`, or `main.na.jac` files are annexed as variant modules with their respective code contexts (SERVER, CLIENT, NATIVE).
 - **Fix: Bare Impl Files Not Matched to Variant Modules**: Fixed `discover_annex_files` rejecting bare annex files (e.g., `foo.impl.jac`) when the source is a variant (e.g., `foo.cl.jac`) with no plain `foo.jac` head. Bare annex files now match any variant source unless a bare `.jac` head exists that would claim them.
@@ -16,6 +21,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Refactor: Native Jac Generics in Primitives**: Replaced Python-style `Generic[(V, C)]` with native Jac bracket syntax `[V, C]` across all emitter classes in `primitives.jac` and removed unused `TypeVar`/`Generic` imports.
 - **Fix: `jac format` Misplaces Comments Around Generic Type Params**: Fixed `jac format` moving section comments (e.g., `# === String Types ===`) into the `[V, C]` brackets of the preceding class. The parser was generating synthetic comma tokens between type parameters with incorrect source locations; `parse_type_params` now preserves the real comma tokens from the source.
 - 4 Minor refactors/chages
+- **Native Codegen: Expanded Primitive Coverage**: Added 45 new LLVM IR emitter implementations and inline codegen across 8 emitters.
 - **Native Codegen: Expanded Primitive Coverage**: Added 17 new LLVM IR emitter implementations across 6 emitters: IntEmitter (`conjugate`, `bit_length`, `bit_count`), FloatEmitter (`conjugate`, `is_integer`, `op_floordiv`), StrEmitter (`title`, `rfind`, `ljust`, `rjust`, `zfill`), SetEmitter (`clear`, `discard`, `copy`), ListEmitter (`extend`, `insert`), and BuiltinEmitter (`bool`). Fixed string comparison operators (`<`, `>`, `<=`, `>=`) via `strcmp` and added float floor division (`fdiv` + `floor`). Fixed `rfind` infinite loop on empty substring. 108/299 implemented (36%), 105/299 tested (35%).
 - **ES Codegen: Comprehension Support (Set, Dict, Nested Loops)**: Added `SetCompr` → `new Set(...)`, `DictCompr` → `Object.fromEntries(...)`, and nested loop → `.flatMap()` chain support to the ES transpile pass. Fixed arrow function parenthesization for destructuring params (`([k, v]) => ...`). Includes 17 new test cases covering all comprehension types.
 - **Fix: Walker `result.reports` in CLI Mode**: Fixed `report` keyword not populating `result.reports` when running walkers via `jac run` or `jac test`.
@@ -23,7 +29,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Bootstrap Compiler (jac0) Native Generic Support**: Extended the jac0 bootstrap transpiler to parse and emit PEP 695 generic class syntax (`class Foo[T, V](Base)`) and type alias statements (`type Alias[T] = Expr`), enabling jac0core infrastructure files to use native Jac generics instead of Python-style `Generic[T]`/`TypeVar` patterns.
 - **Migrate jac0core and Compiler Passes to Native Generics**: Replaced `Generic[(T, V)]` inheritance and `TypeVar` declarations with native `[T, V]` syntax across `transform.jac`, `unitree.jac`, `base_ast_gen_pass.jac`, and all `Transform[(X, Y)]` subscription sites in the compiler pipeline.
 
-## jaclang 0.10.5 (Latest Release)
+## jaclang 0.10.5
 
 - **Fix: `sv import` of `def:pub` Functions Generates RPC Stubs**: Fixed `sv import from module { func }` in `.cl.jac` files not generating for `def:pub` server functions.
 - **Fix: Type Narrowing Infinite Loop on Large Files**: Fixed `jac check` hanging indefinitely on large `.jac` files (e.g. standalone `.impl.jac` modules). The backward CFG walk in `_compute_narrowed_at` had no depth bound, causing combinatorial explosion when the module-level CFG contained hundreds of basic blocks. Added a depth limit to the walk; narrowing beyond the limit conservatively returns the declared type.

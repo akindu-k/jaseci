@@ -287,3 +287,4 @@ banners.jac
 prim_float_cmp.jac
 prim_builtins_extra.jac
 features_test_ui.cl.jac
+prim_dict_extra.jac
