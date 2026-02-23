@@ -46,9 +46,7 @@ test "find_nodes queries persisted graph" {
     db = kvstore(db_name='jac_db', db_type='mongodb', uri=MONGO_URI);
 
     # Build and persist graph
-    spawn BuildGraph()
-    on
-    root();
+    BuildGraph() spawn root;
 
     # Query with find_nodes
     young = list(db.find_nodes('User', {'age': {'$lt': 28}}));
