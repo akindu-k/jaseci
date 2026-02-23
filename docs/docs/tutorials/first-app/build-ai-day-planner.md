@@ -646,6 +646,22 @@ cl def:pub app -> JsxElement {
 
 **`has`** inside a component declares **reactive state**. When `tasks` or `task_text` changes, the UI automatically re-renders -- same idea as React's `useState`, but declared as simple properties.
 
+??? info "You can also use React's `useState` directly"
+    Since Jac's client-side code compiles to JavaScript that runs in a React context, you can import and use `useState` from React directly if you prefer:
+
+    ```jac
+    cl import from react { useState }
+
+    cl def:pub app -> JsxElement {
+        (tasks, set_tasks) = useState([]);
+        (task_text, set_task_text) = useState("");
+
+        # Use set_tasks([...]) and set_task_text("...") to update state
+    }
+    ```
+
+    The `has` syntax is Jac's idiomatic approach -- it's more concise and handles the getter/setter pattern for you behind the scenes. But if you're coming from React and prefer the explicit `useState` hook, it works just the same.
+
 **Lifecycle Hooks**
 
 **`can with entry`** runs when the component first mounts (like React's `useEffect` on mount):
@@ -657,6 +673,26 @@ cl def:pub app -> JsxElement {
 ```
 
 This fetches all tasks from the server when the page loads.
+
+??? info "You can also use React's `useEffect` directly"
+    If you prefer React's hooks, you can import and use `useEffect` directly:
+
+    ```jac
+    cl import from react { useEffect }
+
+    cl def:pub app -> JsxElement {
+        # ...
+
+        useEffect(lambda -> None {
+            async def load -> None {
+                tasks = await get_tasks();
+            }
+            load();
+        }, []);
+    }
+    ```
+
+    The `can with entry` syntax is Jac's shorthand for a `useEffect` with an empty dependency array (run once on mount). For more advanced cases like watching specific dependencies, you can use `useEffect` directly with the appropriate dependency list.
 
 **Lambdas**
 

@@ -50,7 +50,7 @@ import from jaclang.jac0core.constructs {
 }
 import from jaclang.jac0core.modresolver { infer_language }
 import from jaclang.jac0core.mtp { MTIR, Info, MTRuntime }
-import from jaclang.vendor { pluggy }
+import from jaclang { plugin as pluggy }
 
 with entry {
     if TYPE_CHECKING {
