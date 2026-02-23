@@ -2,14 +2,16 @@
 
 This document provides a summary of new features, improvements, and bug fixes in each version of **Jac-Scale**. For details on changes that might require updates to your existing code, please refer to the [Breaking Changes](../breaking-changes.md) page.
 
-## jac-scale 0.1.12 (Unreleased)
+## jac-scale 0.2.1 (Unreleased)
+
+## jac-scale 0.2.0 (Latest Release)
 
 - **SSO Frontend Callback Redirect**: SSO callback endpoints now support automatic redirection to frontend applications. Configure `client_auth_callback_url` in `jac.toml` to redirect with token/error parameters instead of returning JSON, enabling seamless browser-based OAuth flows.
 - **Graph Visualization Tests**: Added tests for `/graph` and `/graph/data` endpoints.
 
-## jac-scale 0.1.6 (Latest Release)
+## jac-scale 0.1.6
 
-## jac-scale 0.1.9 (Latest Release)
+## jac-scale 0.1.9
 
 - **Refactor: Modular JacAPIServer Architecture**: Split the monolithic `serve.impl.jac` into three focused impl files using mixin composition:
   - `serve.core.impl.jac`: Auth, user management, JWT, API keys, server start/postinit
@@ -19,7 +21,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Remove Authorization header input from Swagger UI**: The `Authorization` header is no longer exposed as a visible text input field in Swagger UI for walker, function, and API key endpoints. Authentication tokens are now read transparently from the standard `Authorization` request header (accessible via the lock icon), consistent with the `update_username` and `update_password` endpoints.
 - **Fix: MongoDB data not retrieved after server restart**: Resolved a bug where nodes and edges created before a server restart were not visible on subsequent requests when using `MONGODB_URI`.
 
-## jac-scale 0.1.11 (Latest Release)
+## jac-scale 0.1.11
 
 - **Graph Visualization Endpoint (`/graph`)**: Added a built-in `/graph` endpoint that serves an interactive graph visualization UI in the browser.
 
