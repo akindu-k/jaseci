@@ -1,8 +1,7 @@
 """Test serialization and persistence of social graph nodes."""
 import contextlib;
 import from jaclang.runtimelib.serializer { Serializer }
-import from jaclang.runtimelib.context { root }
-import from jac_scale.tests.fixtures.social_graph { User, Post, BuildGraph }
+import from jac_scale.tests.fixtures.social_graph { User, Post, BuildGraph, QueryGraph }
 import from jac_scale.lib { kvstore }
 import from jac_scale.db { close_all_db_connections }
 import from testcontainers.mongodb { MongoDbContainer }
@@ -41,17 +40,28 @@ test "serialize post node" {
 }
 
 test "find_nodes queries persisted graph" {
-    glob
-    MONGO_URI;
     db = kvstore(db_name='jac_db', db_type='mongodb', uri=MONGO_URI);
 
-    # Build and persist graph
-    BuildGraph() spawn root;
+    alice = User(name='Alice', role='admin', age=30);
+    bob = User(name='Bob', role='user', age=25);
+    p1 = Post(title='Hello World', content='My first post');
+    p2 = Post(title='Jac is cool', content='Graph programming rocks');
+    p3 = Post(title='Getting started', content='Learning Jac today');
 
-    # Query with find_nodes
-    young = list(db.find_nodes('User', {'age': {'$lt': 28}}));
-    admins = list(db.find_nodes('User', {'role': 'admin'}));
-    posts = list(db.find_nodes('Post', {}));
+    for node in [alice, bob, p1, p2, p3] {
+        data = Serializer.serialize(node.__jac__, include_type=True);
+        db._get_mongo_collection('_anchors').insert_one(
+            {'_id': str(node.__jac__.id), 'data': data, 'type': 'NodeAnchor'}
+        );
+    }
+
+    # Query using the QueryGraph walker
+    result = QueryGraph(mongo_uri=MONGO_URI) spawn root;
+    report_data = result.reports[0];
+
+    young = report_data['young'];
+    admins = report_data['admins'];
+    posts = report_data['posts'];
 
     # Verify counts and data
     assert len(young) == 1 and young[0].name == 'Bob' and young[0].age == 25;
