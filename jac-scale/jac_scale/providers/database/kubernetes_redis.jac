@@ -39,13 +39,21 @@ class KubernetesRedisProvider(DatabaseProvider) {
 
         # Validate eviction policy
         valid_policies = [
-            'allkeys-lru', 'volatile-lru', 'allkeys-lfu', 'volatile-lfu',
-            'allkeys-random', 'volatile-random', 'volatile-ttl', 'noeviction'
+            'allkeys-lru',
+            'volatile-lru',
+            'allkeys-lfu',
+            'volatile-lfu',
+            'allkeys-random',
+            'volatile-random',
+            'volatile-ttl',
+            'noeviction'
         ];
         if redis_eviction_policy not in valid_policies {
             logger.warning(
                 f"Invalid Redis eviction policy '{redis_eviction_policy}'. "
-                f"Using default 'allkeys-lru'. Valid options: {', '.join(valid_policies)}"
+                f"Using default 'allkeys-lru'. Valid options: {', '.join(
+                    valid_policies
+                )}"
             );
             redis_eviction_policy = 'allkeys-lru';
         }
@@ -73,7 +81,7 @@ class KubernetesRedisProvider(DatabaseProvider) {
                 raise FileNotFoundError(
                     f"Redis config template not found at: {template_path}\n"
                     f"Please ensure redis.conf.template exists in the same directory."
-                );
+                ) ;
             }
 
             template_content = template_path.read_text(encoding='utf-8');
@@ -83,10 +91,10 @@ class KubernetesRedisProvider(DatabaseProvider) {
             raise ;
         } except PermissionError as e {
             logger.error(f"Permission denied reading Redis config template: {e}");
-            raise ValueError(f"Cannot read Redis config template: {e}");
+            raise ValueError(f"Cannot read Redis config template: {e}") ;
         } except Exception as e {
             logger.error(f"Unexpected error reading Redis config template: {e}");
-            raise ValueError(f"Failed to load Redis config template: {e}");
+            raise ValueError(f"Failed to load Redis config template: {e}") ;
         }
 
         # Populate template with configuration values
@@ -105,15 +113,17 @@ class KubernetesRedisProvider(DatabaseProvider) {
             return config_content;
         } except KeyError as e {
             logger.error(f"Missing template variable in redis.conf.template: {e}");
-            raise ValueError(f"Invalid Redis config template - missing variable: {e}");
+            raise ValueError(f"Invalid Redis config template - missing variable: {e}") ;
         } except Exception as e {
             logger.error(f"Error populating Redis config template: {e}");
-            raise ValueError(f"Failed to generate Redis config: {e}");
+            raise ValueError(f"Failed to generate Redis config: {e}") ;
         }
     }
 
     """Calculate hash of Redis configuration for change detection."""
-    def _calculate_config_hash(self: KubernetesRedisProvider, config_content: str) -> str {
+    def _calculate_config_hash(
+        self: KubernetesRedisProvider, config_content: str
+    ) -> str {
         config_bytes = config_content.encode('utf-8');
         hash_obj = hashlib.md5(config_bytes);
         # Return first 8 chars for brevity (sufficient for change detection)
@@ -170,10 +180,7 @@ class KubernetesRedisProvider(DatabaseProvider) {
                 'selector': {'matchLabels': {'app': redis_name}},
                 'template': {
                     'metadata': {
-                        'labels': {
-                            'app': redis_name,
-                            'component': 'cache'
-                        },
+                        'labels': {'app': redis_name, 'component': 'cache'},
                         'annotations': {
                             # This annotation triggers pod restart when config changes
                             'redis-config-hash': config_hash,
@@ -185,7 +192,9 @@ class KubernetesRedisProvider(DatabaseProvider) {
                             {
                                 'name': 'redis',
                                 'image': 'redis:7.2',
-                                'ports': [{'containerPort': redis_port, 'name': 'redis'}],
+                                'ports': [
+                                    {'containerPort': redis_port, 'name': 'redis'}
+                                ],
                                 'command': ['redis-server', '/etc/redis/redis.conf'],
                                 'volumeMounts': [
                                     {
@@ -206,9 +215,7 @@ class KubernetesRedisProvider(DatabaseProvider) {
                                     'failureThreshold': 3
                                 },
                                 'readinessProbe': {
-                                    'exec': {
-                                        'command': ['redis-cli', 'ping']
-                                    },
+                                    'exec': {'command': ['redis-cli', 'ping']},
                                     'initialDelaySeconds': 5,
                                     'periodSeconds': 5,
                                     'timeoutSeconds': 3,

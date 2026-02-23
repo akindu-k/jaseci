@@ -4,6 +4,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.2.1 (Unreleased)
 
+- **Redis Cache Configuration**: Added configurable eviction policies for Kubernetes Redis deployments. Configure via `jac.toml` database settings: `redis_max_memory` (default: `200mb`), `redis_eviction_policy` (default: `allkeys-lru`), and `redis_eviction_samples` (default: `5`). ConfigMap-based configuration with automatic pod restart on changes.
+
 ## jac-scale 0.2.0 (Latest Release)
 
 - **SSO Frontend Callback Redirect**: SSO callback endpoints now support automatic redirection to frontend applications. Configure `client_auth_callback_url` in `jac.toml` to redirect with token/error parameters instead of returning JSON, enabling seamless browser-based OAuth flows.
