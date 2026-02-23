@@ -1,4 +1,4 @@
-"""Small social graph fixture for kvstore serialization tests.
+"""Small social graph fixture for native JAC persistence.
 
 Graph shape:  Root --> User --> Post
               (each User can have multiple Posts)
@@ -17,12 +17,8 @@ node Post {
 }
 
 walker:pub BuildGraph {
-    """Build a small social graph and persist each node via kvstore MongoDB."""
-    has mongo_uri: str;
-
+    """Build a small social graph - nodes are automatically persisted."""
     can build with Root entry {
-        db = kvstore(db_name='social', db_type='mongodb', uri=self.mongo_uri);
-
         alice = here ++> User(name='Alice', role='admin', age=30);
         bob = here ++> User(name='Bob', role='user', age=25);
 
@@ -30,34 +26,27 @@ walker:pub BuildGraph {
         p2 = alice ++> Post(title='Jac is cool', content='Graph programming rocks');
         p3 = bob ++> Post(title='Getting started', content='Learning Jac today');
 
-        # Persist each node's fields in MongoDB via kvstore
-        for user in [-->](?:User) {
-            db.set(
-                user.name,
-                {'name': user.name, 'role': user.role, 'age': user.age},
-                'users'
-            );
-        }
-        for post in [[-->](?:User)-->](?:Post) {
-            db.set(post.title, {'title': post.title, 'content': post.content}, 'posts');
-        }
-
         report {'users': 2, 'posts': 3};
     }
 }
 
 walker:pub QueryGraph {
-    """Retrieve persisted nodes from kvstore and report them."""
+    """Query persisted nodes using find_nodes."""
     has mongo_uri: str;
 
     can query with Root entry {
-        db = kvstore(db_name='social', db_type='mongodb', uri=self.mongo_uri);
+        # Use kvstore to access the database where nodes are persisted
+        db = kvstore(db_name='jac_db', db_type='mongodb', uri=self.mongo_uri);
 
-        alice = db.get('Alice', 'users');
-        admins = list(db.find('users', {'role': 'admin'}));
-        young = list(db.find('users', {'age': {'$lt': 28}}));
-        posts = list(db.find('posts', {}));
+        # Find users younger than 28
+        young = list(db.find_nodes('User', {'age': {'$lt': 28}}));
 
-        report {'alice': alice, 'admins': admins, 'young': young, 'posts': posts};
+        # Find admin users
+        admins = list(db.find_nodes('User', {'role': 'admin'}));
+
+        # Find all posts
+        posts = list(db.find_nodes('Post', {}));
+
+        report {'admins': admins, 'young': young, 'posts': posts};
     }
 }
