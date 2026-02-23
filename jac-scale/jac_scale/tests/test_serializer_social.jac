@@ -20,7 +20,9 @@ glob _mongo_container = MongoDbContainer("mongo:7.0"),
 with entry {
     _mongo_container.start();
 }
+
 glob MONGO_URI = _mongo_container.get_connection_url();
+
 with entry {
     os.environ['MONGODB_URI'] = MONGO_URI;
 }
