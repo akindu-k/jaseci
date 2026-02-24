@@ -5,6 +5,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 ## jac-scale 0.2.1 (Unreleased)
 
 - **Redis Cache Configuration**: Added configurable eviction policies for Kubernetes Redis deployments. Configure via `jac.toml` database settings: `redis_max_memory` (default: `200mb`), `redis_eviction_policy` (default: `allkeys-lru`), and `redis_eviction_samples` (default: `5`). ConfigMap-based configuration with automatic pod restart on changes.
+- jac destroy command deletes non default namespace
 
 ## jac-scale 0.2.0 (Latest Release)
 
