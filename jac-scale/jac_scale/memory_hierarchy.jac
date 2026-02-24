@@ -9,6 +9,7 @@ implementations in jaclang.runtimelib.memory:
 ScaleTieredMemory extends TieredMemory by swapping in these backends.
 Falls back to jaclang's SqliteMemory when MongoDB is unavailable.
 """
+import json;
 import logging;
 import redis;
 import from collections.abc { Callable, Generator, Iterable }
