@@ -48,9 +48,18 @@ test "serialize post node" {
 }
 
 test "find_nodes queries persisted graph with BuildGraph" {
+    # Clean up any leftover connections from previous tests
+    cleanup_connections();
+
     db = kvstore(db_name='jac_db', db_type='mongodb', uri=MONGO_URI);
 
+    # Drop collection to ensure clean state before test
+    db._get_mongo_collection('_anchors').drop();
+
     graph = BuildGraph() spawn root;
+
+    # Explicit commit to ensure nodes are persisted to MongoDB before querying
+    Jac.commit();
 
     # Query using the QueryGraph walker
     result = QueryGraph(mongo_uri=MONGO_URI) spawn root;
