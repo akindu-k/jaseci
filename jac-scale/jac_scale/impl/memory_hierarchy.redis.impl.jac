@@ -6,11 +6,16 @@ import from collections.abc { Callable, Generator, Iterable }
 import from uuid { UUID }
 import from jaclang.jac0core.archetype { Anchor, Root }
 import from jaclang.runtimelib.utils { storage_key, to_uuid }
+import from jac_scale.config_loader { get_scale_config }
 
 glob logger = logging.getLogger(__name__);
 
 """Post-initialization: connect to Redis."""
 impl RedisBackend.postinit -> None {
+    # Get URL from config if not explicitly set
+    if self.redis_url is None {
+        self.redis_url = get_scale_config().get_database_config()['redis_url'];
+    }
     if self.redis_url and self.redis_client is None {
         try {
             self.redis_client = redis.from_url(self.redis_url);

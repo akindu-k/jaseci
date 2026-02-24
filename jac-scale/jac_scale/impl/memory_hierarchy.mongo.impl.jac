@@ -7,11 +7,16 @@ import from pymongo { MongoClient, UpdateOne }
 import from pymongo.errors { ConnectionFailure }
 import from jaclang.jac0core.archetype { Anchor, NodeAnchor, Root }
 import from jaclang.runtimelib.utils { storage_key, to_uuid }
+import from jac_scale.config_loader { get_scale_config }
 
 glob logger = logging.getLogger(__name__);
 
 """Post-initialization: connect to MongoDB."""
 impl MongoBackend.postinit -> None {
+    # Get URL from config if not explicitly set
+    if self.mongo_url is None {
+        self.mongo_url = get_scale_config().get_database_config()['mongodb_uri'];
+    }
     if self.client is None and self.mongo_url {
         try {
             self.client = MongoClient(self.mongo_url);

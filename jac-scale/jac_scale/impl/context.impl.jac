@@ -15,6 +15,8 @@ impl JScaleExecutionContext.init(self: JScaleExecutionContext) -> None {
     if not isinstance(system_root_anchor, NodeAnchor) {
         system_root_anchor = Root().__jac__;
         system_root_anchor.id = UUID(Con.SUPER_ROOT_UUID);
+        system_root_anchor.persistent = True;
+        system_root_anchor.root = system_root_anchor.id;
         self.mem.put(system_root_anchor);
     }
     self.system_root = system_root_anchor;

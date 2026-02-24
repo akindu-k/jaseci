@@ -25,18 +25,15 @@ import from jaclang.runtimelib.memory {
 }
 import from jaclang.runtimelib.utils { storage_key, to_uuid }
 import from jaclang.runtimelib.serializer { Serializer }
-import from jac_scale.config_loader { get_scale_config }
 
-# Load database configuration from jac.toml with env var overrides
-glob _db_config = get_scale_config().get_database_config(),
-     logger = logging.getLogger(__name__);
+glob logger = logging.getLogger(__name__);
 
 """
 Redis cache backend - implements CacheMemory for distributed L2 caching.
 Replaces LocalCacheMemory when Redis is available.
 """
 obj RedisBackend(CacheMemory) {
-    has redis_url: str = _db_config['redis_url'],
+    has redis_url: (str | None) = None,
         redis_client: (redis.Redis | None) = None;
 
     def postinit -> None;
@@ -79,7 +76,7 @@ obj MongoBackend(PersistentMemory) {
         collection: Any by postinit,
         db_name: str = 'jac_db',
         collection_name: str = '_anchors',
-        mongo_url: str = _db_config['mongodb_uri'];
+        mongo_url: (str | None) = None;
 
     def postinit -> None;
     def is_available -> bool;
