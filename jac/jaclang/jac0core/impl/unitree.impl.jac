@@ -726,6 +726,9 @@ impl WalkerStmtOnlyNode.init(self: WalkerStmtOnlyNode) -> None {
 impl UniCFGNode.init(self: UniCFGNode) -> None {
     self.bb_in: list[UniCFGNode] = [];
     self.bb_out: list[UniCFGNode] = [];
+    # Pyright-style optimization: track symbols affected (assigned/narrowed) in this branch.
+    # If a symbol is not in affected_symbols, we can skip backward traversal through this node.
+    self.affected_symbols: set[str] = set();
 }
 
 """Get head by walking up the CFG iteratively."""
@@ -1114,12 +1117,14 @@ impl Import.init(
     items: (Sequence[ModuleItem] | Sequence[ModulePath]),
     is_absorb: bool,
     kid: Sequence[UniNode],
-    doc: (String | None) = None
+    doc: (String | None) = None,
+    clib_decls: (Sequence[UniNode] | None) = None
 ) -> None {
     self.hint = None;
     self.from_loc = from_loc;
     self.items = items;
     self.is_absorb = is_absorb;
+    self.clib_decls = clib_decls;
     UniNode.init(self, kid=kid);
     AstDocNode.init(self, doc=doc);
     CodeBlockStmt.init(self);
