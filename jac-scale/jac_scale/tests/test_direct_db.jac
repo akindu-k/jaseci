@@ -23,13 +23,6 @@ glob _mongo_container = MongoDbContainer(
      MONGO_URI: str = "",
      REDIS_URI: str = "";
 
-# Test node for find_nodes test
-node TestNode {
-    has name: str,
-        age: int,
-        status: str = "active";
-}
-
 with entry {
     _mongo_container.start();
     _redis_container.start();
@@ -288,6 +281,12 @@ test "cache aside pattern" {
 test "find_nodes basic" {
     import from jaclang.runtimelib.serializer { Serializer }
 
+    # Test node for find_nodes test
+    node TestNode {
+        has name: str,
+            age: int,
+            status: str = "active";
+    }
     db = kvstore(db_name="test_find_nodes", db_type="mongodb", uri=MONGO_URI);
 
     # Create test nodes manually
