@@ -46,16 +46,10 @@ test "serialize post node" {
 }
 
 test "find_nodes queries persisted graph" {
-    import os;
-
-    # Ensure MongoDB URI is set in environment BEFORE any spawn
-    os.environ['MONGODB_URI'] = MONGO_URI;
-
     db = kvstore(db_name='jac_db', db_type='mongodb', uri=MONGO_URI);
 
-    # Spawn BuildGraph walker - nodes will be created and persisted
+    # Build graph using BuildGraph walker - nodes are persisted via Jac.save()
     graph = BuildGraph() spawn root;
-    Jac.commit();  # Persist all nodes to MongoDB
 
     # Query using the QueryGraph walker
     result = QueryGraph(mongo_uri=MONGO_URI) spawn root;
