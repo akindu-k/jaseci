@@ -913,7 +913,7 @@ with entry {
 ## MongoDB Operations
 
 **Common Methods:** `get()`, `set()`, `delete()`, `exists()`
-**Query Methods:** `find_one()`, `find()`, `insert_one()`, `insert_many()`, `update_one()`, `update_many()`, `delete_one()`, `delete_many()`, `find_by_id()`, `update_by_id()`, `delete_by_id()`
+**Query Methods:** `find_one()`, `find()`, `insert_one()`, `insert_many()`, `update_one()`, `update_many()`, `delete_one()`, `delete_many()`, `find_by_id()`, `update_by_id()`, `delete_by_id()`, `find_nodes()`
 
 **Example:**
 
@@ -936,6 +936,20 @@ with entry {
 ```
 
 **Query Operators:** `$eq`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$ne`, `$and`, `$or`
+
+### Querying Persisted Nodes (`find_nodes`)
+
+Query persisted graph nodes by type with MongoDB filters. Returns deserialized node instances.
+
+```jac
+with entry{
+    db = kvstore(db_name='jac_db', db_type='mongodb');
+    young_users = list(db.find_nodes('User', {'age': {'$lt': 30}}));
+    admins = list(db.find_nodes('User', {'role': 'admin'}));
+}
+```
+
+**Parameters:** `node_type` (str), `filter` (dict, default `{}`), `col_name` (str, default `'_anchors'`)
 
 ---
 

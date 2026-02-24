@@ -406,7 +406,8 @@ impl SqliteMemory.sync -> None {
                     isinstance(anchor, NodeAnchor)
                     and not isinstance(anchor.archetype, Root)
                     and not anchor.edges
-                ) and Jac.check_write_access(anchor) {
+                )
+                and Jac.check_write_access(anchor) {
                     self.__conn__.execute(
                         "INSERT OR REPLACE INTO anchors (id, data) VALUES (?, ?)",
                         (key, dumps(anchor))
