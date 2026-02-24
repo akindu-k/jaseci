@@ -230,9 +230,11 @@ impl Anchor.__eq__(self: Anchor, other: object) -> bool {
 
 """Check if edges have been populated from storage."""
 impl NodeAnchor.is_populated(self: NodeAnchor) -> bool {
-    # If _edge_ids is set and non-empty but edges is empty, not populated
-    # Otherwise, it's populated (either freshly created or already loaded)
-    return not (self._edge_ids and not self.edges);
+    # Use __dict__ directly to avoid triggering __getattr__ on stub anchors
+    d = self.__dict__;
+    edge_ids = d.get('_edge_ids');
+    edges = d.get('edges');
+    return not (edge_ids and not edges);
 }
 
 """Populate edges from _edge_ids by loading from memory."""
@@ -266,8 +268,13 @@ impl NodeAnchor.__getstate__(self: NodeAnchor) -> dict[(str, object)] {
 
 """Check if edge endpoints have been populated from storage."""
 impl EdgeAnchor.is_populated(self: EdgeAnchor) -> bool {
-    # If _source_id or _target_id is set but source/target is None, not populated
-    return not ((self._source_id and not self.source) or (self._target_id and not self.target));
+    # Use __dict__ directly to avoid triggering __getattr__ on stub anchors
+    d = self.__dict__;
+    source_id = d.get('_source_id');
+    target_id = d.get('_target_id');
+    source = d.get('source');
+    target = d.get('target');
+    return not ((source_id and not source) or (target_id and not target));
 }
 
 """Populate edge source/target from IDs."""
