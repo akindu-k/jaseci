@@ -1,4 +1,6 @@
 """Bidirectional serializer for Jac objects."""
+
+import logging;
 import from enum { Enum }
 import from typing { cast }
 import from uuid { UUID }
@@ -17,6 +19,8 @@ import from jaclang.jac0core.constructs {
     Root,
     GenericEdge
 }
+
+glob logger = logging.getLogger(__name__);
 
 obj Serializer {
     """Registry of classes that may be deserialized.
@@ -50,6 +54,14 @@ obj Serializer {
     static def _serialize_value(
         val: object, include_type: bool, api_mode: bool = False
     ) -> object;
+
+    """Get type metadata dict."""
+    static def _type_info(obj: object, include: bool) -> dict[str, object];
+
+    """Serialize object attributes (non-private, non-callable)."""
+    static def _serialize_attrs(
+        obj: object, include_type: bool, api_mode: bool
+    ) -> dict[str, object];
 
     """Deserialize a value recursively."""
     static def _deserialize_value(val: object) -> object;
