@@ -4,7 +4,6 @@ Graph shape:  Root --> User --> Post
               (each User can have multiple Posts)
 """
 import from jac_scale.lib { kvstore }
-import from jaclang.jac0core.runtime { JacRuntime as Jac }
 
 node User {
     has name: str,
@@ -18,26 +17,14 @@ node Post {
 }
 
 walker:pub BuildGraph {
-    """Build a small social graph - nodes are explicitly persisted."""
+    """Build a small social graph - nodes are automatically persisted."""
     can build with Root entry {
-        # ++> returns a list, extract first element with [0]
-        alice = (here ++> User(name='Alice', role='admin', age=30))[0];
-        bob = (here ++> User(name='Bob', role='user', age=25))[0];
+        alice = here ++> User(name='Alice', role='admin', age=30);
+        bob = here ++> User(name='Bob', role='user', age=25);
 
-        # Explicitly save nodes to make them persistent
-        Jac.save(alice);
-        Jac.save(bob);
-
-        p1 = (alice ++> Post(title='Hello World', content='My first post'))[0];
-        p2 = (alice ++> Post(title='Jac is cool', content='Graph programming rocks'))[
-            0
-        ];
-        p3 = (bob ++> Post(title='Getting started', content='Learning Jac today'))[0];
-
-        # Save posts
-        Jac.save(p1);
-        Jac.save(p2);
-        Jac.save(p3);
+        p1 = alice ++> Post(title='Hello World', content='My first post');
+        p2 = alice ++> Post(title='Jac is cool', content='Graph programming rocks');
+        p3 = bob ++> Post(title='Getting started', content='Learning Jac today');
 
         report {'users': 2, 'posts': 3};
     }
