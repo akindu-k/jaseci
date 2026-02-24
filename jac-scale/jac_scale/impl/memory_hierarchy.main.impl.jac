@@ -36,7 +36,9 @@ impl ScaleTieredMemory.init(use_cache: bool = True) -> None {
         } except Exception { }
     } else {
         # Fall back to jaclang's SqliteMemory using configured path
-        self.l3 = SqliteMemory(path=get_scale_config().get_database_config()['shelf_db_path']);
+        self.l3 = SqliteMemory(
+            path=get_scale_config().get_database_config()['shelf_db_path']
+        );
         self._persistence_type = PersistenceType.SQLITE;
         logger.debug("MongoDB not available, using SqliteMemory for persistence");
         # Show subtle message
