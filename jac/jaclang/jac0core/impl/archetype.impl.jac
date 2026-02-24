@@ -241,6 +241,7 @@ impl NodeAnchor.is_populated(self: NodeAnchor) -> bool {
 impl NodeAnchor.populate_edges(self: NodeAnchor) -> None {
     if self.is_populated() {
         return;  # Already populated or no edges to load
+
     }
     # Load edges from memory
     import from jaclang { JacRuntimeInterface as Jac }
@@ -270,11 +271,9 @@ impl NodeAnchor.__getstate__(self: NodeAnchor) -> dict[(str, object)] {
 impl EdgeAnchor.is_populated(self: EdgeAnchor) -> bool {
     # Use __dict__ directly to avoid triggering __getattr__ on stub anchors
     d = self.__dict__;
-    source_id = d.get('_source_id');
-    target_id = d.get('_target_id');
     source = d.get('source');
     target = d.get('target');
-    return not ((source_id and not source) or (target_id and not target));
+    return not ((source.id and not source) or (target.id and not target));
 }
 
 """Populate edge source/target from IDs."""
@@ -283,22 +282,21 @@ impl EdgeAnchor.populate(self: EdgeAnchor) -> None {
         return;
     }
     import from jaclang { JacRuntimeInterface as Jac }
-    import from uuid { UUID }
     ctx = Jac.get_context();
     # Load source and target NodeAnchors (without auto-populating their edges)
-    if self._source_id {
-        source_anchor = ctx.mem.get(UUID(self._source_id));
+    if self.source.id {
+        source_anchor = ctx.mem.get(UUID(self.source.id));
         if isinstance(source_anchor, NodeAnchor) {
             self.source = source_anchor;
         }
-        self._source_id = None;
+        self.source.id = None;
     }
-    if self._target_id {
-        target_anchor = ctx.mem.get(UUID(self._target_id));
+    if self.target.id {
+        target_anchor = ctx.mem.get(UUID(self.target.id));
         if isinstance(target_anchor, NodeAnchor) {
             self.target = target_anchor;
         }
-        self._target_id = None;
+        self.target.id = None;
     }
 }
 

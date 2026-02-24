@@ -178,9 +178,7 @@ obj EdgeAnchor(Anchor) {
     has archetype: EdgeArchetype,
         source: (NodeAnchor | None) = None,
         target: (NodeAnchor | None) = None,
-        is_undirected: bool = False,
-        _source_id: (str | None) = None,
-        _target_id: (str | None) = None;
+        is_undirected: bool = False;
 
     def __getstate__(self: EdgeAnchor) -> dict[(str, object)];
     def is_populated(self: EdgeAnchor) -> bool;

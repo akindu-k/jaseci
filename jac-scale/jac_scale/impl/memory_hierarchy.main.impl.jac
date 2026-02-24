@@ -3,8 +3,6 @@
 Storage configuration comes from environment variables or jac.toml.
 """
 
-
-
 """Initialize ScaleTieredMemory with distributed backends."""
 impl ScaleTieredMemory.init(use_cache: bool = True) -> None {
     # L1: Initialize volatile memory (inherited from VolatileMemory via TieredMemory)
@@ -87,7 +85,6 @@ impl ScaleTieredMemory.commit(anchor: (Any | None) = None) -> None {
         }
     }
 }
-
 
 """Close all backends."""
 impl ScaleTieredMemory.close -> None {
