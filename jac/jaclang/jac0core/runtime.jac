@@ -328,11 +328,7 @@ class JacNode {
         nodes: OrderedDict[(NodeAnchor, NodeArchetype)] = OrderedDict();
         for nd in origin {
             nanch = nd.__jac__;
-            # Ensure edges are populated from storage before accessing
-            nanch.populate_edges();
             for anchor in nanch.edges {
-                # Ensure edge source/target are populated
-                anchor.populate();
                 if (
                     (source := anchor.source)
                     and (target := anchor.target)

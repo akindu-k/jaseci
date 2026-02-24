@@ -164,25 +164,22 @@ obj Anchor {
 @dataclass(eq=False, repr=False, kw_only=True)
 obj NodeAnchor(Anchor) {
     has archetype: NodeArchetype,
-        edges: list[EdgeAnchor],
-        _edge_ids: list[str] = field(default_factory=`list);
+        edges: list[EdgeAnchor];
 
     def __getstate__(self: NodeAnchor) -> dict[(str, object)];
     def is_populated(self: NodeAnchor) -> bool;
-    def populate_edges(self: NodeAnchor) -> None;
 }
 
 """Edge Anchor."""
 @dataclass(eq=False, repr=False, kw_only=True)
 obj EdgeAnchor(Anchor) {
     has archetype: EdgeArchetype,
-        source: (NodeAnchor | None) = None,
-        target: (NodeAnchor | None) = None,
-        is_undirected: bool = False;
+        source: NodeAnchor,
+        target: NodeAnchor,
+        is_undirected: bool;
 
-    def __getstate__(self: EdgeAnchor) -> dict[(str, object)];
     def is_populated(self: EdgeAnchor) -> bool;
-    def populate(self: EdgeAnchor) -> None;
+    def __getstate__(self: EdgeAnchor) -> dict[(str, object)];
 }
 
 """Walker Anchor."""

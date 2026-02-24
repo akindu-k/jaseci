@@ -228,34 +228,16 @@ impl Anchor.__eq__(self: Anchor, other: object) -> bool {
     return False;
 }
 
-"""Check if edges have been populated from storage."""
+"""Check if node anchor is fully populated (has edges)."""
 impl NodeAnchor.is_populated(self: NodeAnchor) -> bool {
-    # Use __dict__ directly to avoid triggering __getattr__ on stub anchors
     d = self.__dict__;
-    edge_ids = d.get('_edge_ids');
-    edges = d.get('edges');
-    return not (edge_ids and not edges);
+    return 'edges' in d and 'archetype' in d;
 }
 
-"""Populate edges from _edge_ids by loading from memory."""
-impl NodeAnchor.populate_edges(self: NodeAnchor) -> None {
-    if self.is_populated() {
-        return;  # Already populated or no edges to load
-
-    }
-    # Load edges from memory
-    import from jaclang { JacRuntimeInterface as Jac }
-    import from uuid { UUID }
-    ctx = Jac.get_context();
-    self.edges = [];
-    for edge_id in self._edge_ids {
-        edge_anchor = ctx.mem.get(UUID(edge_id));
-        if isinstance(edge_anchor, EdgeAnchor) {
-            self.edges.append(edge_anchor);
-        }
-    }
-    # Clear _edge_ids after population
-    self._edge_ids = [];
+"""Check if edge anchor is fully populated (has source/target)."""
+impl EdgeAnchor.is_populated(self: EdgeAnchor) -> bool {
+    d = self.__dict__;
+    return 'source' in d and 'target' in d and 'archetype' in d;
 }
 
 """Serialize Node Anchor."""
@@ -265,39 +247,6 @@ impl NodeAnchor.__getstate__(self: NodeAnchor) -> dict[(str, object)] {
         state['edges'] = [`edge.make_stub() for `edge in self.edges];
     }
     return state;
-}
-
-"""Check if edge endpoints have been populated from storage."""
-impl EdgeAnchor.is_populated(self: EdgeAnchor) -> bool {
-    # Use __dict__ directly to avoid triggering __getattr__ on stub anchors
-    d = self.__dict__;
-    source = d.get('source');
-    target = d.get('target');
-    return not ((source.id and not source) or (target.id and not target));
-}
-
-"""Populate edge source/target from IDs."""
-impl EdgeAnchor.populate(self: EdgeAnchor) -> None {
-    if self.is_populated() {
-        return;
-    }
-    import from jaclang { JacRuntimeInterface as Jac }
-    ctx = Jac.get_context();
-    # Load source and target NodeAnchors (without auto-populating their edges)
-    if self.source.id {
-        source_anchor = ctx.mem.get(UUID(self.source.id));
-        if isinstance(source_anchor, NodeAnchor) {
-            self.source = source_anchor;
-        }
-        self.source.id = None;
-    }
-    if self.target.id {
-        target_anchor = ctx.mem.get(UUID(self.target.id));
-        if isinstance(target_anchor, NodeAnchor) {
-            self.target = target_anchor;
-        }
-        self.target.id = None;
-    }
 }
 
 """Serialize Edge Anchor."""

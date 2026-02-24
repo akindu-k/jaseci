@@ -185,9 +185,6 @@ impl Serializer.deserialize(data: dict[str, object]) -> (object | None) {
                     setattr(instance, k, Serializer._deserialize_value(v));
                 }
             }
-            if callable(getattr(instance, '__jac_post_deserialize__', None)) {
-                instance.__jac_post_deserialize__();
-            }
             return instance;
         } except Exception as e {
             logger.error(f"Failed to deserialize {type_name}: {e}");
@@ -316,9 +313,6 @@ impl Serializer._deserialize_archetype(
             }
         }
         arch.__jac__ = anchor;
-        if callable(getattr(arch, '__jac_post_deserialize__', None)) {
-            arch.__jac_post_deserialize__();
-        }
         return arch;
     } except Exception as e {
         logger.error(f"Failed to deserialize archetype {type_name}: {e}");

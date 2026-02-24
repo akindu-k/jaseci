@@ -3,7 +3,7 @@
 """Post-initialization: connect to Redis."""
 impl RedisBackend.postinit -> None {
     if self.redis_url is None {
-        self.redis_url = _db_config.get('redis_url');
+        self.redis_url = _get_db_config().get('redis_url');
     }
     if self.redis_url and self.redis_client is None {
         try {
@@ -18,7 +18,7 @@ impl RedisBackend.postinit -> None {
 """Check if Redis is available and connected."""
 impl RedisBackend.is_available -> bool {
     if not self.redis_url {
-        self.redis_url = _db_config.get('redis_url');
+        self.redis_url = _get_db_config().get('redis_url');
     }
     if not self.redis_url {
         return False;

@@ -29,9 +29,12 @@ import from jaclang.runtimelib.utils { storage_key, to_uuid }
 import from jaclang.runtimelib.serializer { Serializer }
 import from jac_scale.config_loader { get_scale_config }
 
-# Load database configuration from jac.toml with env var overrides
-glob _db_config = get_scale_config().get_database_config(),
-     logger = logging.getLogger(__name__);
+glob logger = logging.getLogger(__name__);
+
+"""Get fresh database config to support dynamic env var changes (e.g., testcontainers)."""
+def _get_db_config -> dict {
+    return get_scale_config().get_database_config();
+}
 
 """
 Redis cache backend - implements CacheMemory for distributed L2 caching.

@@ -43,25 +43,7 @@ obj Serializer {
         `obj: object, include_type: bool = False, api_mode: bool = False
     ) -> object;
 
-    """Deserialize data back to original object type.
-
-    After field restoration, calls ``__jac_post_deserialize__(self)`` on the
-    reconstructed object if that method is defined.  Use this hook to
-    re-establish any invariants that ``__init__`` or ``__post_init__`` would
-    normally set up (e.g. derived caches, threading locks, or validated
-    computed fields) — all of which are bypassed when ``__new__`` is used for
-    reconstruction.
-
-    Example::
-
-        obj MyNode {
-            has count: int;
-
-            def __jac_post_deserialize__(self: MyNode) -> None {
-                self._cached_result = expensive_compute(self.count);
-            }
-        }
-    """
+    """Deserialize data back to original object type."""
     static def deserialize(data: dict[str, object]) -> (object | None);
 
     """Serialize a value recursively."""

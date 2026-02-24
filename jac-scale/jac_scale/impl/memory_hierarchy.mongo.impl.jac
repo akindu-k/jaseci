@@ -3,7 +3,7 @@
 """Post-initialization: connect to MongoDB."""
 impl MongoBackend.postinit -> None {
     if self.mongo_url is None {
-        self.mongo_url = _db_config.get('mongodb_uri');
+        self.mongo_url = _get_db_config().get('mongodb_uri');
     }
     if self.client is None and self.mongo_url {
         try {
@@ -20,7 +20,7 @@ impl MongoBackend.postinit -> None {
 """Check if MongoDB is available and connected."""
 impl MongoBackend.is_available -> bool {
     if not self.mongo_url {
-        self.mongo_url = _db_config.get('mongodb_uri');
+        self.mongo_url = _get_db_config().get('mongodb_uri');
     }
     if not self.mongo_url {
         return False;

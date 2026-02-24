@@ -13,15 +13,8 @@ impl JScaleExecutionContext.init(self: JScaleExecutionContext) -> None {
     self.custom: Any = MISSING;
     system_root_anchor: (Anchor | None) = self.mem.get(UUID(Con.SUPER_ROOT_UUID));
     if not isinstance(system_root_anchor, NodeAnchor) {
-        super_root_id = UUID(Con.SUPER_ROOT_UUID);
-        if self.mem.l3 is not None and self.mem.l3.`has(super_root_id) {
-            raise RuntimeError(
-                f"System root anchor (id={Con.SUPER_ROOT_UUID}) exists in "
-                f"persistent storage but could not be deserialized. "
-            ) ;
-        }
         system_root_anchor = Root().__jac__;
-        system_root_anchor.id = super_root_id;
+        system_root_anchor.id = UUID(Con.SUPER_ROOT_UUID);
         self.mem.put(system_root_anchor);
     }
     self.system_root = system_root_anchor;
