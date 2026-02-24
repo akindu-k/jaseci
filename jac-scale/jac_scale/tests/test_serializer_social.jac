@@ -58,9 +58,6 @@ test "find_nodes queries persisted graph with BuildGraph" {
 
     graph = BuildGraph() spawn root;
 
-    # Explicit commit to ensure nodes are persisted to MongoDB before querying
-    Jac.commit();
-
     # Query using the QueryGraph walker
     result = QueryGraph(mongo_uri=MONGO_URI) spawn root;
     report_data = result.reports[0];
