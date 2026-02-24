@@ -228,6 +228,33 @@ impl Anchor.__eq__(self: Anchor, other: object) -> bool {
     return False;
 }
 
+"""Check if edges have been populated from storage."""
+impl NodeAnchor.is_populated(self: NodeAnchor) -> bool {
+    # If _edge_ids is set and non-empty but edges is empty, not populated
+    # Otherwise, it's populated (either freshly created or already loaded)
+    return not (self._edge_ids and not self.edges);
+}
+
+"""Populate edges from _edge_ids by loading from memory."""
+impl NodeAnchor.populate_edges(self: NodeAnchor) -> None {
+    if self.is_populated() {
+        return;  # Already populated or no edges to load
+    }
+    # Load edges from memory
+    import from jaclang { JacRuntimeInterface as Jac }
+    import from uuid { UUID }
+    ctx = Jac.get_context();
+    self.edges = [];
+    for edge_id in self._edge_ids {
+        edge_anchor = ctx.mem.get(UUID(edge_id));
+        if isinstance(edge_anchor, EdgeAnchor) {
+            self.edges.append(edge_anchor);
+        }
+    }
+    # Clear _edge_ids after population
+    self._edge_ids = [];
+}
+
 """Serialize Node Anchor."""
 impl NodeAnchor.__getstate__(self: NodeAnchor) -> dict[(str, object)] {
     state = super.__getstate__();
@@ -235,6 +262,37 @@ impl NodeAnchor.__getstate__(self: NodeAnchor) -> dict[(str, object)] {
         state['edges'] = [`edge.make_stub() for `edge in self.edges];
     }
     return state;
+}
+
+"""Check if edge endpoints have been populated from storage."""
+impl EdgeAnchor.is_populated(self: EdgeAnchor) -> bool {
+    # If _source_id or _target_id is set but source/target is None, not populated
+    return not ((self._source_id and not self.source) or (self._target_id and not self.target));
+}
+
+"""Populate edge source/target from IDs."""
+impl EdgeAnchor.populate(self: EdgeAnchor) -> None {
+    if self.is_populated() {
+        return;
+    }
+    import from jaclang { JacRuntimeInterface as Jac }
+    import from uuid { UUID }
+    ctx = Jac.get_context();
+    # Load source and target NodeAnchors (without auto-populating their edges)
+    if self._source_id {
+        source_anchor = ctx.mem.get(UUID(self._source_id));
+        if isinstance(source_anchor, NodeAnchor) {
+            self.source = source_anchor;
+        }
+        self._source_id = None;
+    }
+    if self._target_id {
+        target_anchor = ctx.mem.get(UUID(self._target_id));
+        if isinstance(target_anchor, NodeAnchor) {
+            self.target = target_anchor;
+        }
+        self._target_id = None;
+    }
 }
 
 """Serialize Edge Anchor."""

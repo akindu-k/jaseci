@@ -1,21 +1,9 @@
 """MongoDB PersistenceBackend Implementation."""
-import logging;
-import from collections.abc { Callable, Generator, Iterable }
-import from typing { Any, cast }
-import from uuid { UUID }
-import from pymongo { MongoClient, UpdateOne }
-import from pymongo.errors { ConnectionFailure }
-import from jaclang.jac0core.archetype { Anchor, NodeAnchor, Root }
-import from jaclang.runtimelib.utils { storage_key, to_uuid }
-import from jac_scale.config_loader { get_scale_config }
-
-glob logger = logging.getLogger(__name__);
 
 """Post-initialization: connect to MongoDB."""
 impl MongoBackend.postinit -> None {
-    # Get URL from config if not explicitly set
     if self.mongo_url is None {
-        self.mongo_url = get_scale_config().get_database_config()['mongodb_uri'];
+        self.mongo_url = _db_config.get('mongodb_uri');
     }
     if self.client is None and self.mongo_url {
         try {
@@ -31,6 +19,9 @@ impl MongoBackend.postinit -> None {
 
 """Check if MongoDB is available and connected."""
 impl MongoBackend.is_available -> bool {
+    if not self.mongo_url {
+        self.mongo_url = _db_config.get('mongodb_uri');
+    }
     if not self.mongo_url {
         return False;
     }
@@ -65,7 +56,7 @@ impl MongoBackend.get(id: UUID) -> (Anchor | None) {
             return self._load_anchor(db_obj);
         }
     } except Exception as e {
-        logger.error(f"MongoDB get failed: {e}");
+        logger.debug(f"MongoDB get failed: {e}");
     }
     return None;
 }
@@ -97,7 +88,7 @@ impl MongoBackend.delete(id: UUID) -> None {
     try {
         self.collection.delete_one({'_id': str(_id)});
     } except Exception as e {
-        logger.error(f"MongoDB delete failed: {e}");
+        logger.debug(f"MongoDB delete failed: {e}");
     }
 }
 
@@ -107,7 +98,7 @@ impl MongoBackend.close -> None {
         try {
             self.client.close();
         } except Exception as e {
-            logger.error(f"Error closing MongoDB connection: {e}");
+            logger.warning(f"Error closing MongoDB connection: {e}");
         }
         self.client = None;
     }
@@ -142,7 +133,7 @@ impl MongoBackend.query(
             }
         }
     } except Exception as e {
-        logger.error(f"MongoDB query failed: {e}");
+        logger.debug(f"MongoDB query failed: {e}");
     }
 }
 
@@ -216,14 +207,14 @@ impl MongoBackend.bulk_put(anchors: Iterable[Anchor]) -> None {
                 )
             );
         } except Exception as e {
-            logger.error(f"MongoDB bulk_put serialization failed: {e}");
+            logger.debug(f"MongoDB bulk_put serialization failed: {e}");
         }
     }
     if ops {
         try {
             self.collection.bulk_write(ops);
         } except Exception as e {
-            logger.error(f"MongoDB bulk_write failed: {e}");
+            logger.debug(f"MongoDB bulk_write failed: {e}");
         }
     }
 }
@@ -237,7 +228,14 @@ impl MongoBackend._load_anchor(raw: dict[(str, Any)]) -> (Anchor | None) {
         data = raw['data'];
         return Serializer.deserialize(data);
     } except Exception as e {
-        logger.error(f"MongoDB _load_anchor failed: {e}");
+        doc_id = raw.get('_id', '<unknown>');
+        doc_type = raw.get('type', '<unknown>');
+        logger.warning(
+            f"MongoDB _load_anchor failed to deserialize anchor "
+            f"(id={doc_id}, type={doc_type}): {e}. "
+            f"This anchor will be skipped. Data may be from an incompatible "
+            f"version or the class definition has changed."
+        );
         return None;
     }
 }

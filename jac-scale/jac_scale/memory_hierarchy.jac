@@ -10,11 +10,12 @@ ScaleTieredMemory extends TieredMemory by swapping in these backends.
 Falls back to jaclang's SqliteMemory when MongoDB is unavailable.
 """
 import logging;
-import from collections.abc { Callable, Generator, Iterable }
-import from typing { Any }
-import from uuid { UUID }
 import redis;
-import from pymongo { MongoClient }
+import from collections.abc { Callable, Generator, Iterable }
+import from pickle { dumps, loads }
+import from typing { Any, cast }
+import from uuid { UUID }
+import from pymongo { MongoClient, UpdateOne }
 import from pymongo.errors { ConnectionFailure }
 import from jaclang.jac0core.archetype { Anchor, NodeAnchor, Root }
 import from jaclang.runtimelib.memory {
@@ -25,8 +26,11 @@ import from jaclang.runtimelib.memory {
 }
 import from jaclang.runtimelib.utils { storage_key, to_uuid }
 import from jaclang.runtimelib.serializer { Serializer }
+import from jac_scale.config_loader { get_scale_config }
 
-glob logger = logging.getLogger(__name__);
+# Load database configuration from jac.toml with env var overrides
+glob _db_config = get_scale_config().get_database_config(),
+     logger = logging.getLogger(__name__);
 
 """
 Redis cache backend - implements CacheMemory for distributed L2 caching.
@@ -134,4 +138,5 @@ obj ScaleTieredMemory(TieredMemory) {
 
     def init(use_cache: bool = True) -> None;
     def close -> None;
+    def commit(anchor: (Any | None) = None) -> None;
 }

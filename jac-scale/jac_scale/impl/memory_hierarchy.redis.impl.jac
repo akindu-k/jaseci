@@ -1,26 +1,15 @@
 """Redis CacheBackend Implementation."""
-import json;
-import redis;
-import logging;
-import from collections.abc { Callable, Generator, Iterable }
-import from uuid { UUID }
-import from jaclang.jac0core.archetype { Anchor, Root }
-import from jaclang.runtimelib.utils { storage_key, to_uuid }
-import from jac_scale.config_loader { get_scale_config }
-
-glob logger = logging.getLogger(__name__);
 
 """Post-initialization: connect to Redis."""
 impl RedisBackend.postinit -> None {
-    # Get URL from config if not explicitly set
     if self.redis_url is None {
-        self.redis_url = get_scale_config().get_database_config()['redis_url'];
+        self.redis_url = _db_config.get('redis_url');
     }
     if self.redis_url and self.redis_client is None {
         try {
             self.redis_client = redis.from_url(self.redis_url);
         } except Exception as e {
-            logger.error(f"Redis connection failed: {e}");
+            logger.warning(f"Redis connection failed: {e}");
             self.redis_client = None;
         }
     }
@@ -28,6 +17,9 @@ impl RedisBackend.postinit -> None {
 
 """Check if Redis is available and connected."""
 impl RedisBackend.is_available -> bool {
+    if not self.redis_url {
+        self.redis_url = _db_config.get('redis_url');
+    }
     if not self.redis_url {
         return False;
     }
@@ -62,7 +54,7 @@ impl RedisBackend.get(id: UUID) -> (Anchor | None) {
         data = json.loads(raw);
         return Serializer.deserialize(data);
     } except Exception as e {
-        logger.error(f"Redis get failed: {e}");
+        logger.debug(f"Redis get failed: {e}");
         return None;
     }
 }
@@ -77,7 +69,7 @@ impl RedisBackend.put(anchor: Anchor) -> None {
         key = storage_key(anchor.id);
         self.redis_client.set(key, json.dumps(data));
     } except Exception as e {
-        logger.error(f"Redis put failed: {e}");
+        logger.debug(f"Redis put failed: {e}");
     }
 }
 
@@ -90,7 +82,7 @@ impl RedisBackend.delete(id: UUID) -> None {
         key = storage_key(to_uuid(id));
         self.redis_client.delete(key);
     } except Exception as e {
-        logger.error(f"Redis delete failed: {e}");
+        logger.debug(f"Redis delete failed: {e}");
     }
 }
 
@@ -100,7 +92,7 @@ impl RedisBackend.close -> None {
         try {
             self.redis_client.close();
         } except Exception as e {
-            logger.error(f"Error closing Redis connection: {e}");
+            logger.warning(f"Error closing Redis connection: {e}");
         }
         self.redis_client = None;
     }

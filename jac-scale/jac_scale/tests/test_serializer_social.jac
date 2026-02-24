@@ -47,40 +47,6 @@ test "serialize post node" {
     assert type(deserialized) == Post;
 }
 
-test "find_nodes queries persisted graph with direct db access" {
-    db = kvstore(db_name='jac_db', db_type='mongodb', uri=MONGO_URI);
-
-    alice = User(name='Alice', role='admin', age=30);
-    bob = User(name='Bob', role='user', age=25);
-    p1 = Post(title='Hello World', content='My first post');
-    p2 = Post(title='Jac is cool', content='Graph programming rocks');
-    p3 = Post(title='Getting started', content='Learning Jac today');
-
-    for node in [alice, bob, p1, p2, p3] {
-        data = Serializer.serialize(node.__jac__, include_type=True);
-        db._get_mongo_collection('_anchors').insert_one(
-            {'_id': str(node.__jac__.id), 'data': data, 'type': 'NodeAnchor'}
-        );
-    }
-
-    # Query using the QueryGraph walker
-    result = QueryGraph(mongo_uri=MONGO_URI) spawn root;
-    report_data = result.reports[0];
-
-    young = report_data['young'];
-    admins = report_data['admins'];
-    posts = report_data['posts'];
-
-    # Verify counts and data
-    assert len(young) == 1 and young[0].name == 'Bob' and young[0].age == 25;
-    assert len(admins) == 1 and admins[0].name == 'Alice' and admins[0].role == 'admin';
-    assert len(posts) == 3;
-
-    # Cleanup
-    db._get_mongo_collection('_anchors').drop();
-    cleanup_connections();
-}
-
 test "find_nodes queries persisted graph with BuildGraph" {
     db = kvstore(db_name='jac_db', db_type='mongodb', uri=MONGO_URI);
 

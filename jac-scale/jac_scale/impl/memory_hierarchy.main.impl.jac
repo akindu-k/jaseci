@@ -2,11 +2,8 @@
 
 Storage configuration comes from environment variables or jac.toml.
 """
-import logging;
-import from jaclang.runtimelib.memory { SqliteMemory }
-import from jac_scale.config_loader { get_scale_config }
 
-glob logger = logging.getLogger(__name__);
+
 
 """Initialize ScaleTieredMemory with distributed backends."""
 impl ScaleTieredMemory.init(use_cache: bool = True) -> None {
@@ -49,8 +46,52 @@ impl ScaleTieredMemory.init(use_cache: bool = True) -> None {
     }
 }
 
+"""Commit changes: flush all modified L1 anchors to MongoDB."""
+impl ScaleTieredMemory.commit(anchor: (Any | None) = None) -> None {
+    import from jaclang { JacRuntimeInterface as Jac }
+    if self.l3 is None or self._persistence_type != PersistenceType.MONGODB {
+        if self.l3 {
+            self.l3.sync();
+        }
+        return;
+    }
+    if anchor is not None {
+        # Early return if anchor is not valid for persistence
+        if not isinstance(anchor, Anchor) or not anchor.persistent {
+            return;
+        }
+        typed_anchor = cast(Anchor, anchor);
+        # Early return if no write access
+        if not Jac.check_write_access(typed_anchor) {
+            return;
+        }
+        try {
+            self.l3.put(typed_anchor);
+        } except Exception as e {
+            logger.warning(f"ScaleTieredMemory.commit(anchor) failed: {e}");
+        }
+        return;
+    }
+    for (_, mem_anchor) in list(self.__mem__.items()) {
+        if mem_anchor.persistent {
+            try {
+                if Jac.check_write_access(mem_anchor) {
+                    self.l3.put(mem_anchor);
+                }
+            } except Exception as e {
+                logger.warning(
+                    f"ScaleTieredMemory.commit flush failed for anchor "
+                    f"{mem_anchor.id}: {e}"
+                );
+            }
+        }
+    }
+}
+
+
 """Close all backends."""
 impl ScaleTieredMemory.close -> None {
+    self.commit();
     # Sync and close L3 persistence
     if self.l3 {
         self.l3.sync();
