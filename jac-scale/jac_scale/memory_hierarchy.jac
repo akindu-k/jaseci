@@ -141,5 +141,6 @@ obj ScaleTieredMemory(TieredMemory) {
         _persistence_type: PersistenceType = PersistenceType.NONE;
 
     def init(use_cache: bool = True) -> None;
+    def commit(anchor: (Anchor | None) = None) -> None;
     def close -> None;
 }
