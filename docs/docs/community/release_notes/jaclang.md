@@ -4,6 +4,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.11.2 (Unreleased)
 
+- **Serializer: Restore Anchor Edges/Source/Target from IDs**: `_deserialize_anchor` now restores `NodeAnchor.edges` and `EdgeAnchor.source/target` as unpopulated stubs from serialized ID strings via new `_id_to_stub` helper.
+
 ## jaclang 0.11.1 (Latest Release)
 
 - **Perf: Type Narrowing Optimization**: Fixed exponential slowdown in `jac check` with many `if` statements (~1 min → ~2s). Member access now uses narrowed types and reports errors for invalid attribute access on `None`.
