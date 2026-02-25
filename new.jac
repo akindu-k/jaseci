@@ -32,7 +32,7 @@ walker PaymentReceived {
         report response;
     }
 }
-        
+
 walker test_end_point {
     has query: str;
 
