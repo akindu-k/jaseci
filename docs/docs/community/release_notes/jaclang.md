@@ -6,6 +6,12 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 - **Serializer: Restore Anchor Edges/Source/Target from IDs**: `_deserialize_anchor` now restores `NodeAnchor.edges` and `EdgeAnchor.source/target` as unpopulated stubs from serialized ID strings via new `_id_to_stub` helper.
 
+- **Fix: Union of Subclasses Assignable to Base Class**: Fixed type checker rejecting valid assignments where a union of subclasses (e.g., `Dog | Cat`) is passed to a parameter expecting the base class (e.g., `Animal`). This commonly occurs after match statement narrowing and now works correctly.
+- **Fix: Type Narrowing for Inheritance-Based isinstance**: Fixed `isinstance(nd, SubClass)` not narrowing the type when the variable is declared as a base class (e.g., `nd: BaseNode`). Previously, type narrowing only worked with union types; now single-class types are correctly narrowed to their subclass after isinstance checks.
+- **Fix: Native Global Pointer Variables Collected by GC**: MCJIT global variables (e.g. `glob WHITE_SYMBOLS: dict[...]`) live outside Boehm GC's scanned memory, causing global dicts/lists/objects to be freed after enough allocations trigger a collection. Fixed by emitting `GC_add_roots` calls for every pointer-typed global after initialization.
+- **Fix: Native Dict Tuple Key Comparison**: Dict key comparison for tuple/struct pointer types used pointer equality instead of structural comparison, so two separately-allocated tuples with the same values would never match. Fixed by using `memcmp` for tuple keys, matching the existing pattern in set helpers.
+- **Match Case Type Narrowing**: The type checker now narrows variable types inside match cases based on the pattern being matched. For example, `case MyClass():` narrows the matched variable to `MyClass`, and union patterns like `case A() | B():` narrow to `A | B`.
+
 ## jaclang 0.11.1 (Latest Release)
 
 - **Perf: Type Narrowing Optimization**: Fixed exponential slowdown in `jac check` with many `if` statements (~1 min → ~2s). Member access now uses narrowed types and reports errors for invalid attribute access on `None`.
