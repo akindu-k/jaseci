@@ -4,6 +4,9 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.2.2 (Unreleased)
 
+- **Explicit Data Persistence (`commit()`)**: Added `ScaleTieredMemory.commit(anchor=None)` method to flush L1 anchors to persistent storage (MongoDB/SQLite). Supports single-anchor commits or bulk flush of all modified anchors. The `close()` method now auto-commits before shutdown.
+- **Serializer Tests**: Added tests for `_id_to_stub` stub creation, `NodeAnchor` edges restoration, and `EdgeAnchor` source/target restoration with lazy-loading.
+
 ## jac-scale 0.2.1 (Latest Release)
 
 - **Admin Portal**: Added a built-in `/admin` dashboard for user management and administration. Features include user CRUD operations (list, create, edit, delete), role-based access control with `admin`, `moderator`, and `user` roles, force password reset, and SSO account management view.
