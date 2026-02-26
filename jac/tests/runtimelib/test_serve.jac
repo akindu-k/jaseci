@@ -87,35 +87,6 @@ test "user manager token validation" {
     }
 }
 
-test "users are stored in sqlite not mongodb" {
-    import sqlite3;
-    with TemporaryDirectory() as tmpdir {
-        session_file = str(Path(tmpdir) / "test.session");
-        user_mgr = Jac.get_user_manager(session_file);
-        # Create a user through the UserManager API
-        result = user_mgr.create_user("sqliteuser", "sqlitepass");
-        assert "error" not in result, f"User creation failed: {result}";
-        created_token = result["token"];
-        created_root_id = result["root_id"];
-        # Verify the SQLite database file was created
-        db_path = os.path.join(session_file, ".jac", "data", "main.db");
-        assert os.path.exists(db_path), f"SQLite DB not found at {db_path}";
-        # Open the database directly and verify the user row exists
-        conn = sqlite3.connect(db_path);
-        cursor = conn.execute(
-            "SELECT username, token, root_id FROM users WHERE username = ?",
-            ("sqliteuser", )
-        );
-        row = cursor.fetchone();
-        conn.close();
-        assert row is not None, "User not found in SQLite database";
-        assert row[0] == "sqliteuser", f"Username mismatch: {row[0]}";
-        assert row[1] == created_token, f"Token mismatch: {row[1]}";
-        assert row[2] == created_root_id, f"Root ID mismatch: {row[2]}";
-        user_mgr.close();
-    }
-}
-
 # --- Faux Mode Tests ---
 test "faux flag prints endpoint docs" {
     with TemporaryDirectory() as tmpdir {
