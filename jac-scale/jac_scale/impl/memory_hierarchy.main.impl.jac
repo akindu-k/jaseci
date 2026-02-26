@@ -73,20 +73,19 @@ impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
     }
     # Flush all L1 anchors to L3 (and L2 if available)
     for (_, mem_anchor) in list(self.__mem__.items()) {
-        if mem_anchor.persistent {
-            try {
-                if Jac.check_write_access(mem_anchor) {
-                    self.l3.put(mem_anchor);
-                    if self.l2 {
-                        self.l2.put(mem_anchor);
-                    }
-                }
-            } except Exception as e {
-                logger.warning(
-                    f"ScaleTieredMemory.commit flush failed for anchor "
-                    f"{mem_anchor.id}: {e}"
-                );
+        if not mem_anchor.persistent or not Jac.check_write_access(mem_anchor) {
+            continue;
+        }
+        try {
+            self.l3.put(mem_anchor);
+            if self.l2 {
+                self.l2.put(mem_anchor);
             }
+        } except Exception as e {
+            logger.warning(
+                f"ScaleTieredMemory.commit flush failed for anchor "
+                f"{mem_anchor.id}: {e}"
+            );
         }
     }
 }
