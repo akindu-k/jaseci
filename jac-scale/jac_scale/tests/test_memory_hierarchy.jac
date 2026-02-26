@@ -302,19 +302,18 @@ test "data persists after server restart for mongo db" {
     }
 }
 
-test "data persists after server restart for local storage" {
+test "data persists after server restart for sqlite" {
     if not JAC_FILE.exists() {
         raise FileNotFoundError(f"Missing Jac file: {JAC_FILE}") ;
     }
 
-    # Clean up data files
     data_dir = FIXTURES_DIR / ".jac" / "data";
     if data_dir.exists() {
         import shutil;
         shutil.rmtree(data_dir);
     }
 
-    # Ensure no MongoDB or Redis environment variables are set
+    # Ensure no MongoDB or Redis environment variables are set (SQLite-only mode)
     env_backup = {};
     for key in ["MONGODB_URI", "REDIS_URL"] {
         if key in os.environ {
@@ -328,31 +327,39 @@ test "data persists after server restart for local storage" {
     server = start_server(FIXTURES_DIR, JAC_FILE, port);
 
     try {
-        # Create tasks with local storage (in-memory session)
-        created_tasks = [
-            {"id": 301, "title": "Local Task 1"},
-            {"id": 302, "title": "Local Task 2"}
-        ];
+        # Create a task
+        res = requests.post(
+            f"{base_url}/walker/CreateTask",
+            json={"id": 401, "title": "Persist me across restart"},
+            timeout=2
+        );
+        assert res.status_code == 200 , f"Task creation failed: {res.status_code} - {res.text}";
 
-        for task_payload in created_tasks {
-            res = requests.post(
-                f"{base_url}/walker/CreateTask", json=task_payload, timeout=2
-            );
-            assert res.status_code == 200 , f"Task creation failed: {res.status_code} - {res.text}";
-        }
-
-        # Verify tasks exist in current session
-        res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=2);
+        # Verify task exists before restart
+        res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=5);
         response_data = cast(
             dict[str, Any], extract_transport_response_data(res.json())
         );
-        tasks = response_data["reports"][0];
-        assert len(tasks) == 2 , f"Should have 2 tasks in session, got {len(tasks)}";
+        tasks_before = response_data["reports"][0];
+        assert len(tasks_before) == 1 , f"Should have 1 task before restart, got {len(
+            tasks_before
+        )}";
 
-        # Verify task details
-        task_titles = {task["title"] for task in tasks};
-        assert "Local Task 1" in task_titles , "Local Task 1 should exist in session";
-        assert "Local Task 2" in task_titles , "Local Task 2 should exist in session";
+        # Restart server
+        server.terminate();
+        server.wait(timeout=2);
+        server = start_server(FIXTURES_DIR, JAC_FILE, port);
+
+        # Verify task persists after restart
+        res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=5);
+        assert res.status_code == 200 , f"Post-restart request failed: {res.status_code}";
+        response_data = cast(
+            dict[str, Any], extract_transport_response_data(res.json())
+        );
+        tasks_after = response_data["reports"][0];
+        assert len(tasks_after) == 1 , f"Task should persist after SQLite restart, got {len(
+            tasks_after
+        )}";
     } finally {
         if server {
             server.terminate();
