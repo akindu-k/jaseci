@@ -5,6 +5,9 @@ This document provides a summary of new features, improvements, and bug fixes in
 ## jac-scale 0.2.2 (Unreleased)
 
 - **Data Persists Across Server Restarts**: Graph nodes and edges created during a session now persist automatically in MongoDB. When you restart your `jac start` server, previously created data is restored and accessible - no manual save operations required.
+- **`jac status` Command**: New `jac status app.jac` command to check the live deployment status of all Kubernetes components (Jaseci App, Redis, MongoDB, Prometheus, Grafana). Displays a color-coded table with component health, pod readiness counts, and service URLs. Detects running, degraded, pending, restarting (crash-loop), and not-deployed states.
+- **Resource Tagging**: All Kubernetes resources created by jac-scale are now labeled with `managed: jac-scale`, enabling easy auditing and identification via `kubectl get all -l managed=jac-scale -A`.
+- k8s metrics dashboard in prometheus and grafana
 - Jac status command to check deployment status of each component of k8s
 - **Chore: Codebase Reformatted**: All `.jac` files reformatted with improved `jac format` (better line-breaking, comment spacing, and ternary indentation).
 
@@ -17,6 +20,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - Internal: refactor jac-scale k8s loadbalancer/service to support other vendors
 - Before deploying to the local Kubernetes cluster, check whether the required NodePorts are already in use in any namespace; if they are, throw an error.
 - jac destroy command deletes non default namespace
+- **Fix: Code-sync pod stuck in ContainerCreating**: Added preferred `podAffinity` to the code-sync pod spec so it prefers scheduling on the same node as the code-server pod. Fixes RWO (ReadWriteOnce) PVC mount failures when Kubernetes schedules the two pods on different nodes.
 - 1 Minor refactor
 
 ## jac-scale 0.2.0
