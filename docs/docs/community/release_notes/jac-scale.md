@@ -5,6 +5,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 ## jac-scale 0.2.2 (Unreleased)
 
 - **Explicit Data Persistence (`commit()`)**: Added `ScaleTieredMemory.commit(anchor=None)` to flush L1 anchors to storage; `close()` now auto-commits before shutdown.
+- **Chore: Codebase Reformatted**: All `.jac` files reformatted with improved `jac format` (better line-breaking, comment spacing, and ternary indentation).
 
 ## jac-scale 0.2.1 (Latest Release)
 
