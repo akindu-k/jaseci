@@ -28,6 +28,7 @@ import from jaclang.runtimelib.memory {
 import from jaclang.runtimelib.utils { storage_key, to_uuid }
 import from jaclang.runtimelib.serializer { Serializer }
 import from jac_scale.config_loader { get_scale_config }
+import from jaclang { JacRuntimeInterface as Jac }
 
 glob logger = logging.getLogger(__name__);
 

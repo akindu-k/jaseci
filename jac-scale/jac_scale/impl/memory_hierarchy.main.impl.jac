@@ -46,8 +46,6 @@ impl ScaleTieredMemory.init(use_cache: bool = True) -> None {
 
 """Commit changes: flush L1 anchors to persistent storage (MongoDB/SQLite)."""
 impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
-    import from jaclang { JacRuntimeInterface as Jac }
-    import from typing { cast }
     if self.l3 is None {
         return;
     }
@@ -95,7 +93,6 @@ impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
 
 """Close all backends."""
 impl ScaleTieredMemory.close -> None {
-    # Commit all pending changes before closing
     self.commit();
     # Sync and close L3 persistence
     if self.l3 {

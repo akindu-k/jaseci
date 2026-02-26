@@ -78,19 +78,23 @@ test "find_nodes queries persisted graph with BuildGraph" {
     cleanup_connections();
 }
 
-test "_id_to_stub with valid/invalid UUIDs" {
-    # Valid stubs
-    for anchor_cls in [NodeAnchor, EdgeAnchor] {
-        stub_id = uuid4();
-        stub = Serializer._id_to_stub(anchor_cls, str(stub_id));
-        assert stub.id == stub_id and not stub.is_populated();
-    }
-    # Invalid UUID
+test "_id_to_stub creates valid stubs" {
+    # NodeAnchor stub
+    node_id = uuid4();
+    node_stub = Serializer._id_to_stub(NodeAnchor, str(node_id));
+    assert node_stub.id == node_id and not node_stub.is_populated();
+
+    # EdgeAnchor stub
+    edge_id = uuid4();
+    edge_stub = Serializer._id_to_stub(EdgeAnchor, str(edge_id));
+    assert edge_stub.id == edge_id and not edge_stub.is_populated();
+
+    # Invalid UUID returns None
     assert Serializer._id_to_stub(NodeAnchor, "bad-uuid") is None;
 }
 
 test "NodeAnchor edges restored as lazy stubs" {
-    edge_ids = [uuid4() for _ in range(3)];
+    edge_ids = [uuid4(), uuid4(), uuid4()];
     anchor = Serializer._deserialize_anchor(
         {
             '__type__': 'NodeAnchor',
@@ -100,14 +104,14 @@ test "NodeAnchor edges restored as lazy stubs" {
         }
     );
     assert len(anchor.edges) == 3;
-    assert all(
-        e.id == edge_ids[i] and not e.is_populated()
-        for (i, e) in enumerate(anchor.edges)
-    );
+    for (i, edge) in enumerate(anchor.edges) {
+        assert edge.id == edge_ids[i] and not edge.is_populated();
+    }
 }
 
 test "EdgeAnchor source/target restored as lazy stubs" {
-    (src_id, tgt_id) = (uuid4(), uuid4());
+    src_id = uuid4();
+    tgt_id = uuid4();
     anchor = Serializer._deserialize_anchor(
         {
             '__type__': 'EdgeAnchor',
