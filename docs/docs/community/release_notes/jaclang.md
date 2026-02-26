@@ -4,7 +4,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.11.2 (Unreleased)
 
-- **Improved Memory Efficiency for Large Graphs**: Jac now uses lazy loading for graph data in MongoDB/Redis — nodes and edges are fetched only when accessed, instead of loading the entire graph upfront.
+- **Improved Memory Efficiency for Large Graphs**: Jac now uses lazy loading for graph data in MongoDB/Redis, nodes and edges are fetched only when accessed, instead of loading the entire graph upfront.
 
 - **Fix: Union of Subclasses Assignable to Base Class**: Fixed type checker rejecting valid assignments where a union of subclasses (e.g., `Dog | Cat`) is passed to a parameter expecting the base class (e.g., `Animal`). This commonly occurs after match statement narrowing and now works correctly.
 - **Fix: Compound AND Narrowing**: Multiple isinstance checks in the same AND expression now narrow to the most specific type. Example: `isinstance(x, BaseNode) and isinstance(x, CFGNode)` correctly narrows `x` to `CFGNode` inside the if block.
