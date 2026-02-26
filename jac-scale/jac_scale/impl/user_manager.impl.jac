@@ -1,45 +1,19 @@
 impl JacScaleUserManager.postinit -> None {
-    super.postinit();
-    # Create SSO accounts table for tracking linked external identities
-    self._ensure_connection();
-    self._conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS sso_accounts (
-            user_id TEXT NOT NULL,
-            platform TEXT NOT NULL,
-            external_id TEXT NOT NULL,
-            email TEXT,
-            linked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (platform, external_id),
-            FOREIGN KEY (user_id) REFERENCES users(username) ON DELETE CASCADE
-        )
-        """
-    );
-    # Create index for faster lookups by user_id
-    self._conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_sso_accounts_user_id ON sso_accounts(user_id)"
-    );
-    # Add role, requires_password_reset, and is_password_required columns to users table
-    # SQLite doesn't support IF NOT EXISTS for ALTER TABLE, so check column existence first
-    cursor = self._conn.execute("PRAGMA table_info(users)");
-    existing_columns = {row[1] for row in cursor.fetchall()};
-    if 'role' not in existing_columns {
-        self._conn.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'");
-    }
-    if 'requires_password_reset' not in existing_columns {
-        self._conn.execute(
-            "ALTER TABLE users ADD COLUMN requires_password_reset INTEGER DEFAULT 0"
-        );
-    }
-    if 'is_password_required' not in existing_columns {
-        self._conn.execute(
-            "ALTER TABLE users ADD COLUMN is_password_required INTEGER DEFAULT 1"
-        );
-    }
-    if 'user_id' not in existing_columns {
-        self._conn.execute("ALTER TABLE users ADD COLUMN user_id TEXT");
-    }
-    self._conn.commit();
+    import os;
+    import from jac_scale.db { get_mongo_client }
+    # Initialize MongoDB connection
+    client = get_mongo_client();
+    self._mongo_db = client['jac_db'];
+    self._users_col = self._mongo_db['users'];
+    self._sso_col = self._mongo_db['sso_accounts'];
+    # Ensure indexes
+    self._users_col.create_index('username', unique=True);
+    self._users_col.create_index('token', unique=True, sparse=True);
+    self._sso_col.create_index([('platform', 1), ('external_id', 1)], unique=True);
+    self._sso_col.create_index('user_id');
+    # Initialize parent fields without calling super.postinit() (no SQLite needed)
+    self._db_path = '';
+    self._conn = None;
     # Load SSO config
     sso_config = get_scale_config().get_sso_config();
     for platform in Platforms {
@@ -60,6 +34,145 @@ impl JacScaleUserManager.postinit -> None {
     }
 }
 
+# """Override parent's _ensure_connection to be a no-op (MongoDB uses connection pooling)."""
+impl JacScaleUserManager._ensure_connection -> None { }
+
+"""Create a new user with their own root node. Returns dict with user data or error."""
+impl JacScaleUserManager.create_user(username: str, password: str) -> dict[str, str] {
+    import from jaclang.jac0core.constructs { Root }
+    import from jaclang { JacRuntime as Jac }
+    import hashlib;
+    import secrets;
+    # Check if user already exists
+    if self._users_col.count_documents({'username': username}, limit=1) > 0 {
+        return {'error': 'User already exists'};
+    }
+    # Create user root node
+    ctx = Jac.get_context();
+    user_root = Root();
+    root_anchor = user_root.__jac__;
+    Jac.save(root_anchor);
+    Jac.commit(root_anchor);
+    root_id = root_anchor.id.hex;
+    token = secrets.token_urlsafe(32);
+    password_hash = hashlib.sha256(password.encode()).hexdigest();
+    self._users_col.insert_one(
+        {
+            'username': username,
+            'password_hash': password_hash,
+            'token': token,
+            'root_id': root_id,
+            'role': 'user',
+            'requires_password_reset': False,
+            'is_password_required': True,
+            'user_id': None
+        }
+    );
+    return {'username': username, 'token': token, 'root_id': root_id};
+}
+
+"""Authenticate a user and return their data."""
+impl JacScaleUserManager.authenticate(
+    username: str, password: str
+) -> (dict[(str, str)] | None) {
+    import hashlib;
+    password_hash = hashlib.sha256(password.encode()).hexdigest();
+    user = self._users_col.find_one(
+        {'username': username, 'password_hash': password_hash},
+        {'token': 1, 'root_id': 1, '_id': 0}
+    );
+    if user {
+        return {
+            'username': username,
+            'token': user['token'],
+            'root_id': user['root_id']
+        };
+    }
+    return None;
+}
+
+"""Validate token and return username."""
+impl JacScaleUserManager.validate_token(token: str) -> (str | None) {
+    return self.validate_jwt_token(token);
+}
+
+"""Get user's root node ID."""
+impl JacScaleUserManager.get_root_id(username: str) -> (str | None) {
+    user = self._users_col.find_one({'username': username}, {'root_id': 1, '_id': 0});
+    return user['root_id'] if user else None;
+}
+
+"""Get user data by username."""
+impl JacScaleUserManager.get_user(username: str) -> (dict[(str, str)] | None) {
+    user = self._users_col.find_one(
+        {'username': username}, {'token': 1, 'root_id': 1, '_id': 0}
+    );
+    if not user {
+        return None;
+    }
+    return {'email': username, 'token': user['token'], 'root_id': user['root_id']};
+}
+
+"""Check if a user exists."""
+impl JacScaleUserManager.user_exists(username: str) -> bool {
+    return self._users_col.count_documents({'username': username}, limit=1) > 0;
+}
+
+"""Update user's username."""
+impl JacScaleUserManager.update_username(
+    current_username: str, new_username: str
+) -> dict[str, str] {
+    # Check if new username already exists
+    if self._users_col.count_documents({'username': new_username}, limit=1) > 0 {
+        return {'error': 'Username already taken'};
+    }
+    result = self._users_col.update_one(
+        {'username': current_username}, {'$set': {'username': new_username}}
+    );
+    if result.modified_count == 0 {
+        return {'error': 'User not found'};
+    }
+    # Also update SSO references
+    self._sso_col.update_many(
+        {'user_id': current_username}, {'$set': {'user_id': new_username}}
+    );
+    # Get updated user data
+    user = self._users_col.find_one(
+        {'username': new_username}, {'token': 1, 'root_id': 1, '_id': 0}
+    );
+    return {
+        'username': new_username,
+        'token': user['token'],
+        'root_id': user['root_id']
+    };
+}
+
+"""Update user's password."""
+impl JacScaleUserManager.update_password(
+    username: str, current_password: str, new_password: str
+) -> dict[str, str] {
+    import hashlib;
+    # Verify current password
+    current_password_hash = hashlib.sha256(current_password.encode()).hexdigest();
+    if self._users_col.count_documents(
+        {'username': username, 'password_hash': current_password_hash}, limit=1
+    ) == 0 {
+        return {'error': 'Current password is incorrect'};
+    }
+    # Update password
+    new_password_hash = hashlib.sha256(new_password.encode()).hexdigest();
+    self._users_col.update_one(
+        {'username': username}, {'$set': {'password_hash': new_password_hash}}
+    );
+    return {'username': username, 'message': 'Password updated successfully'};
+}
+
+"""Close connection — no-op with MongoDB connection pooling."""
+impl JacScaleUserManager.close -> None { }
+
+# ============================================================================
+# JWT Methods
+# ============================================================================
 impl JacScaleUserManager.create_jwt_token(
     username: str, include_role: bool = True
 ) -> str {
@@ -119,10 +232,9 @@ impl JacScaleUserManager.refresh_jwt_token(token: str) -> (str | None) {
     }
 }
 
-impl JacScaleUserManager.validate_token(token: str) -> (str | None) {
-    return self.validate_jwt_token(token);
-}
-
+# ============================================================================
+# SSO Methods
+# ============================================================================
 impl JacScaleUserManager.get_sso(platform: str, operation: str) -> (SSOProvider | None) {
     if (platform not in self.SUPPORTED_PLATFORMS) {
         return None;
@@ -283,36 +395,34 @@ impl JacScaleUserManager.sso_callback(
     );
 }
 
+# ============================================================================
 # SSO Account Linking Methods
-"""Link an SSO account to a user.
-
-This allows users to have multiple SSO providers linked to their account.
-"""
+# ============================================================================
+"""Link an SSO account to a user."""
 impl JacScaleUserManager.link_sso_account(
     user_id: str, platform: str, external_id: str, email: str
 ) -> dict[str, str] {
-    self._ensure_connection();
-    # Check if this SSO account is already linked to another user
-    cursor = self._conn.execute(
-        "SELECT user_id FROM sso_accounts WHERE platform = ? AND external_id = ?",
-        (platform, external_id)
+    # Check if this SSO account is already linked
+    existing = self._sso_col.find_one(
+        {'platform': platform, 'external_id': external_id}
     );
-    existing = cursor.fetchone();
     if existing {
-        if existing[0] == user_id {
+        if existing['user_id'] == user_id {
             return {'message': 'SSO account already linked to this user'};
         }
         return {'error': 'This SSO account is already linked to another user'};
     }
     # Link the SSO account
-    self._conn.execute(
-        """
-        INSERT INTO sso_accounts (user_id, platform, external_id, email)
-        VALUES (?, ?, ?, ?)
-        """,
-        (user_id, platform, external_id, email)
+    import from datetime { datetime, UTC }
+    self._sso_col.insert_one(
+        {
+            'user_id': user_id,
+            'platform': platform,
+            'external_id': external_id,
+            'email': email,
+            'linked_at': datetime.now(UTC)
+        }
     );
-    self._conn.commit();
     return {
         'message': 'SSO account linked successfully',
         'user_id': user_id,
@@ -324,13 +434,8 @@ impl JacScaleUserManager.link_sso_account(
 impl JacScaleUserManager.unlink_sso_account(
     user_id: str, platform: str
 ) -> dict[str, str] {
-    self._ensure_connection();
-    cursor = self._conn.execute(
-        "DELETE FROM sso_accounts WHERE user_id = ? AND platform = ?",
-        (user_id, platform)
-    );
-    self._conn.commit();
-    if cursor.rowcount == 0 {
+    result = self._sso_col.delete_one({'user_id': user_id, 'platform': platform});
+    if result.deleted_count == 0 {
         return {'error': 'SSO account not found'};
     }
     return {
@@ -342,53 +447,45 @@ impl JacScaleUserManager.unlink_sso_account(
 
 """Get all SSO accounts linked to a user."""
 impl JacScaleUserManager.get_sso_accounts(user_id: str) -> list[dict[str, str]] {
-    self._ensure_connection();
-    cursor = self._conn.execute(
-        """
-        SELECT platform, external_id, email, linked_at
-        FROM sso_accounts
-        WHERE user_id = ?
-        ORDER BY linked_at DESC
-        """,
-        (user_id, )
+    cursor = self._sso_col.find(
+        {'user_id': user_id},
+        {'_id': 0, 'platform': 1, 'external_id': 1, 'email': 1, 'linked_at': 1}
+    ).sort(
+        'linked_at', -1
     );
     accounts = [];
-    for row in cursor.fetchall() {
+    for doc in cursor {
         accounts.append(
             {
-                'platform': row[0],
-                'external_id': row[1],
-                'email': row[2],
-                'linked_at': row[3]
+                'platform': doc['platform'],
+                'external_id': doc['external_id'],
+                'email': doc.get('email', ''),
+                'linked_at': str(doc.get('linked_at', ''))
             }
         );
     }
     return accounts;
 }
 
-"""Find a user by their SSO account credentials.
-
-This is used during SSO login to find the user associated with
-an external SSO identity.
-"""
+"""Find a user by their SSO account credentials."""
 impl JacScaleUserManager.get_user_by_sso(
     platform: str, external_id: str
 ) -> (dict[str, str] | None) {
-    self._ensure_connection();
-    cursor = self._conn.execute(
-        """
-        SELECT sa.user_id, u.token, u.root_id
-        FROM sso_accounts sa
-        JOIN users u ON sa.user_id = u.username
-        WHERE sa.platform = ? AND sa.external_id = ?
-        """,
-        (platform, external_id)
-    );
-    row = cursor.fetchone();
-    if not row {
+    sso_doc = self._sso_col.find_one({'platform': platform, 'external_id': external_id});
+    if not sso_doc {
         return None;
     }
-    return {'email': row[0], 'token': row[1], 'root_id': row[2]};
+    user = self._users_col.find_one(
+        {'username': sso_doc['user_id']}, {'token': 1, 'root_id': 1, '_id': 0}
+    );
+    if not user {
+        return None;
+    }
+    return {
+        'email': sso_doc['user_id'],
+        'token': user['token'],
+        'root_id': user['root_id']
+    };
 }
 
 # ============================================================================
@@ -396,15 +493,11 @@ impl JacScaleUserManager.get_user_by_sso(
 # ============================================================================
 """Get user's role."""
 impl JacScaleUserManager.get_user_role(username: str) -> (str | None) {
-    self._ensure_connection();
-    cursor = self._conn.execute(
-        "SELECT role FROM users WHERE username = ?", (username, )
-    );
-    row = cursor.fetchone();
-    if not row {
+    user = self._users_col.find_one({'username': username}, {'role': 1, '_id': 0});
+    if not user {
         return None;
     }
-    return row[0] or 'user';
+    return user.get('role', 'user') or 'user';
 }
 
 """Set user's role."""
@@ -415,12 +508,10 @@ impl JacScaleUserManager.set_user_role(username: str, role: str) -> dict[str, st
     if role not in valid_roles {
         return {'error': f"Invalid role. Must be one of: {', '.join(valid_roles)}"};
     }
-    self._ensure_connection();
-    cursor = self._conn.execute(
-        "UPDATE users SET role = ? WHERE username = ?", (role, username)
+    result = self._users_col.update_one(
+        {'username': username}, {'$set': {'role': role}}
     );
-    self._conn.commit();
-    if cursor.rowcount == 0 {
+    if result.matched_count == 0 {
         return {'error': 'User not found'};
     }
     return {
@@ -438,28 +529,23 @@ impl JacScaleUserManager.is_admin(username: str) -> bool {
 
 """Check if user requires password reset."""
 impl JacScaleUserManager.requires_password_reset(username: str) -> bool {
-    self._ensure_connection();
-    cursor = self._conn.execute(
-        "SELECT requires_password_reset FROM users WHERE username = ?", (username, )
+    user = self._users_col.find_one(
+        {'username': username}, {'requires_password_reset': 1, '_id': 0}
     );
-    row = cursor.fetchone();
-    if not row {
+    if not user {
         return False;
     }
-    return bool(row[0]);
+    return bool(user.get('requires_password_reset', False));
 }
 
 """Set whether user requires password reset."""
 impl JacScaleUserManager.set_requires_password_reset(
     username: str, requires_reset: bool
 ) -> dict[str, str] {
-    self._ensure_connection();
-    cursor = self._conn.execute(
-        "UPDATE users SET requires_password_reset = ? WHERE username = ?",
-        (1 if requires_reset else 0, username)
+    result = self._users_col.update_one(
+        {'username': username}, {'$set': {'requires_password_reset': requires_reset}}
     );
-    self._conn.commit();
-    if cursor.rowcount == 0 {
+    if result.matched_count == 0 {
         return {'error': 'User not found'};
     }
     return {'message': 'Password reset requirement updated', 'username': username};
@@ -467,28 +553,24 @@ impl JacScaleUserManager.set_requires_password_reset(
 
 """Check if password is required for user (SSO users may not need password)."""
 impl JacScaleUserManager.is_password_required(username: str) -> bool {
-    self._ensure_connection();
-    cursor = self._conn.execute(
-        "SELECT is_password_required FROM users WHERE username = ?", (username, )
+    user = self._users_col.find_one(
+        {'username': username}, {'is_password_required': 1, '_id': 0}
     );
-    row = cursor.fetchone();
-    if not row {
+    if not user {
         return True;
     }
-    return bool(row[0]) if row[0] is not None else True;
+    val = user.get('is_password_required');
+    return bool(val) if val is not None else True;
 }
 
 """Set whether password is required for user."""
 impl JacScaleUserManager.set_password_required(
     username: str, required: bool
 ) -> dict[str, str] {
-    self._ensure_connection();
-    cursor = self._conn.execute(
-        "UPDATE users SET is_password_required = ? WHERE username = ?",
-        (1 if required else 0, username)
+    result = self._users_col.update_one(
+        {'username': username}, {'$set': {'is_password_required': required}}
     );
-    self._conn.commit();
-    if cursor.rowcount == 0 {
+    if result.matched_count == 0 {
         return {'error': 'User not found'};
     }
     return {'message': 'Password requirement updated', 'username': username};
@@ -512,12 +594,10 @@ impl JacScaleUserManager.bootstrap_admin_user -> dict[str, str] {
         # Ensure existing user has admin role
         current_role = self.get_user_role(admin_username);
         if current_role != 'admin' {
-            self._ensure_connection();
-            self._conn.execute(
-                "UPDATE users SET role = 'admin', user_id = ? WHERE username = ?",
-                (self.ADMIN_USER_ID, admin_username)
+            self._users_col.update_one(
+                {'username': admin_username},
+                {'$set': {'role': 'admin', 'user_id': self.ADMIN_USER_ID}}
             );
-            self._conn.commit();
             logger.info(f"Existing user '{admin_username}' promoted to admin role");
         }
         return {'message': 'Admin user already exists', 'username': admin_username};
@@ -528,18 +608,16 @@ impl JacScaleUserManager.bootstrap_admin_user -> dict[str, str] {
         return result;
     }
     # Set admin role and user_id
-    self._ensure_connection();
-    self._conn.execute(
-        """
-        UPDATE users
-        SET role = 'admin',
-            user_id = ?,
-            requires_password_reset = ?
-        WHERE username = ?
-        """,
-        (self.ADMIN_USER_ID, 1 if require_reset else 0, admin_username)
+    self._users_col.update_one(
+        {'username': admin_username},
+        {
+            '$set': {
+                'role': 'admin',
+                'user_id': self.ADMIN_USER_ID,
+                'requires_password_reset': require_reset
+            }
+        }
     );
-    self._conn.commit();
     logger.warning(
         f"Admin user '{admin_username}' created with default password. "
         "Please change the password immediately!"
@@ -556,27 +634,29 @@ impl JacScaleUserManager.bootstrap_admin_user -> dict[str, str] {
 impl JacScaleUserManager.list_all_users(
     limit: int = 100, offset: int = 0
 ) -> list[dict[str, Any]] {
-    self._ensure_connection();
-    cursor = self._conn.execute(
-        """
-        SELECT username, root_id, role, requires_password_reset, is_password_required, user_id
-        FROM users
-        WHERE username != '__guest__'
-        ORDER BY username
-        LIMIT ? OFFSET ?
-        """,
-        (limit, offset)
+    cursor = self._users_col.find(
+        {'username': {'$ne': '__guest__'}}, {'_id': 0, 'password_hash': 0}
+    ).sort(
+        'username', 1
+    ).skip(
+        offset
+    ).limit(
+        limit
     );
     users = [];
-    for row in cursor.fetchall() {
+    for doc in cursor {
         users.append(
             {
-                'username': row[0],
-                'root_id': row[1],
-                'role': row[2] or 'user',
-                'requires_password_reset': bool(row[3]),
-                'is_password_required': bool(row[4]) if row[4] is not None else True,
-                'user_id': row[5]
+                'username': doc.get('username', ''),
+                'root_id': doc.get('root_id', ''),
+                'role': doc.get('role', 'user') or 'user',
+                'requires_password_reset': bool(
+                    doc.get('requires_password_reset', False)
+                ),
+                'is_password_required': bool(doc.get('is_password_required', True))
+                    if doc.get('is_password_required') is not None
+                    else True,
+                'user_id': doc.get('user_id')
             }
         );
     }
@@ -586,20 +666,17 @@ impl JacScaleUserManager.list_all_users(
 """Delete a user (admin only)."""
 impl JacScaleUserManager.delete_user(username: str) -> dict[str, str] {
     # Prevent deleting admin user with all-zeros UUID
-    self._ensure_connection();
-    cursor = self._conn.execute(
-        "SELECT user_id FROM users WHERE username = ?", (username, )
-    );
-    row = cursor.fetchone();
-    if row and row[0] == self.ADMIN_USER_ID {
+    user = self._users_col.find_one({'username': username}, {'user_id': 1, '_id': 0});
+    if user and user.get('user_id') == self.ADMIN_USER_ID {
         return {'error': 'Cannot delete the primary admin user'};
     }
     # Delete the user
-    cursor = self._conn.execute("DELETE FROM users WHERE username = ?", (username, ));
-    self._conn.commit();
-    if cursor.rowcount == 0 {
+    result = self._users_col.delete_one({'username': username});
+    if result.deleted_count == 0 {
         return {'error': 'User not found'};
     }
+    # Also delete SSO accounts
+    self._sso_col.delete_many({'user_id': username});
     return {'message': 'User deleted successfully', 'username': username};
 }
 
@@ -624,18 +701,16 @@ impl JacScaleUserManager.create_user_as_admin(
     }
     # Update with admin-specific fields
     user_id = str(uuid.uuid4());
-    self._ensure_connection();
-    self._conn.execute(
-        """
-        UPDATE users
-        SET role = ?,
-            user_id = ?,
-            requires_password_reset = ?
-        WHERE username = ?
-        """,
-        (role, user_id, 1 if requires_password_reset else 0, username)
+    self._users_col.update_one(
+        {'username': username},
+        {
+            '$set': {
+                'role': role,
+                'user_id': user_id,
+                'requires_password_reset': requires_password_reset
+            }
+        }
     );
-    self._conn.commit();
     result['role'] = role;
     result['user_id'] = user_id;
     result['requires_password_reset'] = str(requires_password_reset);

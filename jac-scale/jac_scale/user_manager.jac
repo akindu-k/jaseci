@@ -26,9 +26,26 @@ enum UserRole {
 
 obj JacScaleUserManager(UserManager) {
     has SUPPORTED_PLATFORMS: dict = {},
-        ADMIN_USER_ID: str = '00000000-0000-0000-0000-000000000000';
+        ADMIN_USER_ID: str = '00000000-0000-0000-0000-000000000000',
+        _mongo_db: Any by postinit,
+        _users_col: Any by postinit,
+        _sso_col: Any by postinit;
 
     def postinit -> None;
+    def _ensure_connection -> None;  # I need to implement this
+
+    def create_user(username: str, password: str) -> dict[str, str];
+    def authenticate(username: str, password: str) -> (dict[(str, str)] | None);
+    def get_root_id(username: str) -> (str | None);
+    def get_user(username: str) -> (dict[(str, str)] | None);
+    def user_exists(username: str) -> bool;
+    def update_username(current_username: str, new_username: str) -> dict[str, str];
+    def update_password(
+        username: str, current_password: str, new_password: str
+    ) -> dict[str, str];
+
+    def close -> None;  # I need to implement this
+
     # JWT methods
     def create_jwt_token(username: str, include_role: bool = True) -> str;
     def validate_jwt_token(token: str) -> (str | None);
