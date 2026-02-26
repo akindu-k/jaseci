@@ -376,7 +376,6 @@ test "data persists after server restart for sqlite" {
         time.sleep(0.5);
         gc.collect();
 
-        # Clean up data files
         if data_dir.exists() {
             import shutil;
             shutil.rmtree(data_dir);
