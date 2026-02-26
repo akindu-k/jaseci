@@ -271,6 +271,12 @@ test "data persists after server restart for mongo db" {
         );
         tasks_before = response_data["reports"][0];
         assert len(tasks_before) == 1 , "Should have 1 task before restart";
+        assert tasks_before[0]["id"] == 100 , f"Task id should be 100, got {tasks_before[
+            0
+        ]['id']}";
+        assert tasks_before[0]["title"] == "Test persistence" , f"Task title mismatch: {tasks_before[
+            0
+        ]['title']}";
 
         # Restart server
         server.terminate();
@@ -284,6 +290,12 @@ test "data persists after server restart for mongo db" {
         );
         tasks_after = response_data["reports"][0];
         assert len(tasks_after) == 1 , "Task should persist after restart";
+        assert tasks_after[0]["id"] == 100 , f"Task id should be 100 after restart, got {tasks_after[
+            0
+        ]['id']}";
+        assert tasks_after[0]["title"] == "Test persistence" , f"Task title mismatch after restart: {tasks_after[
+            0
+        ]['title']}";
     } finally {
         if server {
             server.terminate();
@@ -344,6 +356,12 @@ test "data persists after server restart for sqlite" {
         assert len(tasks_before) == 1 , f"Should have 1 task before restart, got {len(
             tasks_before
         )}";
+        assert tasks_before[0]["id"] == 401 , f"Task id should be 401, got {tasks_before[
+            0
+        ]['id']}";
+        assert tasks_before[0]["title"] == "Persist me across restart" , f"Task title mismatch: {tasks_before[
+            0
+        ]['title']}";
 
         # Restart server
         server.terminate();
@@ -360,6 +378,12 @@ test "data persists after server restart for sqlite" {
         assert len(tasks_after) == 1 , f"Task should persist after SQLite restart, got {len(
             tasks_after
         )}";
+        assert tasks_after[0]["id"] == 401 , f"Task id should be 401 after restart, got {tasks_after[
+            0
+        ]['id']}";
+        assert tasks_after[0]["title"] == "Persist me across restart" , f"Task title mismatch after restart: {tasks_after[
+            0
+        ]['title']}";
     } finally {
         if server {
             server.terminate();
