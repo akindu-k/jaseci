@@ -32,7 +32,7 @@ obj JacScaleUserManager(UserManager) {
         _sso_col: Any by postinit;
 
     def postinit -> None;
-    def _ensure_connection -> None;  # I need to implement this
+    def _ensure_connection -> None;  # need to implement this
 
     def create_user(username: str, password: str) -> dict[str, str];
     def authenticate(username: str, password: str) -> (dict[(str, str)] | None);
