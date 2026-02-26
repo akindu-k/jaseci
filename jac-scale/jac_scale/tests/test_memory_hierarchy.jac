@@ -23,8 +23,7 @@ def get_free_port -> int {
 }
 
 glob FIXTURES_DIR = Path(__file__).parent / "fixtures",
-     JAC_FILE = FIXTURES_DIR / "todo_app.jac",
-     PAYMENT_FILE = FIXTURES_DIR / "payment_app.jac";
+     JAC_FILE = FIXTURES_DIR / "todo_app.jac";
 
 """Extract data from TransportResponse envelope format."""
 def extract_transport_response_data(
@@ -235,71 +234,70 @@ test "read and write" {
 }
 
 test "data persists after server restart" {
-    
-        if not PAYMENT_FILE.exists() {
-            raise FileNotFoundError(f"Missing Jac file: {PAYMENT_FILE}") ;
-        }
+    if not JAC_FILE.exists() {
+        raise FileNotFoundError(f"Missing Jac file: {JAC_FILE}") ;
+    }
 
-        # Clean up data files
-        data_dir = FIXTURES_DIR / ".jac" / "data";
+    # Clean up data files
+    data_dir = FIXTURES_DIR / ".jac" / "data";
+    if data_dir.exists() {
+        import shutil;
+        shutil.rmtree(data_dir);
+    }
+
+    # Start MongoDB container
+    mongo_container = MongoDbContainer("mongo:latest");
+    mongo_container.start();
+    mongo_uri = mongo_container.get_connection_url();
+    os.environ["MONGODB_URI"] = mongo_uri;
+
+    port = get_free_port();
+    base_url = f"http://localhost:{port}";
+    server = start_server(FIXTURES_DIR, JAC_FILE, port);
+
+    try {
+        # Create task
+        res = requests.post(
+            f"{base_url}/walker/CreateTask",
+            json={"id": 100, "title": "Test persistence"},
+            timeout=5
+        );
+        assert res.status_code == 200;
+
+        # Verify task exists before restart
+        res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=5);
+        response_data = cast(
+            dict[str, Any], extract_transport_response_data(res.json())
+        );
+        tasks_before = response_data["reports"][0];
+        assert len(tasks_before) == 1 , "Should have 1 task before restart";
+
+        # Restart server
+        server.terminate();
+        server.wait(timeout=5);
+        server = start_server(FIXTURES_DIR, JAC_FILE, port);
+
+        # Verify task persists after restart
+        res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=5);
+        response_data = cast(
+            dict[str, Any], extract_transport_response_data(res.json())
+        );
+        tasks_after = response_data["reports"][0];
+        assert len(tasks_after) == 1 , "Task should persist after restart";
+    } finally {
+        if server {
+            server.terminate();
+            with contextlib.suppress(Exception) {
+                server.wait(timeout=5);
+            }
+        }
+        mongo_container.stop();
+        time.sleep(0.5);
+        gc.collect();
+
         if data_dir.exists() {
             import shutil;
             shutil.rmtree(data_dir);
         }
-
-        # Start MongoDB container
-        mongo_container = MongoDbContainer("mongo:latest");
-        mongo_container.start();
-        mongo_uri = mongo_container.get_connection_url();
-        os.environ["MONGODB_URI"] = mongo_uri;
-
-        port = get_free_port();
-        base_url = f"http://localhost:{port}";
-
-        # Start server first time
-        server = start_server(FIXTURES_DIR, PAYMENT_FILE, port);
-
-        try {
-            # Create payment
-            res = requests.post(
-                f"{base_url}/walker/set_payment",
-                json={"amount": 40.0, "currency": "USD"},
-                timeout=5
-            );
-            assert res.status_code == 200;
-
-            # Verify payment exists before restart
-            res = requests.post(f"{base_url}/walker/get_all_payments", json={}, timeout=5);
-            response_data = cast(dict[str, Any], extract_transport_response_data(res.json()));
-            payments_before = response_data["reports"][0];
-            assert len(payments_before) == 1 , f"Should have 1 payment before restart";
-
-            # Restart server
-            server.terminate();
-            server.wait(timeout=5);
-            server = start_server(FIXTURES_DIR, PAYMENT_FILE, port);
-
-            # Verify payment persists after restart
-            res = requests.post(f"{base_url}/walker/get_all_payments", json={}, timeout=5);
-            response_data = cast(dict[str, Any], extract_transport_response_data(res.json()));
-            payments_after = response_data["reports"][0];
-            assert len(payments_after) == 1 , "Payment should persist after restart";
-        } finally {
-            if server {
-                server.terminate();
-                with contextlib.suppress(Exception) {
-                    server.wait(timeout=5);
-                }
-            }
-            mongo_container.stop();
-            time.sleep(0.5);
-            gc.collect();
-
-            # Clean up
-            if data_dir.exists() {
-                import shutil;
-                shutil.rmtree(data_dir);
-            }
-        }
-    
+    }
 }
