@@ -233,7 +233,7 @@ test "read and write" {
     }
 }
 
-test "data persists after server restart" {
+test "data persists after server restart for mongo db" {
     if not JAC_FILE.exists() {
         raise FileNotFoundError(f"Missing Jac file: {JAC_FILE}") ;
     }
@@ -295,6 +295,81 @@ test "data persists after server restart" {
         time.sleep(0.5);
         gc.collect();
 
+        if data_dir.exists() {
+            import shutil;
+            shutil.rmtree(data_dir);
+        }
+    }
+}
+
+test "data persists after server restart for local storage" {
+    if not JAC_FILE.exists() {
+        raise FileNotFoundError(f"Missing Jac file: {JAC_FILE}") ;
+    }
+
+    # Clean up data files
+    data_dir = FIXTURES_DIR / ".jac" / "data";
+    if data_dir.exists() {
+        import shutil;
+        shutil.rmtree(data_dir);
+    }
+
+    # Ensure no MongoDB or Redis environment variables are set
+    env_backup = {};
+    for key in ["MONGODB_URI", "REDIS_URL"] {
+        if key in os.environ {
+            env_backup[key] = os.environ[key];
+            del os.environ[key];
+        }
+    }
+
+    port = get_free_port();
+    base_url = f"http://localhost:{port}";
+    server = start_server(FIXTURES_DIR, JAC_FILE, port);
+
+    try {
+        # Create tasks with local storage (in-memory session)
+        created_tasks = [
+            {"id": 301, "title": "Local Task 1"},
+            {"id": 302, "title": "Local Task 2"}
+        ];
+
+        for task_payload in created_tasks {
+            res = requests.post(
+                f"{base_url}/walker/CreateTask", json=task_payload, timeout=2
+            );
+            assert res.status_code == 200 , f"Task creation failed: {res.status_code} - {res.text}";
+        }
+
+        # Verify tasks exist in current session
+        res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=2);
+        response_data = cast(
+            dict[str, Any], extract_transport_response_data(res.json())
+        );
+        tasks = response_data["reports"][0];
+        assert len(tasks) == 2 , f"Should have 2 tasks in session, got {len(tasks)}";
+
+        # Verify task details
+        task_titles = {task["title"] for task in tasks};
+        assert "Local Task 1" in task_titles , "Local Task 1 should exist in session";
+        assert "Local Task 2" in task_titles , "Local Task 2 should exist in session";
+    } finally {
+        if server {
+            server.terminate();
+            with contextlib.suppress(Exception) {
+                server.wait(timeout=2);
+            }
+        }
+
+        # Restore environment variables
+        for (key, value) in env_backup.items() {
+            os.environ[key] = value;
+        }
+
+        time.sleep(0.5);
+        gc.collect();
+
+        # Clean up data files
         if data_dir.exists() {
             import shutil;
             shutil.rmtree(data_dir);
