@@ -217,17 +217,19 @@ impl Serializer._deserialize_anchor(data: dict[str, object]) -> (Anchor | None) 
         }
         if isinstance(anchor, NodeAnchor) {
             # Restore edges from serialized edge IDs
-            if (edge_ids := data.get('edges')) {
-                edges = [];
-                for eid in edge_ids {
-                    if (stub := Serializer._id_to_stub(EdgeAnchor, eid)) {
-                        edges.append(stub);
-                    }
-                }
-                anchor.edges = edges;
-            } else {
+            edge_ids = data.get('edges');
+            if not edge_ids {
                 anchor.edges = [];
+                return;
             }
+
+            edges = [];
+            for eid in edge_ids {
+                if (stub := Serializer._id_to_stub(EdgeAnchor, eid)) {
+                    edges.append(stub);
+                }
+            }
+            anchor.edges = edges;
         }
         if isinstance(anchor, EdgeAnchor) {
             anchor.is_undirected = data.get('is_undirected', False);
