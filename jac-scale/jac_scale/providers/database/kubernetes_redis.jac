@@ -239,12 +239,6 @@ class KubernetesRedisProvider(DatabaseProvider) {
                                         'readOnly': True
                                     }
                                 ],
-                                'env': [
-                                    {
-                                        'name': 'REDIS_DEFAULT_TTL',
-                                        'value': str(redis_default_ttl)
-                                    }
-                                ],
                                 'resources': {
                                     'requests': {'cpu': '100m', 'memory': '128Mi'},
                                     'limits': {'cpu': '500m', 'memory': '256Mi'}
