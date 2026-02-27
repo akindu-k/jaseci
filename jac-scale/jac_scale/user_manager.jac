@@ -2,6 +2,8 @@ import jwt;
 import from datetime { UTC, datetime, timedelta }
 import from typing { Any }
 import from fastapi { Request, Response }
+import from pymongo.database { Database }
+import from pymongo.collection { Collection }
 import from jaclang.runtimelib.server { UserManager }
 import from jaclang.runtimelib.transport { TransportResponse, Meta }
 import from jac_scale.enums { Platforms, Operations }
@@ -27,9 +29,9 @@ enum UserRole {
 obj JacScaleUserManager(UserManager) {
     has SUPPORTED_PLATFORMS: dict = {},
         ADMIN_USER_ID: str = '00000000-0000-0000-0000-000000000000',
-        _mongo_db: Any by postinit,
-        _users_col: Any by postinit,
-        _sso_col: Any by postinit;
+        _mongo_db: Database by postinit,
+        _users_col: Collection by postinit,
+        _sso_col: Collection by postinit;
 
     def postinit -> None;
     def _ensure_connection -> None;  # need to implement this
