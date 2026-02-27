@@ -36,6 +36,8 @@ class KubernetesRedisProvider(DatabaseProvider) {
         redis_max_memory = db_config.get('redis_max_memory', '200mb');
         redis_eviction_policy = db_config.get('redis_eviction_policy', 'allkeys-lru');
         redis_eviction_samples = db_config.get('redis_eviction_samples', 5);
+        redis_default_ttl = db_config.get('redis_default_ttl', 0);
+        redis_enable_keyspace_notifications = db_config.get('redis_enable_keyspace_notifications', False);
 
         # Validate eviction policy
         valid_policies = [
@@ -74,6 +76,32 @@ class KubernetesRedisProvider(DatabaseProvider) {
             redis_eviction_samples = 5;
         }
 
+        # Validate TTL (must be non-negative integer)
+        try {
+            ttl = int(redis_default_ttl);
+            if ttl < 0 {
+                logger.warning(
+                    f"Redis default TTL {ttl} is negative. Using 0 (no expiration)."
+                );
+                redis_default_ttl = 0;
+            } else {
+                redis_default_ttl = ttl;
+            }
+        } except (ValueError, TypeError) {
+            logger.warning(f"Invalid TTL value. Using default 0 (no expiration).");
+            redis_default_ttl = 0;
+        }
+
+        # Configure keyspace notifications
+        # Ex = Expired events, Kx = Keyspace events for expired keys
+        # '' = disabled (default for performance)
+        if redis_enable_keyspace_notifications {
+            redis_keyspace_events = 'Ex';
+            logger.info("Redis keyspace notifications enabled for expired events");
+        } else {
+            redis_keyspace_events = '';
+        }
+
         # Load template file with error handling
         try {
             template_path = Path(__file__).parent / 'redis.conf.template';
@@ -102,12 +130,15 @@ class KubernetesRedisProvider(DatabaseProvider) {
             config_content = template_content.format(
                 redis_max_memory=redis_max_memory,
                 redis_eviction_policy=redis_eviction_policy,
-                redis_eviction_samples=redis_eviction_samples
+                redis_eviction_samples=redis_eviction_samples,
+                redis_keyspace_events=redis_keyspace_events
             );
 
+            ttl_info = f"TTL={redis_default_ttl}s" if redis_default_ttl > 0 else "no TTL";
             logger.info(
                 f"Generated Redis config: maxmemory={redis_max_memory}, "
-                f"policy={redis_eviction_policy}, samples={redis_eviction_samples}"
+                f"policy={redis_eviction_policy}, samples={redis_eviction_samples}, "
+                f"{ttl_info}, keyspace_events={redis_keyspace_events or 'disabled'}"
             );
 
             return config_content;
@@ -157,7 +188,7 @@ class KubernetesRedisProvider(DatabaseProvider) {
                 },
                 'annotations': {
                     'config-hash': config_hash,
-                    'description': 'Redis L2 cache configuration with LRU eviction'
+                    'description': 'Redis L2 cache configuration with eviction and TTL support'
                 }
             },
             'data': {'redis.conf': redis_conf_content}
@@ -184,7 +215,7 @@ class KubernetesRedisProvider(DatabaseProvider) {
                         'annotations': {
                             # This annotation triggers pod restart when config changes
                             'redis-config-hash': config_hash,
-                            'description': 'Redis L2 cache with LRU eviction'
+                            'description': 'Redis L2 cache with eviction and TTL support'
                         }
                     },
                     'spec': {
@@ -201,6 +232,12 @@ class KubernetesRedisProvider(DatabaseProvider) {
                                         'name': 'redis-config',
                                         'mountPath': '/etc/redis',
                                         'readOnly': True
+                                    }
+                                ],
+                                'env': [
+                                    {
+                                        'name': 'REDIS_DEFAULT_TTL',
+                                        'value': str(redis_default_ttl)
                                     }
                                 ],
                                 'resources': {
@@ -272,7 +309,9 @@ class KubernetesRedisProvider(DatabaseProvider) {
             'service': redis_service,
             'connection_string': self.connection_string,
             'service_name': redis_service_name,
-            'config_hash': config_hash
+            'config_hash': config_hash,
+            'default_ttl': redis_default_ttl,
+            'keyspace_notifications_enabled': redis_enable_keyspace_notifications
         };
     }
 

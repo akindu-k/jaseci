@@ -35,7 +35,10 @@ impl JacScaleConfig.get_default_config(self: JacScaleConfig) -> dict[str, Any] {
             # Redis cache configuration
             'redis_max_memory': '200mb',
             'redis_eviction_policy': 'allkeys-lru',
-            'redis_eviction_samples': 5
+            'redis_eviction_samples': 5,
+            # Redis TTL configuration (in seconds, 0 = no expiration)
+            'redis_default_ttl': 0,  # Default TTL for all keys (0 = no expiration)
+            'redis_enable_keyspace_notifications': False  # Enable for TTL expiry events
         },
         'kubernetes': {
             'app_name': 'jaseci',
@@ -139,7 +142,9 @@ impl JacScaleConfig.get_database_config(self: JacScaleConfig) -> dict[str, Any] 
         'shelf_db_path': db_config.get('shelf_db_path', '.jac/data/anchor_store.db'),
         'redis_max_memory': db_config.get('redis_max_memory', '200mb'),
         'redis_eviction_policy': db_config.get('redis_eviction_policy', 'allkeys-lru'),
-        'redis_eviction_samples': int(db_config.get('redis_eviction_samples', 5))
+        'redis_eviction_samples': int(db_config.get('redis_eviction_samples', 5)),
+        'redis_default_ttl': int(db_config.get('redis_default_ttl', 0)),
+        'redis_enable_keyspace_notifications': db_config.get('redis_enable_keyspace_notifications', False)
     };
 }
 
