@@ -93,13 +93,11 @@ class KubernetesRedisProvider(DatabaseProvider) {
         }
 
         # Configure keyspace notifications
-        # Ex = Expired events, Kx = Keyspace events for expired keys
-        # '' = disabled (default for performance)
         if redis_enable_keyspace_notifications {
-            redis_keyspace_events = 'Ex';
+            redis_keyspace_events_line = '\nnotify-keyspace-events Ex';
             logger.info("Redis keyspace notifications enabled for expired events");
         } else {
-            redis_keyspace_events = '';
+            redis_keyspace_events_line = '';
         }
 
         # Load template file with error handling
@@ -131,14 +129,15 @@ class KubernetesRedisProvider(DatabaseProvider) {
                 redis_max_memory=redis_max_memory,
                 redis_eviction_policy=redis_eviction_policy,
                 redis_eviction_samples=redis_eviction_samples,
-                redis_keyspace_events=redis_keyspace_events
+                redis_keyspace_events_line=redis_keyspace_events_line
             );
 
             ttl_info = f"TTL={redis_default_ttl}s" if redis_default_ttl > 0 else "no TTL";
+            keyspace_info = "enabled" if redis_enable_keyspace_notifications else "disabled";
             logger.info(
                 f"Generated Redis config: maxmemory={redis_max_memory}, "
                 f"policy={redis_eviction_policy}, samples={redis_eviction_samples}, "
-                f"{ttl_info}, keyspace_events={redis_keyspace_events or 'disabled'}"
+                f"{ttl_info}, keyspace_events={keyspace_info}"
             );
 
             return config_content;
