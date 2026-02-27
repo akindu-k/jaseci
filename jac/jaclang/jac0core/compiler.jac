@@ -70,6 +70,8 @@ def get_ir_gen_sched -> list[type[Transform[uni.Module, uni.Module]]] {
             CFGBuildPass,
             MTIRGenPass
         ];
+    } except ImportError {
+        return [SymTabBuildPass, DeclImplMatchPass, SemanticAnalysisPass];
     } finally {
         _ir_sched_loading = False;
     }
@@ -103,6 +105,8 @@ def get_py_code_gen -> list[type[Transform[uni.Module, uni.Module]]] {
         passes.extend([NaIRGenPass, NativeCompilePass]);
         passes.extend([PyastGenPass, PyJacAstLinkPass, PyBytecodeGenPass]);
         return passes;
+    } except ImportError {
+        return [PyastGenPass, PyBytecodeGenPass];
     } finally {
         _codegen_sched_loading = False;
     }
@@ -630,9 +634,6 @@ class JacCompiler {
             );
             _recalculate_parents(mod);
             had_error = len(parse_errors) > 0 or len(lex_errors) > 0;
-            if had_error {
-                mod.has_syntax_errors = True;
-            }
             if file_path.endswith('.cl.jac') {
                 _coerce_client_module(mod);
             } elif file_path.endswith('.sv.jac') {
@@ -673,9 +674,11 @@ class JacCompiler {
         actual_program = self._resolve_program(file_path, target_program);
         actual_program._compile_options = options;
         keep_str = use_str or read_file_with_encoding(file_path);
+        had_parse_errors = len(actual_program.errors_had);
         mod_targ = self.parse_str(
             keep_str, file_path, actual_program, cancel_token=options.cancel_token
         );
+        had_parse_errors = len(actual_program.errors_had) > had_parse_errors;
         if options.symtab_ir_only {
             self.run_schedule(
                 mod=mod_targ,
@@ -699,7 +702,7 @@ class JacCompiler {
                 cancel_token=options.cancel_token
             );
         }
-        if (not mod_targ.has_syntax_errors and not options.no_cgen) {
+        if (not had_parse_errors and not options.no_cgen) {
             self.run_schedule(
                 mod=mod_targ,
                 target_program=actual_program,
@@ -753,7 +756,8 @@ class JacCompiler {
         (current_mod, parse_errors, lex_errors) = rd_parse(source_str, file_path);
         _recalculate_parents(current_mod);
         if len(parse_errors) > 0 or len(lex_errors) > 0 {
-            current_mod.has_syntax_errors = True;
+            prog.errors_had.extend(parse_errors);
+            prog.errors_had.extend(lex_errors);
             prog.mod = uni.ProgramModule(current_mod);
             return prog;
         }
@@ -800,7 +804,8 @@ class JacCompiler {
         (current_mod, parse_errors, lex_errors) = rd_parse(source_str, file_path);
         _recalculate_parents(current_mod);
         if len(parse_errors) > 0 or len(lex_errors) > 0 {
-            current_mod.has_syntax_errors = True;
+            prog.errors_had.extend(parse_errors);
+            prog.errors_had.extend(lex_errors);
             prog.mod = uni.ProgramModule(current_mod);
             return prog;
         }
