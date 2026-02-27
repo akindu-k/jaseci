@@ -32,13 +32,11 @@ impl JacScaleConfig.get_default_config(self: JacScaleConfig) -> dict[str, Any] {
             'mongodb_uri': None,
             'redis_url': None,
             'shelf_db_path': '.jac/data/anchor_store.db',
-            # Redis cache configuration
             'redis_max_memory': '200mb',
             'redis_eviction_policy': 'allkeys-lru',
             'redis_eviction_samples': 5,
-            # Redis TTL configuration (in seconds, 0 = no expiration)
-            'redis_default_ttl': 0,  # Default TTL for all keys (0 = no expiration)
-            'redis_enable_keyspace_notifications': False  # Enable for TTL expiry events
+            'redis_default_ttl': 0,
+            'redis_enable_keyspace_notifications': False
         },
         'kubernetes': {
             'app_name': 'jaseci',

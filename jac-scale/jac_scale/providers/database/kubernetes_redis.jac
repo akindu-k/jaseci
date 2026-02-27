@@ -29,7 +29,6 @@ class KubernetesRedisProvider(DatabaseProvider) {
 
     """Load and generate Redis configuration from template."""
     def _load_redis_config(self: KubernetesRedisProvider) -> str {
-        # Get configuration values from jac.toml
         scale_config = get_scale_config();
         db_config = scale_config.get_database_config();
 
@@ -41,7 +40,6 @@ class KubernetesRedisProvider(DatabaseProvider) {
             'redis_enable_keyspace_notifications', False
         );
 
-        # Validate eviction policy
         valid_policies = [
             'allkeys-lru',
             'volatile-lru',
@@ -78,7 +76,7 @@ class KubernetesRedisProvider(DatabaseProvider) {
             redis_eviction_samples = 5;
         }
 
-        # Validate TTL (must be non-negative integer)
+        # Validate TTL
         try {
             ttl = int(redis_default_ttl);
             if ttl < 0 {

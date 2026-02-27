@@ -510,15 +510,11 @@ class KubernetesTarget(DeploymentTarget) {
             self.env_list.append(
                 {'name': 'REDIS_URL', 'value': redis_result['connection_string']}
             );
-            # Deploy ConfigMap with update detection
-            # If config changes, ConfigMap is updated and deployment annotation
-            # triggers pod restart
             config_updated = False;
             try {
                 existing_cm = core_v1.read_namespaced_config_map(
                     name=redis_config_name, namespace=namespace
                 );
-                # Check if configuration content has changed
                 existing_content = existing_cm.data.get('redis.conf', '');
                 new_content = redis_result['configmap']['data']['redis.conf'];
 
