@@ -237,7 +237,14 @@ class KubernetesRedisProvider(DatabaseProvider) {
         redis_service = {
             'apiVersion': 'v1',
             'kind': 'Service',
-            'metadata': {'name': redis_service_name},
+            'metadata': {
+                'name': redis_service_name,
+                'labels': {
+                    'app': redis_name,
+                    'component': 'cache',
+                    'managed-by': 'jac-scale'
+                }
+            },
             'spec': {
                 'selector': {'app': redis_name},
                 'ports': [
