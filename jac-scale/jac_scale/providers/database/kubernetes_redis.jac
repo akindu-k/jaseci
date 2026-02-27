@@ -169,6 +169,12 @@ class KubernetesRedisProvider(DatabaseProvider) {
         redis_service_name = f"{redis_name}-service";
         redis_config_name = f"{redis_name}-config";
 
+        # Get configuration values
+        scale_config = get_scale_config();
+        db_config = scale_config.get_database_config();
+        redis_default_ttl = db_config.get('redis_default_ttl', 0);
+        redis_enable_keyspace_notifications = db_config.get('redis_enable_keyspace_notifications', False);
+
         # Load and generate Redis configuration
         redis_conf_content = self._load_redis_config();
         config_hash = self._calculate_config_hash(redis_conf_content);
