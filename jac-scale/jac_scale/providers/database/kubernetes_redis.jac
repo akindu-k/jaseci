@@ -37,7 +37,9 @@ class KubernetesRedisProvider(DatabaseProvider) {
         redis_eviction_policy = db_config.get('redis_eviction_policy', 'allkeys-lru');
         redis_eviction_samples = db_config.get('redis_eviction_samples', 5);
         redis_default_ttl = db_config.get('redis_default_ttl', 0);
-        redis_enable_keyspace_notifications = db_config.get('redis_enable_keyspace_notifications', False);
+        redis_enable_keyspace_notifications = db_config.get(
+            'redis_enable_keyspace_notifications', False
+        );
 
         # Validate eviction policy
         valid_policies = [
@@ -132,8 +134,12 @@ class KubernetesRedisProvider(DatabaseProvider) {
                 redis_keyspace_events_line=redis_keyspace_events_line
             );
 
-            ttl_info = f"TTL={redis_default_ttl}s" if redis_default_ttl > 0 else "no TTL";
-            keyspace_info = "enabled" if redis_enable_keyspace_notifications else "disabled";
+            ttl_info = f"TTL={redis_default_ttl}s"
+                if redis_default_ttl > 0
+                else "no TTL";
+            keyspace_info = "enabled"
+                if redis_enable_keyspace_notifications
+                else "disabled";
             logger.info(
                 f"Generated Redis config: maxmemory={redis_max_memory}, "
                 f"policy={redis_eviction_policy}, samples={redis_eviction_samples}, "
@@ -172,7 +178,9 @@ class KubernetesRedisProvider(DatabaseProvider) {
         scale_config = get_scale_config();
         db_config = scale_config.get_database_config();
         redis_default_ttl = db_config.get('redis_default_ttl', 0);
-        redis_enable_keyspace_notifications = db_config.get('redis_enable_keyspace_notifications', False);
+        redis_enable_keyspace_notifications = db_config.get(
+            'redis_enable_keyspace_notifications', False
+        );
 
         # Load and generate Redis configuration
         redis_conf_content = self._load_redis_config();

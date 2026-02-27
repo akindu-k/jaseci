@@ -597,7 +597,9 @@ class KubernetesTarget(DeploymentTarget) {
                     }
                 } else {
                     if self.logger {
-                        self.logger.debug("Redis deployment unchanged, skipping update");
+                        self.logger.debug(
+                            "Redis deployment unchanged, skipping update"
+                        );
                     }
                 }
             } except ApiException as e {

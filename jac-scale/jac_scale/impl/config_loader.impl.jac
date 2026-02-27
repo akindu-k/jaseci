@@ -144,7 +144,9 @@ impl JacScaleConfig.get_database_config(self: JacScaleConfig) -> dict[str, Any] 
         'redis_eviction_policy': db_config.get('redis_eviction_policy', 'allkeys-lru'),
         'redis_eviction_samples': int(db_config.get('redis_eviction_samples', 5)),
         'redis_default_ttl': int(db_config.get('redis_default_ttl', 0)),
-        'redis_enable_keyspace_notifications': db_config.get('redis_enable_keyspace_notifications', False)
+        'redis_enable_keyspace_notifications': db_config.get(
+            'redis_enable_keyspace_notifications', False
+        )
     };
 }
 
