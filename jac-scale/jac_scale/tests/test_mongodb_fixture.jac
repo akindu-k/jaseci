@@ -139,7 +139,7 @@ def teardown_mongo_user_manager(
         user_manager._users_col.delete_many({});
         user_manager._sso_col.delete_many({});
     } except Exception {
-        
+
     }
 
     # Clean temp directory
