@@ -266,9 +266,16 @@ glob sv_fixtures_dir: Path = Path(__file__).parent / "fixtures",
 
 """Setup and start the serve server."""
 def setup_serve_server -> subprocess.Popen {
+    import from jac_scale.tests.test_mongodb_fixture { start_mongo_container }
+
     if not sv_test_file.exists() {
         raise FileNotFoundError(f"Test fixture not found: {sv_test_file}") ;
     }
+
+    # Start MongoDB testcontainer and set environment variable
+    mongo_uri = start_mongo_container();
+    os.environ['MONGODB_URI'] = mongo_uri;
+
     _cleanup_db_files(sv_fixtures_dir);
     return _start_server(sv_fixtures_dir, sv_test_file, sv_port, sv_base_url);
 }

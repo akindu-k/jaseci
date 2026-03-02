@@ -3,6 +3,10 @@ name = "test-api"
 version = "1.0.0"
 description = "Test fixture for jac-scale serve tests"
 
+[plugins.scale.database]
+# MongoDB URI - will use testcontainers or environment variable
+mongodb_uri = "${MONGODB_URI:mongodb://localhost:27017}"
+
 [environments.response.headers]
 X-Custom-Test-Header = "test-value"
 Cross-Origin-Opener-Policy = "same-origin"
