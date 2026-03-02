@@ -9,6 +9,8 @@ import from jac_scale.utils { generate_random_password }
 import from jac_scale.config_loader { get_scale_config }
 import from jac_scale.sso_provider { SSOProvider, SSOUserInfo }
 import from jac_scale.google_sso_provider { GoogleSSOProvider }
+import from pymongo { MongoClient }
+import from pymongo.collection { Collection }
 
 # Load configuration
 glob _jwt_config = get_scale_config().get_jwt_config(),
@@ -26,9 +28,26 @@ enum UserRole {
 
 obj JacScaleUserManager(UserManager) {
     has SUPPORTED_PLATFORMS: dict = {},
-        ADMIN_USER_ID: str = '00000000-0000-0000-0000-000000000000';
+        ADMIN_USER_ID: str = '00000000-0000-0000-0000-000000000000',
+        _mongo_client: MongoClient by postinit,
+        _db_name: str = 'jac_db',
+        _users_col: Collection by postinit,
+        _sso_col: Collection by postinit;
 
     def postinit -> None;
+    # Override base UserManager methods to use MongoDB
+    def _ensure_connection -> None;
+    def create_user(username: str, password: str) -> dict[str, str];
+    def authenticate(username: str, password: str) -> (dict[(str, str)] | None);
+    def get_root_id(username: str) -> (str | None);
+    def get_user(username: str) -> (dict[(str, str)] | None);
+    def user_exists(username: str) -> bool;
+    def update_username(current_username: str, new_username: str) -> dict[str, str];
+    def update_password(
+        username: str, current_password: str, new_password: str
+    ) -> dict[str, str];
+
+    def close -> None;
     # JWT methods
     def create_jwt_token(username: str, include_role: bool = True) -> str;
     def validate_jwt_token(token: str) -> (str | None);

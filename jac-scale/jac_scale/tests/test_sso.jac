@@ -661,14 +661,28 @@ test "supported platforms initialization without jac toml credentials" {
 
 """Test linking an SSO account successfully."""
 test "link sso account success" {
-    (test_dir, user_manager) = _setup_user_manager();
+    import from jac_scale.tests.test_mongodb_fixture {
+        setup_mongo_user_manager,
+        teardown_mongo_user_manager
+    }
+    import from datetime { datetime, timezone }
+
+    (test_dir, user_manager) = setup_mongo_user_manager(
+        mock_sso_config_with_credentials()
+    );
     try {
-        user_manager._ensure_connection();
-        user_manager._conn.execute(
-            "INSERT INTO users (username, password_hash, token, root_id) VALUES (?, ?, ?, ?)",
-            ("user1", "hash", "token", "root")
-        );
-        user_manager._conn.commit();
+        # Insert user via MongoDB
+        user_manager._users_col.insert_one({
+            'username': 'user1',
+            'password_hash': 'hash',
+            'token': 'token',
+            'root_id': 'root',
+            'role': 'user',
+            'requires_password_reset': False,
+            'is_password_required': True,
+            'user_id': None,
+            'created_at': datetime.now(timezone.utc)
+        });
 
         result = user_manager.link_sso_account(
             "user1", "google", "ext_123", "test@google.com"
@@ -681,24 +695,45 @@ test "link sso account success" {
         assert accounts[0]["platform"] == "google";
         assert accounts[0]["external_id"] == "ext_123";
     } finally {
-        _teardown_user_manager(test_dir);
+        teardown_mongo_user_manager(test_dir, user_manager);
     }
 }
 
 """Test preventing duplicate SSO account linking."""
 test "link sso account duplicate" {
-    (test_dir, user_manager) = _setup_user_manager();
+    import from jac_scale.tests.test_mongodb_fixture {
+        setup_mongo_user_manager,
+        teardown_mongo_user_manager
+    }
+    import from datetime { datetime, timezone }
+
+    (test_dir, user_manager) = setup_mongo_user_manager(
+        mock_sso_config_with_credentials()
+    );
     try {
-        user_manager._ensure_connection();
-        user_manager._conn.execute(
-            "INSERT INTO users (username, password_hash, token, root_id) VALUES (?, ?, ?, ?)",
-            ("user1", "hash", "token", "root")
-        );
-        user_manager._conn.execute(
-            "INSERT INTO users (username, password_hash, token, root_id) VALUES (?, ?, ?, ?)",
-            ("user2", "hash", "token2", "root2")
-        );
-        user_manager._conn.commit();
+        # Insert two users via MongoDB
+        user_manager._users_col.insert_one({
+            'username': 'user1',
+            'password_hash': 'hash',
+            'token': 'token',
+            'root_id': 'root',
+            'role': 'user',
+            'requires_password_reset': False,
+            'is_password_required': True,
+            'user_id': None,
+            'created_at': datetime.now(timezone.utc)
+        });
+        user_manager._users_col.insert_one({
+            'username': 'user2',
+            'password_hash': 'hash',
+            'token': 'token2',
+            'root_id': 'root2',
+            'role': 'user',
+            'requires_password_reset': False,
+            'is_password_required': True,
+            'user_id': None,
+            'created_at': datetime.now(timezone.utc)
+        });
 
         user_manager.link_sso_account("user1", "google", "ext_123", "test@google.com");
 
@@ -712,20 +747,34 @@ test "link sso account duplicate" {
         );
         assert "already linked to this user" in result.get("message", "");
     } finally {
-        _teardown_user_manager(test_dir);
+        teardown_mongo_user_manager(test_dir, user_manager);
     }
 }
 
 """Test unlinking an SSO account."""
 test "unlink sso account" {
-    (test_dir, user_manager) = _setup_user_manager();
+    import from jac_scale.tests.test_mongodb_fixture {
+        setup_mongo_user_manager,
+        teardown_mongo_user_manager
+    }
+    import from datetime { datetime, timezone }
+
+    (test_dir, user_manager) = setup_mongo_user_manager(
+        mock_sso_config_with_credentials()
+    );
     try {
-        user_manager._ensure_connection();
-        user_manager._conn.execute(
-            "INSERT INTO users (username, password_hash, token, root_id) VALUES (?, ?, ?, ?)",
-            ("user1", "hash", "token", "root")
-        );
-        user_manager._conn.commit();
+        # Insert user via MongoDB
+        user_manager._users_col.insert_one({
+            'username': 'user1',
+            'password_hash': 'hash',
+            'token': 'token',
+            'root_id': 'root',
+            'role': 'user',
+            'requires_password_reset': False,
+            'is_password_required': True,
+            'user_id': None,
+            'created_at': datetime.now(timezone.utc)
+        });
 
         user_manager.link_sso_account("user1", "google", "ext_123", "test@google.com");
 
@@ -735,20 +784,34 @@ test "unlink sso account" {
         accounts = user_manager.get_sso_accounts("user1");
         assert len(accounts) == 0;
     } finally {
-        _teardown_user_manager(test_dir);
+        teardown_mongo_user_manager(test_dir, user_manager);
     }
 }
 
 """Test retrieving user by SSO credentials."""
 test "get user by sso" {
-    (test_dir, user_manager) = _setup_user_manager();
+    import from jac_scale.tests.test_mongodb_fixture {
+        setup_mongo_user_manager,
+        teardown_mongo_user_manager
+    }
+    import from datetime { datetime, timezone }
+
+    (test_dir, user_manager) = setup_mongo_user_manager(
+        mock_sso_config_with_credentials()
+    );
     try {
-        user_manager._ensure_connection();
-        user_manager._conn.execute(
-            "INSERT INTO users (username, password_hash, token, root_id) VALUES (?, ?, ?, ?)",
-            ("user1", "hash", "token_val", "root_val")
-        );
-        user_manager._conn.commit();
+        # Insert user via MongoDB
+        user_manager._users_col.insert_one({
+            'username': 'user1',
+            'password_hash': 'hash',
+            'token': 'token_val',
+            'root_id': 'root_val',
+            'role': 'user',
+            'requires_password_reset': False,
+            'is_password_required': True,
+            'user_id': None,
+            'created_at': datetime.now(timezone.utc)
+        });
 
         user_manager.link_sso_account("user1", "google", "ext_123", "test@google.com");
 
@@ -761,7 +824,7 @@ test "get user by sso" {
         user = user_manager.get_user_by_sso("google", "nonexistent");
         assert user is None;
     } finally {
-        _teardown_user_manager(test_dir);
+        teardown_mongo_user_manager(test_dir, user_manager);
     }
 }
 

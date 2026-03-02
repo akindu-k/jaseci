@@ -44,9 +44,29 @@ def _extract_response_data(json_response: dict[str, Any]) -> dict[str, Any] {
 
 glob DEFAULT_ADMIN_PASSWORD: str = "changeme";  # Default from admin_config
 
-"""Delete SQLite database files and .jac directories."""
+"""Delete MongoDB test data, SQLite database files and .jac directories."""
 def _cleanup_db_files(fixtures_dir: Path) -> None {
-    # Clean both fixtures dir and parent tests dir
+    # Clean MongoDB test database
+    try {
+        import from pymongo { MongoClient }
+        import from jac_scale.tests.test_mongodb_fixture { get_test_mongo_uri }
+
+        # Get the test MongoDB URI and clean all collections
+        mongo_uri = get_test_mongo_uri();
+        client = MongoClient(mongo_uri);
+
+        # Clean the test database
+        db = client['jac_db'];
+        db['users'].delete_many({});
+        db['sso_accounts'].delete_many({});
+
+        client.close();
+    } except Exception {
+        # MongoDB container might not be running, that's ok
+        pass;
+    }
+
+    # Clean SQLite files (for backward compatibility or fallback)
     dirs_to_clean = [fixtures_dir, fixtures_dir.parent];
     for clean_dir in dirs_to_clean {
         for pattern in [
