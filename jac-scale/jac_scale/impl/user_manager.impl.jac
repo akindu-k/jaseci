@@ -60,7 +60,7 @@ impl JacScaleUserManager.postinit -> None {
 impl JacScaleUserManager._ensure_connection -> None {
     # MongoDB connection is managed by the connection pool
     # This method is kept for interface compatibility
-    
+
 }
 
 # ============================================================================
