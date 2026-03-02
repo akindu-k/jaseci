@@ -192,7 +192,6 @@ impl JacScaleUserManager.update_password(
 impl JacScaleUserManager.close -> None {
     # MongoDB connections are managed by the connection pool
     # Individual operations don't need to close connections
-    pass;
 }
 
 # ============================================================================
