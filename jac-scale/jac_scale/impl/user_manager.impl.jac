@@ -4,7 +4,7 @@ import hashlib;
 import os;
 import from datetime { datetime, timezone }
 import from jaclang.jac0core.constructs { Root }
-import from jaclang.runtimelib.context { Jac }
+import from jaclang.runtimelib.context { JacRuntime as Jac }
 import from jac_scale.db { get_mongo_client }
 
 # ============================================================================
