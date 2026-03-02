@@ -20,8 +20,17 @@ from collections.abc import Sequence
 from pathlib import Path
 from types import ModuleType
 
+# Cache jac0 transpiler hash for bootstrap cache invalidation
+import jaclang.jac0 as _jac0_mod
 from jaclang.jac0 import compile_jac as _jac0_compile  # noqa: E402
 from jaclang.jac0 import discover_impl_files as _jac0_discover_impls  # noqa: E402
+
+_jac0_source_path = getattr(_jac0_mod, "__file__", "")
+_jac0_hash = (
+    hashlib.sha256(Path(_jac0_source_path).read_bytes()).digest()
+    if _jac0_source_path and os.path.isfile(_jac0_source_path)
+    else b""
+)
 
 # Inline logging config (previously in jaclang.jac0core.log)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
@@ -57,9 +66,10 @@ def _bootstrap_compile(
     impl_sources: list[tuple[str, str]] | None = None,
 ) -> types.CodeType:
     """Compile a bootstrap .jac file, using a disk cache when possible."""
-    # Build the hash key from all source inputs + Python version
+    # Build the hash key from all source inputs + Python version + transpiler
     h = hashlib.sha256()
     h.update(sys.version.encode())
+    h.update(_jac0_hash)
     h.update(jac_source.encode())
     if impl_sources:
         for src, path in impl_sources:
