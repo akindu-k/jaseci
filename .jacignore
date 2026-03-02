@@ -1,5 +1,3 @@
-ability_has.jac
-access_mod_check.jac
 actions.jac
 advanced_language_features.jac
 app.jac
@@ -132,7 +130,7 @@ prim_builtins.jac
 prim_dict_extra.jac
 prim_dict_methods.jac
 prim_float_cmp.jac
-prim_jac_runtime.jac
+prim_runtime_errors.jac
 prim_str_extra.jac
 program.jac
 project.impl.jac
@@ -149,6 +147,7 @@ rename.jac
 runtime_errors.na.jac
 runtime.jac
 safe_call_operator.jac
+scheduler.jac
 schema.impl.jac
 schema.jac
 sem_manager.impl.jac

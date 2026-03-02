@@ -412,6 +412,26 @@ impl UniScopeNode.lookup(
     return None;
 }
 
+"""Lookup all overloads of a symbol in the symbol table."""
+impl UniScopeNode.lookup_all(
+    self: UniScopeNode, name: str, deep: bool = True
+) -> list[Symbol] {
+    result: list[Symbol] = [];
+    if name in self.names_in_scope {
+        result.append(self.names_in_scope[name]);
+    }
+    if name in self.names_in_scope_overload {
+        result.extend(self.names_in_scope_overload[name]);
+    }
+    if result {
+        return result;
+    }
+    if deep and self.parent_scope {
+        return self.parent_scope.lookup_all(name, deep);
+    }
+    return result;
+}
+
 """Set a variable in the symbol table.
 
         Returns original symbol as collision if single check fails, none
@@ -601,7 +621,7 @@ impl UniScopeNode.sym_printgraph(self: UniScopeNode) -> str {
 
 """Repr."""
 impl UniScopeNode.__repr__(self: UniScopeNode) -> str {
-    out = f"{self.scope_name} {super.__repr__()}:\n";
+    out = f"{self.scope_name} {super().__repr__()}:\n";
     for (k, v) in self.names_in_scope.items() {
         out += f"    {k}: {v}\n";
     }
@@ -636,11 +656,6 @@ impl AstSymbolNode.sym_category(self: AstSymbolNode) -> SymbolType {
 @ property
 impl AstSymbolNode.py_ctx_func(self: AstSymbolNode) -> type[ast3.AST] {
     return self.name_spec.py_ctx_func;
-}
-
-@ property
-impl AstSymbolNode.expr_type(self: AstSymbolNode) -> str {
-    return self.name_spec.expr_type;
 }
 
 """Get type symbol table."""
@@ -737,6 +752,7 @@ impl UniCFGNode.get_head(self: UniCFGNode) -> UniCFGNode {
     while (
         nd.bb_in
         and (len(nd.bb_in) == 1)
+        and not isinstance(nd, (InForStmt, IterForStmt, WhileStmt))
         and not isinstance(nd.bb_in[0], (InForStmt, IterForStmt, WhileStmt))
         and nd.bb_in[0].bb_out
         and (len(nd.bb_in[0].bb_out) == 1)
@@ -752,6 +768,7 @@ impl UniCFGNode.get_tail(self: UniCFGNode) -> UniCFGNode {
     while (
         nd.bb_out
         and (len(nd.bb_out) == 1)
+        and not isinstance(nd, (InForStmt, IterForStmt, WhileStmt))
         and not isinstance(nd.bb_out[0], (InForStmt, IterForStmt, WhileStmt))
         and nd.bb_out[0].bb_in
         and (len(nd.bb_out[0].bb_in) == 1)
@@ -762,7 +779,6 @@ impl UniCFGNode.get_tail(self: UniCFGNode) -> UniCFGNode {
 }
 
 impl Expr.init(self: Expr) -> None {
-    self._sym_type: str = 'NoType';
     self._type_sym_tab: (UniScopeNode | None) = None;
     self.type: (TypeBase | None) = None;
     self.attached_tokens: (list[Token] | None) = None;
@@ -819,8 +835,10 @@ impl NameAtom.create_symbol(
 
 @ property
 impl NameAtom.clean_type(self: NameAtom) -> str {
-    ret_type = self.expr_type.replace('builtins.', '').replace('NoType', '');
-    return ret_type;
+    if self.type {
+        return str(self.type).replace('builtins.', '');
+    }
+    return '';
 }
 
 """Resolve semantic token."""
@@ -2856,13 +2874,18 @@ impl String.lit_value(self: String) -> str {
                 is_raw2 = 'r' in prefix2;
             }
             if not is_raw2 {
+                import codecs;
                 result = self.value;
-                placeholder = '\x00';
-                result = result.replace('\\\\', placeholder);
-                result = result.replace('\\n', '\n');
-                result = result.replace('\\t', '\t');
-                result = result.replace('\\r', '\r');
-                result = result.replace(placeholder, '\\');
+                try {
+                    result = codecs.decode(result, 'unicode_escape');
+                } except Exception {
+                    placeholder = '\x00';
+                    result = result.replace('\\\\', placeholder);
+                    result = result.replace('\\n', '\n');
+                    result = result.replace('\\t', '\t');
+                    result = result.replace('\\r', '\r');
+                    result = result.replace(placeholder, '\\');
+                }
                 return result;
             }
             return self.value;
@@ -2876,13 +2899,20 @@ impl String.lit_value(self: String) -> str {
                 is_raw = 'r' in prefix;
             }
             if not is_raw {
+                import codecs;
                 result = self.value;
-                placeholder = '\x00';
-                result = result.replace('\\\\', placeholder);
-                result = result.replace('\\n', '\n');
-                result = result.replace('\\t', '\t');
-                result = result.replace('\\r', '\r');
-                result = result.replace(placeholder, '\\');
+                # Use codecs to decode all escape sequences (like \x1b, \n, \t, etc.)
+                try {
+                    result = codecs.decode(result, 'unicode_escape');
+                } except Exception {
+                    # Fallback to manual handling if decode fails
+                    placeholder = '\x00';
+                    result = result.replace('\\\\', placeholder);
+                    result = result.replace('\\n', '\n');
+                    result = result.replace('\\t', '\t');
+                    result = result.replace('\\r', '\r');
+                    result = result.replace(placeholder, '\\');
+                }
                 return result;
             }
         }

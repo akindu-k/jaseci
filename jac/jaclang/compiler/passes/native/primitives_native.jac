@@ -662,7 +662,10 @@ class NativeStrEmitter(StrEmitter[(ir.Value, NativeEmitCtx)]) {
     def emit_replace(
         self, ctx: NativeEmitCtx, target: ir.Value, args: list[ir.Value]
     ) -> (ir.Value | None) {
-        # replace(old, new): replace all occurrences
+        # replace(old, new[, count])
+        # count < 0 or omitted means replace all occurrences.
+        # count == 0 means replace nothing.
+        # count > 0 means replace at most that many occurrences.
         if len(args) < 2 {
             return None;
         }
@@ -677,6 +680,10 @@ class NativeStrEmitter(StrEmitter[(ir.Value, NativeEmitCtx)]) {
         memcpy_fn = p._get_or_declare_extern("memcpy", i8p, [i8p, i8p, i64]);
         old_str = args[0];
         new_str = args[1];
+        # count_val: use the third arg if provided, else -1 (unlimited sentinel).
+        # The loop checks remaining == 0 to stop; -1 decrements to -2, -3, ...
+        # and never reaches 0, so unlimited behaviour is preserved.
+        count_val: ir.Value = ir.Constant(i64, -1) if len(args) < 3 else args[2];
         target_len = b.call(strlen_fn, [target], name="repl.tgt.len");
         old_len = b.call(strlen_fn, [old_str], name="repl.old.len");
         new_len = b.call(strlen_fn, [new_str], name="repl.new.len");
@@ -696,11 +703,18 @@ class NativeStrEmitter(StrEmitter[(ir.Value, NativeEmitCtx)]) {
         b.position_at_start(loop_bb);
         src = b.phi(i8p, name="repl.src");
         dst_off = b.phi(i64, name="repl.dst.off");
+        remaining = b.phi(i64, name="repl.remaining");
         src.add_incoming(target, entry_bb);
         dst_off.add_incoming(ir.Constant(i64, 0), entry_bb);
+        remaining.add_incoming(count_val, entry_bb);
+        # Stop replacing when count is exhausted (remaining == 0).
+        count_exhausted = b.icmp_signed(
+            "==", remaining, ir.Constant(i64, 0), name="repl.exhausted"
+        );
         found = b.call(strstr_fn, [src, old_str], name="repl.found.ptr");
         is_null = b.icmp_unsigned("==", found, null_ptr, name="repl.null");
-        b.cbranch(is_null, notfound_bb, found_bb);
+        no_replace = b.or_(count_exhausted, is_null, name="repl.no.repl");
+        b.cbranch(no_replace, notfound_bb, found_bb);
         b.position_at_start(found_bb);
         src_int = b.ptrtoint(src, i64, name="repl.src.int");
         found_int = b.ptrtoint(found, i64, name="repl.fnd.int");
@@ -713,8 +727,11 @@ class NativeStrEmitter(StrEmitter[(ir.Value, NativeEmitCtx)]) {
         dst_off3 = b.add(dst_off2, new_len, name="repl.off3");
         next_src_int = b.add(found_int, old_len, name="repl.next.int");
         next_src = b.inttoptr(next_src_int, i8p, name="repl.next.src");
+        # Decrement remaining; -1 wraps to -2, -3, ... (never hits 0 → unlimited).
+        next_remaining = b.sub(remaining, ir.Constant(i64, 1), name="repl.next.rem");
         src.add_incoming(next_src, found_bb);
         dst_off.add_incoming(dst_off3, found_bb);
+        remaining.add_incoming(next_remaining, found_bb);
         b.branch(loop_bb);
         b.position_at_start(notfound_bb);
         remain_len = b.call(strlen_fn, [src], name="repl.remain.len");
@@ -2968,6 +2985,115 @@ class NativeDictEmitter(DictEmitter[(ir.Value, NativeEmitCtx)]) {
         return result;
     }
 
+    def emit_remove(
+        self, ctx: NativeEmitCtx, target: ir.Value, args: list[ir.Value]
+    ) -> (ir.Value | None) {
+        # d.remove(key) / del d[key]: remove key, raise KeyError if missing.
+        if not args {
+            return None;
+        }
+        p = ctx.pass_ref;
+        helpers = p.dict_helpers.get(ctx.type_key);
+        if helpers is None {
+            return None;
+        }
+        b = p.builder;
+        i32 = ir.IntType(32);
+        i64 = ir.IntType(64);
+        i8p = ir.IntType(8).as_pointer();
+        key = args[0];
+        key_type = helpers["key_type"];
+        func = b.basic_block.function;
+        found_bb = func.append_basic_block(name="drem.found");
+        nokey_bb = func.append_basic_block(name="drem.nokey");
+        search_bb = func.append_basic_block(name="drem.search");
+        search_body = func.append_basic_block(name="drem.search.body");
+        sfound_bb = func.append_basic_block(name="drem.sfound");
+        shift_bb = func.append_basic_block(name="drem.shift");
+        shift_body = func.append_basic_block(name="drem.shift.body");
+        store_bb = func.append_basic_block(name="drem.store");
+        done_bb = func.append_basic_block(name="drem.done");
+        # Contains check → branch to found or not-found
+        found_i1 = b.call(helpers["contains"], [target, key], name="drem.has");
+        b.cbranch(found_i1, found_bb, nokey_bb);
+        # Not found → KeyError, then fall to done
+        b.position_at_start(nokey_bb);
+        p._emit_runtime_raise(
+            ir.Constant(ir.IntType(1), 1), "KeyError", "key not found"
+        );
+        b.branch(done_bb);
+        # Found: load struct fields
+        b.position_at_start(found_bb);
+        len_ptr = b.gep(
+            target, [ir.Constant(i32, 0), ir.Constant(i32, 0)], name="drem.len.p"
+        );
+        keys_ptr = b.gep(
+            target, [ir.Constant(i32, 0), ir.Constant(i32, 2)], name="drem.keys.p"
+        );
+        vals_ptr = b.gep(
+            target, [ir.Constant(i32, 0), ir.Constant(i32, 3)], name="drem.vals.p"
+        );
+        dict_len = b.load(len_ptr, name="drem.len");
+        keys_arr = b.load(keys_ptr, name="drem.keys");
+        vals_arr = b.load(vals_ptr, name="drem.vals");
+        new_len = b.sub(dict_len, ir.Constant(i64, 1), name="drem.newlen");
+        b.branch(search_bb);
+        # Linear search for the index of key
+        b.position_at_start(search_bb);
+        si = b.phi(i64, name="drem.si");
+        si.add_incoming(ir.Constant(i64, 0), found_bb);
+        si_end = b.icmp_unsigned(">=", si, dict_len, name="drem.si.end");
+        b.cbranch(si_end, sfound_bb, search_body);
+        b.position_at_start(search_body);
+        kp = b.gep(keys_arr, [si], name="drem.kp");
+        kv = b.load(kp, name="drem.kv");
+        if isinstance(key_type, ir.IntType) {
+            keq = b.icmp_signed("==", kv, key, name="drem.keq");
+        } elif key_type == i8p {
+            strcmp_fn = p._get_or_declare_extern("strcmp", ir.IntType(32), [i8p, i8p]);
+            cmp_result = b.call(strcmp_fn, [kv, key], name="drem.strcmp");
+            keq = b.icmp_signed(
+                "==", cmp_result, ir.Constant(ir.IntType(32), 0), name="drem.keq"
+            );
+        } else {
+            keq = b.icmp_unsigned("==", kv, key, name="drem.keq");
+        }
+        next_si = b.add(si, ir.Constant(i64, 1), name="drem.nsi");
+        si.add_incoming(next_si, search_body);
+        b.cbranch(keq, sfound_bb, search_bb);
+        # Have found index: set up shift loop
+        b.position_at_start(sfound_bb);
+        found_idx = b.phi(i64, name="drem.fidx");
+        found_idx.add_incoming(si, search_body);
+        found_idx.add_incoming(dict_len, search_bb);
+        b.branch(shift_bb);
+        b.position_at_start(shift_bb);
+        ji = b.phi(i64, name="drem.ji");
+        ji.add_incoming(found_idx, sfound_bb);
+        ji_end = b.icmp_unsigned(">=", ji, new_len, name="drem.ji.end");
+        b.cbranch(ji_end, store_bb, shift_body);
+        b.position_at_start(shift_body);
+        next_ji = b.add(ji, ir.Constant(i64, 1), name="drem.nji");
+        b.store(
+            b.load(b.gep(keys_arr, [next_ji], name="drem.src.kp"), name="drem.skv"),
+            b.gep(keys_arr, [ji], name="drem.dst.kp")
+        );
+        b.store(
+            b.load(b.gep(vals_arr, [next_ji], name="drem.src.vp"), name="drem.svv"),
+            b.gep(vals_arr, [ji], name="drem.dst.vp")
+        );
+        ji.add_incoming(next_ji, shift_body);
+        b.branch(shift_bb);
+        # Store the new length (only reachable from the found path, so
+        # new_len and len_ptr are in scope / dominate this block).
+        b.position_at_start(store_bb);
+        b.store(new_len, len_ptr);
+        b.branch(done_bb);
+        # Done: builder left positioned here for subsequent statements.
+        b.position_at_start(done_bb);
+        return None;
+    }
+
     def emit_popitem(
         self, ctx: NativeEmitCtx, target: ir.Value, args: list[ir.Value]
     ) -> (ir.Value | None) {
@@ -2977,7 +3103,41 @@ class NativeDictEmitter(DictEmitter[(ir.Value, NativeEmitCtx)]) {
     def emit_setdefault(
         self, ctx: NativeEmitCtx, target: ir.Value, args: list[ir.Value]
     ) -> (ir.Value | None) {
-        return None;
+        # setdefault(key, default=None): if key not in dict, set it to default; return value
+        if not args {
+            return None;
+        }
+        p = ctx.pass_ref;
+        helpers = p.dict_helpers.get(ctx.type_key);
+        if helpers is None {
+            return None;
+        }
+        b = p.builder;
+        i64 = ir.IntType(64);
+        key = args[0];
+        val_type = helpers["val_type"];
+        default_val = args[1] if len(args) >= 2 else ir.Constant(val_type, 0);
+        # Check if key exists
+        found = b.call(helpers["contains"], [target, key], name="sdef.found");
+        func = b.basic_block.function;
+        found_bb = func.append_basic_block(name="sdef.yes");
+        notfound_bb = func.append_basic_block(name="sdef.no");
+        done_bb = func.append_basic_block(name="sdef.done");
+        b.cbranch(found, found_bb, notfound_bb);
+        # Found: just get the value
+        b.position_at_start(found_bb);
+        existing = b.call(helpers["get"], [target, key], name="sdef.existing");
+        b.branch(done_bb);
+        # Not found: set default and return it
+        b.position_at_start(notfound_bb);
+        b.call(helpers["set"], [target, key, default_val]);
+        b.branch(done_bb);
+        # Merge
+        b.position_at_start(done_bb);
+        result = b.phi(val_type, name="sdef.result");
+        result.add_incoming(existing, found_bb);
+        result.add_incoming(default_val, notfound_bb);
+        return result;
     }
 
     def emit_update(
@@ -3539,32 +3699,341 @@ class NativeSetEmitter(SetEmitter[(ir.Value, NativeEmitCtx)]) {
     def emit_symmetric_difference(
         self, ctx: NativeEmitCtx, target: ir.Value, args: list[ir.Value]
     ) -> (ir.Value | None) {
-        return None;
+        # symmetric_difference(other): elements in either set but not both
+        if not args {
+            return None;
+        }
+        p = ctx.pass_ref;
+        helpers = p.set_helpers.get(ctx.type_key);
+        if helpers is None {
+            return None;
+        }
+        b = p.builder;
+        i32 = ir.IntType(32);
+        i64 = ir.IntType(64);
+        new_set = b.call(helpers["new"], [], name="ssymd.new");
+        other = args[0];
+        # Pass 1: add elements from self that are NOT in other
+        len1_ptr = b.gep(
+            target, [ir.Constant(i32, 0), ir.Constant(i32, 0)], name="ssymd.l1.ptr"
+        );
+        e1_ptr = b.gep(
+            target, [ir.Constant(i32, 0), ir.Constant(i32, 2)], name="ssymd.e1.ptr"
+        );
+        len1 = b.load(len1_ptr, name="ssymd.len1");
+        elems1 = b.load(e1_ptr, name="ssymd.elems1");
+        func = b.basic_block.function;
+        entry1 = b.basic_block;
+        loop1 = func.append_basic_block(name="ssymd.loop1");
+        body1 = func.append_basic_block(name="ssymd.body1");
+        add1 = func.append_basic_block(name="ssymd.add1");
+        skip1 = func.append_basic_block(name="ssymd.skip1");
+        mid_bb = func.append_basic_block(name="ssymd.mid");
+        b.branch(loop1);
+        b.position_at_start(loop1);
+        i1 = b.phi(i64, name="ssymd.i1");
+        i1.add_incoming(ir.Constant(i64, 0), entry1);
+        end1 = b.icmp_unsigned(">=", i1, len1, name="ssymd.end1");
+        b.cbranch(end1, mid_bb, body1);
+        b.position_at_start(body1);
+        ep1 = b.gep(elems1, [i1], name="ssymd.ep1");
+        ev1 = b.load(ep1, name="ssymd.ev1");
+        in_other1 = b.call(helpers["contains"], [other, ev1], name="ssymd.inother1");
+        not_in1 = b.icmp_unsigned(
+            "==", in_other1, ir.Constant(ir.IntType(1), 0), name="ssymd.notin1"
+        );
+        b.cbranch(not_in1, add1, skip1);
+        b.position_at_start(add1);
+        b.call(helpers["add"], [new_set, ev1]);
+        b.branch(skip1);
+        b.position_at_start(skip1);
+        n1 = b.add(i1, ir.Constant(i64, 1), name="ssymd.n1");
+        i1.add_incoming(n1, skip1);
+        b.branch(loop1);
+        # Pass 2: add elements from other that are NOT in self
+        b.position_at_start(mid_bb);
+        len2_ptr = b.gep(
+            other, [ir.Constant(i32, 0), ir.Constant(i32, 0)], name="ssymd.l2.ptr"
+        );
+        e2_ptr = b.gep(
+            other, [ir.Constant(i32, 0), ir.Constant(i32, 2)], name="ssymd.e2.ptr"
+        );
+        len2 = b.load(len2_ptr, name="ssymd.len2");
+        elems2 = b.load(e2_ptr, name="ssymd.elems2");
+        loop2 = func.append_basic_block(name="ssymd.loop2");
+        body2 = func.append_basic_block(name="ssymd.body2");
+        add2 = func.append_basic_block(name="ssymd.add2");
+        skip2 = func.append_basic_block(name="ssymd.skip2");
+        done_bb = func.append_basic_block(name="ssymd.done");
+        b.branch(loop2);
+        b.position_at_start(loop2);
+        i2 = b.phi(i64, name="ssymd.i2");
+        i2.add_incoming(ir.Constant(i64, 0), mid_bb);
+        end2 = b.icmp_unsigned(">=", i2, len2, name="ssymd.end2");
+        b.cbranch(end2, done_bb, body2);
+        b.position_at_start(body2);
+        ep2 = b.gep(elems2, [i2], name="ssymd.ep2");
+        ev2 = b.load(ep2, name="ssymd.ev2");
+        in_self = b.call(helpers["contains"], [target, ev2], name="ssymd.inself");
+        not_in2 = b.icmp_unsigned(
+            "==", in_self, ir.Constant(ir.IntType(1), 0), name="ssymd.notin2"
+        );
+        b.cbranch(not_in2, add2, skip2);
+        b.position_at_start(add2);
+        b.call(helpers["add"], [new_set, ev2]);
+        b.branch(skip2);
+        b.position_at_start(skip2);
+        n2 = b.add(i2, ir.Constant(i64, 1), name="ssymd.n2");
+        i2.add_incoming(n2, skip2);
+        b.branch(loop2);
+        b.position_at_start(done_bb);
+        return new_set;
     }
 
     # In-place set algebra
     def emit_update(
         self, ctx: NativeEmitCtx, target: ir.Value, args: list[ir.Value]
     ) -> (ir.Value | None) {
-        return None;
+        # update(other): add all elements from other to self
+        if not args {
+            return None;
+        }
+        p = ctx.pass_ref;
+        helpers = p.set_helpers.get(ctx.type_key);
+        if helpers is None {
+            return None;
+        }
+        b = p.builder;
+        i32 = ir.IntType(32);
+        i64 = ir.IntType(64);
+        other = args[0];
+        len_ptr = b.gep(
+            other, [ir.Constant(i32, 0), ir.Constant(i32, 0)], name="supd.len.ptr"
+        );
+        other_len = b.load(len_ptr, name="supd.len");
+        elems_ptr = b.gep(
+            other, [ir.Constant(i32, 0), ir.Constant(i32, 2)], name="supd.elems.ptr"
+        );
+        elems_arr = b.load(elems_ptr, name="supd.elems");
+        func = b.basic_block.function;
+        entry_bb = b.basic_block;
+        loop_bb = func.append_basic_block(name="supd.loop");
+        body_bb = func.append_basic_block(name="supd.body");
+        done_bb = func.append_basic_block(name="supd.done");
+        b.branch(loop_bb);
+        b.position_at_start(loop_bb);
+        idx = b.phi(i64, name="supd.idx");
+        idx.add_incoming(ir.Constant(i64, 0), entry_bb);
+        at_end = b.icmp_unsigned(">=", idx, other_len, name="supd.atend");
+        b.cbranch(at_end, done_bb, body_bb);
+        b.position_at_start(body_bb);
+        ep = b.gep(elems_arr, [idx], name="supd.ep");
+        ev = b.load(ep, name="supd.ev");
+        b.call(helpers["add"], [target, ev]);
+        next_idx = b.add(idx, ir.Constant(i64, 1), name="supd.next");
+        idx.add_incoming(next_idx, body_bb);
+        b.branch(loop_bb);
+        b.position_at_start(done_bb);
+        return ir.Constant(i64, 0);
     }
 
     def emit_intersection_update(
         self, ctx: NativeEmitCtx, target: ir.Value, args: list[ir.Value]
     ) -> (ir.Value | None) {
-        return None;
+        # intersection_update(other): keep only elements found in other
+        if not args {
+            return None;
+        }
+        p = ctx.pass_ref;
+        helpers = p.set_helpers.get(ctx.type_key);
+        if helpers is None {
+            return None;
+        }
+        b = p.builder;
+        i32 = ir.IntType(32);
+        i64 = ir.IntType(64);
+        elem_type = helpers["elem_type"];
+        # Build a list of elements to remove (those NOT in other)
+        len_ptr = b.gep(
+            target, [ir.Constant(i32, 0), ir.Constant(i32, 0)], name="siupd.len.ptr"
+        );
+        elems_ptr = b.gep(
+            target, [ir.Constant(i32, 0), ir.Constant(i32, 2)], name="siupd.elems.ptr"
+        );
+        other = args[0];
+        # We'll do a two-pass approach: first collect elements to keep, then rebuild
+        # Actually simpler: iterate backwards, discard elements not in other
+        set_len = b.load(len_ptr, name="siupd.len");
+        elems_arr = b.load(elems_ptr, name="siupd.elems");
+        func = b.basic_block.function;
+        # Iterate forward; compact in place
+        entry_bb = b.basic_block;
+        loop_bb = func.append_basic_block(name="siupd.loop");
+        body_bb = func.append_basic_block(name="siupd.body");
+        keep_bb = func.append_basic_block(name="siupd.keep");
+        skip_bb = func.append_basic_block(name="siupd.skip");
+        done_bb = func.append_basic_block(name="siupd.done");
+        b.branch(loop_bb);
+        b.position_at_start(loop_bb);
+        read_idx = b.phi(i64, name="siupd.ridx");
+        write_idx = b.phi(i64, name="siupd.widx");
+        read_idx.add_incoming(ir.Constant(i64, 0), entry_bb);
+        write_idx.add_incoming(ir.Constant(i64, 0), entry_bb);
+        at_end = b.icmp_unsigned(">=", read_idx, set_len, name="siupd.atend");
+        b.cbranch(at_end, done_bb, body_bb);
+        b.position_at_start(body_bb);
+        ep = b.gep(elems_arr, [read_idx], name="siupd.ep");
+        ev = b.load(ep, name="siupd.ev");
+        in_other = b.call(helpers["contains"], [other, ev], name="siupd.inother");
+        b.cbranch(in_other, keep_bb, skip_bb);
+        # Keep: copy element to write position
+        b.position_at_start(keep_bb);
+        wp = b.gep(elems_arr, [write_idx], name="siupd.wp");
+        b.store(ev, wp);
+        new_widx = b.add(write_idx, ir.Constant(i64, 1), name="siupd.nwidx");
+        next_ridx_k = b.add(read_idx, ir.Constant(i64, 1), name="siupd.nridx.k");
+        b.branch(loop_bb);
+        # Skip: advance read only
+        b.position_at_start(skip_bb);
+        next_ridx_s = b.add(read_idx, ir.Constant(i64, 1), name="siupd.nridx.s");
+        b.branch(loop_bb);
+        # Wire phi nodes
+        read_idx.add_incoming(next_ridx_k, keep_bb);
+        read_idx.add_incoming(next_ridx_s, skip_bb);
+        write_idx.add_incoming(new_widx, keep_bb);
+        write_idx.add_incoming(write_idx, skip_bb);
+        # Done: update length (write_idx in loop_bb has the correct final count)
+        b.position_at_start(done_bb);
+        b.store(write_idx, len_ptr);
+        return ir.Constant(i64, 0);
     }
 
     def emit_difference_update(
         self, ctx: NativeEmitCtx, target: ir.Value, args: list[ir.Value]
     ) -> (ir.Value | None) {
-        return None;
+        # difference_update(other): remove all elements found in other
+        if not args {
+            return None;
+        }
+        p = ctx.pass_ref;
+        helpers = p.set_helpers.get(ctx.type_key);
+        if helpers is None {
+            return None;
+        }
+        b = p.builder;
+        i32 = ir.IntType(32);
+        i64 = ir.IntType(64);
+        len_ptr = b.gep(
+            target, [ir.Constant(i32, 0), ir.Constant(i32, 0)], name="sdupd.len.ptr"
+        );
+        elems_ptr = b.gep(
+            target, [ir.Constant(i32, 0), ir.Constant(i32, 2)], name="sdupd.elems.ptr"
+        );
+        other = args[0];
+        set_len = b.load(len_ptr, name="sdupd.len");
+        elems_arr = b.load(elems_ptr, name="sdupd.elems");
+        func = b.basic_block.function;
+        # Compact in place: keep elements NOT in other
+        entry_bb = b.basic_block;
+        loop_bb = func.append_basic_block(name="sdupd.loop");
+        body_bb = func.append_basic_block(name="sdupd.body");
+        keep_bb = func.append_basic_block(name="sdupd.keep");
+        skip_bb = func.append_basic_block(name="sdupd.skip");
+        done_bb = func.append_basic_block(name="sdupd.done");
+        b.branch(loop_bb);
+        b.position_at_start(loop_bb);
+        read_idx = b.phi(i64, name="sdupd.ridx");
+        write_idx = b.phi(i64, name="sdupd.widx");
+        read_idx.add_incoming(ir.Constant(i64, 0), entry_bb);
+        write_idx.add_incoming(ir.Constant(i64, 0), entry_bb);
+        at_end = b.icmp_unsigned(">=", read_idx, set_len, name="sdupd.atend");
+        b.cbranch(at_end, done_bb, body_bb);
+        b.position_at_start(body_bb);
+        ep = b.gep(elems_arr, [read_idx], name="sdupd.ep");
+        ev = b.load(ep, name="sdupd.ev");
+        in_other = b.call(helpers["contains"], [other, ev], name="sdupd.inother");
+        # Keep if NOT in other
+        not_in = b.icmp_unsigned(
+            "==", in_other, ir.Constant(ir.IntType(1), 0), name="sdupd.notin"
+        );
+        b.cbranch(not_in, keep_bb, skip_bb);
+        b.position_at_start(keep_bb);
+        wp = b.gep(elems_arr, [write_idx], name="sdupd.wp");
+        b.store(ev, wp);
+        new_widx = b.add(write_idx, ir.Constant(i64, 1), name="sdupd.nwidx");
+        next_ridx_k = b.add(read_idx, ir.Constant(i64, 1), name="sdupd.nridx.k");
+        b.branch(loop_bb);
+        b.position_at_start(skip_bb);
+        next_ridx_s = b.add(read_idx, ir.Constant(i64, 1), name="sdupd.nridx.s");
+        b.branch(loop_bb);
+        read_idx.add_incoming(next_ridx_k, keep_bb);
+        read_idx.add_incoming(next_ridx_s, skip_bb);
+        write_idx.add_incoming(new_widx, keep_bb);
+        write_idx.add_incoming(write_idx, skip_bb);
+        # Done: update length (write_idx in loop_bb has the correct final count)
+        b.position_at_start(done_bb);
+        b.store(write_idx, len_ptr);
+        return ir.Constant(i64, 0);
     }
 
     def emit_symmetric_difference_update(
         self, ctx: NativeEmitCtx, target: ir.Value, args: list[ir.Value]
     ) -> (ir.Value | None) {
-        return None;
+        # symmetric_difference_update(other): keep only elements in either but not both
+        # Strategy: compute symmetric_difference, then replace target contents
+        if not args {
+            return None;
+        }
+        p = ctx.pass_ref;
+        helpers = p.set_helpers.get(ctx.type_key);
+        if helpers is None {
+            return None;
+        }
+        b = p.builder;
+        i32 = ir.IntType(32);
+        i64 = ir.IntType(64);
+        other = args[0];
+        # Step 1: build the symmetric difference as a new set
+        result = self.emit_symmetric_difference(ctx, target, [other]);
+        if result is None {
+            return None;
+        }
+        # Step 2: clear target
+        len_ptr = b.gep(
+            target, [ir.Constant(i32, 0), ir.Constant(i32, 0)], name="ssdupd.len.ptr"
+        );
+        b.store(ir.Constant(i64, 0), len_ptr);
+        # Step 3: add all elements from result to target
+        res_len_ptr = b.gep(
+            result, [ir.Constant(i32, 0), ir.Constant(i32, 0)], name="ssdupd.rlen.ptr"
+        );
+        res_elems_ptr = b.gep(
+            result,
+            [ir.Constant(i32, 0), ir.Constant(i32, 2)],
+            name="ssdupd.relems.ptr"
+        );
+        res_len = b.load(res_len_ptr, name="ssdupd.rlen");
+        res_elems = b.load(res_elems_ptr, name="ssdupd.relems");
+        func = b.basic_block.function;
+        entry_bb = b.basic_block;
+        loop_bb = func.append_basic_block(name="ssdupd.loop");
+        body_bb = func.append_basic_block(name="ssdupd.body");
+        done_bb = func.append_basic_block(name="ssdupd.done");
+        b.branch(loop_bb);
+        b.position_at_start(loop_bb);
+        idx = b.phi(i64, name="ssdupd.idx");
+        idx.add_incoming(ir.Constant(i64, 0), entry_bb);
+        at_end = b.icmp_unsigned(">=", idx, res_len, name="ssdupd.atend");
+        b.cbranch(at_end, done_bb, body_bb);
+        b.position_at_start(body_bb);
+        ep = b.gep(res_elems, [idx], name="ssdupd.ep");
+        ev = b.load(ep, name="ssdupd.ev");
+        b.call(helpers["add"], [target, ev]);
+        next_idx = b.add(idx, ir.Constant(i64, 1), name="ssdupd.next");
+        idx.add_incoming(next_idx, body_bb);
+        b.branch(loop_bb);
+        b.position_at_start(done_bb);
+        return ir.Constant(i64, 0);
     }
 
     # Tests
