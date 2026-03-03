@@ -1,4 +1,3 @@
-ability_has.jac
 access_mod_check.jac
 actions.jac
 advanced_language_features.jac
@@ -10,16 +9,17 @@ banners.jac
 bccache.jac
 bun_installer.impl.jac
 bun_installer.jac
-CategoryTabs.cl.jac
 cfg_build_pass.jac
 chandra_bugs.jac
 circle_pure_err.impl.jac
+clib_import.na.jac
+clib_import_na_block.jac
+clib_struct_coerce.na.jac
 client_app.jac
 client_bundle.jac
 client.jac
 client_jsx.jac
 client_runtime.cl.jac
-client_runtime.impl.jac
 codeinfo.jac
 comment_injection_pass.impl.jac
 comment_injection_pass.jac
@@ -32,7 +32,6 @@ constant.jac
 context.impl.jac
 context.jac
 corelib_fmt.jac
-CreateUserModal.cl.jac
 custom_access_validation.jac
 data_spatial_types.jac
 decorator_stack.jac
@@ -47,7 +46,6 @@ diagnostics.impl.jac
 doc_ir_gen_pass.jac
 dockerhub.jac
 dynamic_archetype.jac
-EditUserModal.cl.jac
 elf_linker.impl.jac
 elf_linker.jac
 engine.jac
@@ -88,8 +86,6 @@ jac_auto_lint_pass.jac
 jac_formatter_pass.jac
 jaclib.jac
 jfast_api.jac
-jsx_lt_comparison_bug.cl.jac
-jsx_text_quotes_bug.cl.jac
 jsx_unterminated_hang.jac
 kubernetes_utils.impl.jac
 kubernetes_utils.jac
@@ -110,7 +106,6 @@ mtest.jac
 mtir_gen_pass.impl.jac
 mtir_gen_pass.jac
 mtp.jac
-multistatement_lambda_client.jac
 nacompile.impl.jac
 nacompile.jac
 na_compile_pass.jac
@@ -120,6 +115,7 @@ nested_impls.jac
 NonGPT.jac
 normalize_pass.jac
 one.jac
+operations.jac
 other_root_access.jac
 parser.impl.jac
 parser.jac
@@ -129,10 +125,14 @@ precompile_bytecode.jac
 precompiled.jac
 prim_builtins_extra.jac
 prim_builtins.jac
+prim_builtins_introspection.jac
+prim_dict.jac
 prim_dict_extra.jac
 prim_dict_methods.jac
+prim_float.jac
 prim_float_cmp.jac
-prim_jac_runtime.jac
+prim_runtime_errors.jac
+prim_str.jac
 prim_str_extra.jac
 program.jac
 project.impl.jac
@@ -142,6 +142,8 @@ pyast_gen_pass.impl.jac
 pyast_gen_pass.jac
 pyast_load_pass.impl.jac
 pyast_load_pass.jac
+pyjac_ast_link_pass.jac
+pyjac_ast_link_pass.impl.jac
 py_imp_test.jac
 random_check.jac
 registry.jac
@@ -149,6 +151,7 @@ rename.jac
 runtime_errors.na.jac
 runtime.jac
 safe_call_operator.jac
+scheduler.jac
 schema.impl.jac
 schema.jac
 sem_manager.impl.jac
@@ -221,3 +224,8 @@ web_target.jac
 with_context.jac
 with_llm_method.jac
 yield_in_assignment.jac
+prim_builtins_extra2.jac
+prim_builtin_sort.jac
+vite_client_bundle.impl.jac
+test_variant_modules.jac
+async_compr.jac
