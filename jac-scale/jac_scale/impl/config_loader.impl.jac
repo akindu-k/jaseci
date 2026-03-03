@@ -29,8 +29,8 @@ impl JacScaleConfig.get_default_config(self: JacScaleConfig) -> dict[str, Any] {
             'google': {'client_id': '', 'client_secret': ''}
         },
         'database': {
-            'mongodb_uri': 'mongodb://localhost:27017/',
-            'redis_url': 'redis://localhost:6379/0',
+            'mongodb_uri': None,
+            'redis_url': None,
             'shelf_db_path': '.jac/data/anchor_store.db'
         },
         'kubernetes': {
