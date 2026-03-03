@@ -49,6 +49,13 @@ require_password_reset = true
 redis_dashboard = true
 mongodb_dashboard = true
 
+[plugins.scale.database]
+redis_max_memory = "200mb"
+redis_eviction_policy = "allkeys-lru"
+redis_eviction_samples = 5
+redis_default_ttl = 30
+redis_enable_keyspace_notifications = true
+
 [dependencies.npm]
 antd = "^6.0.0"
 jac-client-node = "1.0.4"
