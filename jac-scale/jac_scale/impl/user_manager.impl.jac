@@ -113,12 +113,10 @@ impl JacScaleUserManager.create_user(username: str, password: str) -> dict[str, 
         return {'error': 'User already exists'};
     }
     # Create user root node
-    ctx = Jac.get_context();
     user_root = Root();
-    root_anchor = user_root.__jac__;
-    Jac.save(root_anchor);
-    Jac.commit(root_anchor);
-    root_id = root_anchor.id.hex;
+    Jac.save(user_root);
+    Jac.commit(user_root);
+    root_id = user_root.__jac__.id.hex;
     token = secrets.token_urlsafe(32);
     password_hash = hashlib.sha256(password.encode()).hexdigest();
     self._users_col.insert_one(

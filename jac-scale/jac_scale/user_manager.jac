@@ -29,9 +29,9 @@ enum UserRole {
 obj JacScaleUserManager(UserManager) {
     has SUPPORTED_PLATFORMS: dict = {},
         ADMIN_USER_ID: str = '00000000-0000-0000-0000-000000000000',
-        _mongo_db: Database by postinit,
-        _users_col: Collection by postinit,
-        _sso_col: Collection by postinit;
+        _mongo_db: (Database | None) by postinit,
+        _users_col: (Collection | None) by postinit,
+        _sso_col: (Collection | None) by postinit;
 
     def postinit -> None;
     def _ensure_connection -> None;  # need to implement this
