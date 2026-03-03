@@ -497,6 +497,37 @@ impl JacScaleUserManager.sso_callback(
 impl JacScaleUserManager.link_sso_account(
     user_id: str, platform: str, external_id: str, email: str
 ) -> dict[str, str] {
+    # Fallback to SQLite if MongoDB is not configured
+    if self._sso_col is None {
+        self._ensure_connection();
+        # Check if this SSO account is already linked
+        cursor = self._conn.execute(
+            "SELECT user_id FROM sso_accounts WHERE platform = ? AND external_id = ?",
+            (platform, external_id)
+        );
+        existing = cursor.fetchone();
+        if existing {
+            if existing[0] == user_id {
+                return {'message': 'SSO account already linked to this user'};
+            }
+            return {'error': 'This SSO account is already linked to another user'};
+        }
+        # Link the SSO account
+        self._conn.execute(
+            """
+            INSERT INTO sso_accounts (user_id, platform, external_id, email)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, platform, external_id, email)
+        );
+        self._conn.commit();
+        return {
+            'message': 'SSO account linked successfully',
+            'user_id': user_id,
+            'platform': platform
+        };
+    }
+    # MongoDB implementation
     # Check if this SSO account is already linked
     existing = self._sso_col.find_one(
         {'platform': platform, 'external_id': external_id}
@@ -529,6 +560,24 @@ impl JacScaleUserManager.link_sso_account(
 impl JacScaleUserManager.unlink_sso_account(
     user_id: str, platform: str
 ) -> dict[str, str] {
+    # Fallback to SQLite if MongoDB is not configured
+    if self._sso_col is None {
+        self._ensure_connection();
+        cursor = self._conn.execute(
+            "DELETE FROM sso_accounts WHERE user_id = ? AND platform = ?",
+            (user_id, platform)
+        );
+        self._conn.commit();
+        if cursor.rowcount == 0 {
+            return {'error': 'SSO account not found'};
+        }
+        return {
+            'message': 'SSO account unlinked successfully',
+            'user_id': user_id,
+            'platform': platform
+        };
+    }
+    # MongoDB implementation
     result = self._sso_col.delete_one({'user_id': user_id, 'platform': platform});
     if result.deleted_count == 0 {
         return {'error': 'SSO account not found'};
@@ -542,6 +591,32 @@ impl JacScaleUserManager.unlink_sso_account(
 
 """Get all SSO accounts linked to a user."""
 impl JacScaleUserManager.get_sso_accounts(user_id: str) -> list[dict[str, str]] {
+    # Fallback to SQLite if MongoDB is not configured
+    if self._sso_col is None {
+        self._ensure_connection();
+        cursor = self._conn.execute(
+            """
+            SELECT platform, external_id, email, linked_at
+            FROM sso_accounts
+            WHERE user_id = ?
+            ORDER BY linked_at DESC
+            """,
+            (user_id, )
+        );
+        accounts = [];
+        for row in cursor.fetchall() {
+            accounts.append(
+                {
+                    'platform': row[0],
+                    'external_id': row[1],
+                    'email': row[2],
+                    'linked_at': row[3]
+                }
+            );
+        }
+        return accounts;
+    }
+    # MongoDB implementation
     cursor = self._sso_col.find(
         {'user_id': user_id},
         {'_id': 0, 'platform': 1, 'external_id': 1, 'email': 1, 'linked_at': 1}
@@ -566,6 +641,25 @@ impl JacScaleUserManager.get_sso_accounts(user_id: str) -> list[dict[str, str]] 
 impl JacScaleUserManager.get_user_by_sso(
     platform: str, external_id: str
 ) -> (dict[str, str] | None) {
+    # Fallback to SQLite if MongoDB is not configured
+    if self._sso_col is None {
+        self._ensure_connection();
+        cursor = self._conn.execute(
+            """
+            SELECT sa.user_id, u.token, u.root_id
+            FROM sso_accounts sa
+            JOIN users u ON sa.user_id = u.username
+            WHERE sa.platform = ? AND sa.external_id = ?
+            """,
+            (platform, external_id)
+        );
+        row = cursor.fetchone();
+        if not row {
+            return None;
+        }
+        return {'email': row[0], 'token': row[1], 'root_id': row[2]};
+    }
+    # MongoDB implementation
     sso_doc = self._sso_col.find_one({'platform': platform, 'external_id': external_id});
     if not sso_doc {
         return None;
@@ -848,6 +942,35 @@ impl JacScaleUserManager.bootstrap_admin_user -> dict[str, str] {
 impl JacScaleUserManager.list_all_users(
     limit: int = 100, offset: int = 0
 ) -> list[dict[str, Any]] {
+    # Fallback to SQLite if MongoDB is not configured
+    if self._users_col is None {
+        self._ensure_connection();
+        cursor = self._conn.execute(
+            """
+            SELECT username, root_id, role, requires_password_reset, is_password_required, user_id
+            FROM users
+            WHERE username != ?
+            ORDER BY username
+            LIMIT ? OFFSET ?
+            """,
+            ('__guest__', limit, offset)
+        );
+        users = [];
+        for row in cursor.fetchall() {
+            users.append(
+                {
+                    'username': row[0] or '',
+                    'root_id': row[1] or '',
+                    'role': row[2] or 'user',
+                    'requires_password_reset': bool(row[3]),
+                    'is_password_required': bool(row[4]) if row[4] is not None else True,
+                    'user_id': row[5]
+                }
+            );
+        }
+        return users;
+    }
+    # MongoDB implementation
     cursor = self._users_col.find(
         {'username': {'$ne': '__guest__'}}, {'_id': 0, 'password_hash': 0}
     ).sort(
@@ -879,6 +1002,29 @@ impl JacScaleUserManager.list_all_users(
 
 """Delete a user (admin only)."""
 impl JacScaleUserManager.delete_user(username: str) -> dict[str, str] {
+    # Fallback to SQLite if MongoDB is not configured
+    if self._users_col is None {
+        self._ensure_connection();
+        # Prevent deleting admin user with all-zeros UUID
+        cursor = self._conn.execute(
+            "SELECT user_id FROM users WHERE username = ?", (username, )
+        );
+        user = cursor.fetchone();
+        if user and user[0] == self.ADMIN_USER_ID {
+            return {'error': 'Cannot delete the primary admin user'};
+        }
+        # Delete the user
+        cursor = self._conn.execute("DELETE FROM users WHERE username = ?", (username, ));
+        self._conn.commit();
+        if cursor.rowcount == 0 {
+            return {'error': 'User not found'};
+        }
+        # Also delete SSO accounts
+        self._conn.execute("DELETE FROM sso_accounts WHERE user_id = ?", (username, ));
+        self._conn.commit();
+        return {'message': 'User deleted successfully', 'username': username};
+    }
+    # MongoDB implementation
     # Prevent deleting admin user with all-zeros UUID
     user = self._users_col.find_one({'username': username}, {'user_id': 1, '_id': 0});
     if user and user.get('user_id') == self.ADMIN_USER_ID {
@@ -915,16 +1061,31 @@ impl JacScaleUserManager.create_user_as_admin(
     }
     # Update with admin-specific fields
     user_id = str(uuid.uuid4());
-    self._users_col.update_one(
-        {'username': username},
-        {
-            '$set': {
-                'role': role,
-                'user_id': user_id,
-                'requires_password_reset': requires_password_reset
+    if self._users_col is None {
+        # SQLite
+        self._ensure_connection();
+        self._conn.execute(
+            """
+            UPDATE users
+            SET role = ?, user_id = ?, requires_password_reset = ?
+            WHERE username = ?
+            """,
+            (role, user_id, 1 if requires_password_reset else 0, username)
+        );
+        self._conn.commit();
+    } else {
+        # MongoDB
+        self._users_col.update_one(
+            {'username': username},
+            {
+                '$set': {
+                    'role': role,
+                    'user_id': user_id,
+                    'requires_password_reset': requires_password_reset
+                }
             }
-        }
-    );
+        );
+    }
     result['role'] = role;
     result['user_id'] = user_id;
     result['requires_password_reset'] = str(requires_password_reset);
