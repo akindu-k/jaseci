@@ -752,7 +752,8 @@ impl JacScaleUserManager.requires_password_reset(username: str) -> bool {
     if self._users_col is None {
         self._ensure_connection();
         cursor = self._conn.execute(
-            "SELECT requires_password_reset FROM users WHERE username = ?", (username, )
+            "SELECT requires_password_reset FROM users WHERE username = ?",
+            (username, )
         );
         row = cursor.fetchone();
         if not row {
@@ -963,7 +964,9 @@ impl JacScaleUserManager.list_all_users(
                     'root_id': row[1] or '',
                     'role': row[2] or 'user',
                     'requires_password_reset': bool(row[3]),
-                    'is_password_required': bool(row[4]) if row[4] is not None else True,
+                    'is_password_required': bool(row[4])
+                        if row[4] is not None
+                        else True,
                     'user_id': row[5]
                 }
             );
@@ -1014,7 +1017,9 @@ impl JacScaleUserManager.delete_user(username: str) -> dict[str, str] {
             return {'error': 'Cannot delete the primary admin user'};
         }
         # Delete the user
-        cursor = self._conn.execute("DELETE FROM users WHERE username = ?", (username, ));
+        cursor = self._conn.execute(
+            "DELETE FROM users WHERE username = ?", (username, )
+        );
         self._conn.commit();
         if cursor.rowcount == 0 {
             return {'error': 'User not found'};

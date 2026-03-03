@@ -139,7 +139,11 @@ class MockScaleConfig {
     }
 
     def get_database_config(self) -> dict {
-        return {"mongodb_uri": None, "redis_url": None, "shelf_db_path": ".jac/data/anchor_store.db"};
+        return {
+            "mongodb_uri": None,
+            "redis_url": None,
+            "shelf_db_path": ".jac/data/anchor_store.db"
+        };
     }
 
     def get_kubernetes_config(self) -> dict {
