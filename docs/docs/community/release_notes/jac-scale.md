@@ -4,10 +4,12 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.2.4 (Unreleased)
 
+- **Redis Cache Configuration with TTL Support**: Added configurable eviction policies and TTL support for Kubernetes Redis deployments via `jac.toml` (`redis_max_memory`, `redis_eviction_policy`, `redis_eviction_samples`, `redis_default_ttl`, `redis_enable_keyspace_notifications`); ConfigMap-based with automatic pod restart on change.
+
 ## jac-scale 0.2.3 (Latest Release)
 
-- **Redis Cache Configuration with TTL Support**: Added configurable eviction policies and TTL support for Kubernetes Redis deployments via `jac.toml` (`redis_max_memory`, `redis_eviction_policy`, `redis_eviction_samples`, `redis_default_ttl`, `redis_enable_keyspace_notifications`); ConfigMap-based with automatic pod restart on change.
-- Set default maximum memory limit of k8s pods from unlimited to 12Gb
+- Automatically deploy Redis (RedisInsight) and MongoDB (MongoDB Dashboard) dashboards in Kubernetes when the redis_dashboard and mongodb_dashboard flags are enabled.
+- Set default maximum memory limit for jaseci app pod to None (unlimited)
 - 1 Minor refactor/change.
 
 ## jac-scale 0.2.2
