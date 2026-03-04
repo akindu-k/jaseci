@@ -576,91 +576,114 @@ impl NaIRGenPass._codegen_assignment(nd: uni.Assignment) -> None {
                             current, coerced, name=f"{var_name}.or"
                         );
                     } elif isinstance(current.type, ir.PointerType) {
-                        # Set union: iterate RHS set elements and add to LHS set
-                        rhs_set = coerced;
-                        lhs_set = current;
-                        # Find the matching set helpers by type
-                        set_elem_name: (str | None) = None;
-                        for (sname, stype) in self.set_types.items() {
-                            if current.type == stype.as_pointer()
-                            or rhs_set.type == stype.as_pointer() {
-                                set_elem_name = sname;
-                                break;
+                        # Dict |= (update) via emitter
+                        if var_name in self.var_dict_type {
+                            dict_type_key = self.var_dict_type[var_name];
+                            self._ensure_emitters();
+                            _de = self._native_emitters.get("dict");
+                            if _de is not None {
+                                _ctx = self._native_emit_ctx_class(
+                                    pass_ref=self, type_key=dict_type_key
+                                );
+                                _de.emit_update(_ctx, current, [coerced]);
                             }
-                        }
-                        if set_elem_name is not None {
-                            shelpers = self.set_helpers.get(set_elem_name);
-                            if shelpers is not None {
-                                i64 = ir.IntType(64);
-                                i32 = ir.IntType(32);
-                                # Get RHS set len and elems
-                                rhs_cast = self.builder.bitcast(
-                                    rhs_set,
-                                    self.set_types[set_elem_name].as_pointer(),
-                                    name="rhs.set.cast"
-                                );
-                                rhs_len_ptr = self.builder.gep(
-                                    rhs_cast,
-                                    [ir.Constant(i32, 0), ir.Constant(i32, 0)],
-                                    name="rhs.len.ptr"
-                                );
-                                rhs_len = self.builder.load(rhs_len_ptr, name="rhs.len");
-                                rhs_elems_ptr = self.builder.gep(
-                                    rhs_cast,
-                                    [ir.Constant(i32, 0), ir.Constant(i32, 2)],
-                                    name="rhs.elems.ptr"
-                                );
-                                rhs_elems = self.builder.load(
-                                    rhs_elems_ptr, name="rhs.elems"
-                                );
-                                # Loop: for i in range(rhs_len): lhs.add(rhs[i])
-                                loop_idx = self._entry_alloca(i64, "union.idx");
-                                self.builder.store(ir.Constant(i64, 0), loop_idx);
-                                func = self.builder.function;
-                                cond_bb = func.append_basic_block(name="union.cond");
-                                body_bb = func.append_basic_block(name="union.body");
-                                end_bb = func.append_basic_block(name="union.end");
-                                self.builder.branch(cond_bb);
-                                self.builder.position_at_end(cond_bb);
-                                cur_i = self.builder.load(loop_idx, name="union.i");
-                                cmp = self.builder.icmp_signed(
-                                    "<", cur_i, rhs_len, name="union.cmp"
-                                );
-                                self.builder.cbranch(cmp, body_bb, end_bb);
-                                self.builder.position_at_end(body_bb);
-                                elem_i = self.builder.load(
-                                    loop_idx, name="union.elem.i"
-                                );
-                                elem_ptr = self.builder.gep(
-                                    rhs_elems, [elem_i], name="union.elem.ptr"
-                                );
-                                elem_val = self.builder.load(
-                                    elem_ptr, name="union.elem.val"
-                                );
-                                lhs_cast = self.builder.bitcast(
-                                    lhs_set,
-                                    self.set_types[set_elem_name].as_pointer(),
-                                    name="lhs.set.cast"
-                                );
-                                self.builder.call(shelpers["add"], [lhs_cast, elem_val]);
-                                next_i = self.builder.add(
-                                    elem_i, ir.Constant(i64, 1), name="union.next.i"
-                                );
-                                self.builder.store(next_i, loop_idx);
-                                self.builder.branch(cond_bb);
-                                self.builder.position_at_end(end_bb);
-                                # Keep the LHS set as the value (no change to pointer)
-                                value = lhs_set;
-                                is_inplace_set_op = True;
-                                # Release the RHS set since we've consumed its elements
-                                rhs_release = self.set_release_fns.get(set_elem_name);
-                                if rhs_release is not None {
-                                    rhs_cast2 = self.builder.bitcast(
+                            value = current;
+                            is_inplace_set_op = True;
+                        } else {
+                            # Set union: iterate RHS set elements and add to LHS set
+                            rhs_set = coerced;
+                            lhs_set = current;
+                            # Find the matching set helpers by type
+                            set_elem_name: (str | None) = None;
+                            for (sname, stype) in self.set_types.items() {
+                                if current.type == stype.as_pointer()
+                                or rhs_set.type == stype.as_pointer() {
+                                    set_elem_name = sname;
+                                    break;
+                                }
+                            }
+                            if set_elem_name is not None {
+                                shelpers = self.set_helpers.get(set_elem_name);
+                                if shelpers is not None {
+                                    i64 = ir.IntType(64);
+                                    i32 = ir.IntType(32);
+                                    # Get RHS set len and elems
+                                    rhs_cast = self.builder.bitcast(
                                         rhs_set,
                                         self.set_types[set_elem_name].as_pointer(),
-                                        name="rhs.release.cast"
+                                        name="rhs.set.cast"
                                     );
-                                    self.builder.call(rhs_release, [rhs_cast2]);
+                                    rhs_len_ptr = self.builder.gep(
+                                        rhs_cast,
+                                        [ir.Constant(i32, 0), ir.Constant(i32, 0)],
+                                        name="rhs.len.ptr"
+                                    );
+                                    rhs_len = self.builder.load(
+                                        rhs_len_ptr, name="rhs.len"
+                                    );
+                                    rhs_elems_ptr = self.builder.gep(
+                                        rhs_cast,
+                                        [ir.Constant(i32, 0), ir.Constant(i32, 2)],
+                                        name="rhs.elems.ptr"
+                                    );
+                                    rhs_elems = self.builder.load(
+                                        rhs_elems_ptr, name="rhs.elems"
+                                    );
+                                    # Loop: for i in range(rhs_len): lhs.add(rhs[i])
+                                    loop_idx = self._entry_alloca(i64, "union.idx");
+                                    self.builder.store(ir.Constant(i64, 0), loop_idx);
+                                    func = self.builder.function;
+                                    cond_bb = func.append_basic_block(name="union.cond");
+                                    body_bb = func.append_basic_block(name="union.body");
+                                    end_bb = func.append_basic_block(name="union.end");
+                                    self.builder.branch(cond_bb);
+                                    self.builder.position_at_end(cond_bb);
+                                    cur_i = self.builder.load(loop_idx, name="union.i");
+                                    cmp = self.builder.icmp_signed(
+                                        "<", cur_i, rhs_len, name="union.cmp"
+                                    );
+                                    self.builder.cbranch(cmp, body_bb, end_bb);
+                                    self.builder.position_at_end(body_bb);
+                                    elem_i = self.builder.load(
+                                        loop_idx, name="union.elem.i"
+                                    );
+                                    elem_ptr = self.builder.gep(
+                                        rhs_elems, [elem_i], name="union.elem.ptr"
+                                    );
+                                    elem_val = self.builder.load(
+                                        elem_ptr, name="union.elem.val"
+                                    );
+                                    lhs_cast = self.builder.bitcast(
+                                        lhs_set,
+                                        self.set_types[set_elem_name].as_pointer(),
+                                        name="lhs.set.cast"
+                                    );
+                                    self.builder.call(
+                                        shelpers["add"], [lhs_cast, elem_val]
+                                    );
+                                    next_i = self.builder.add(
+                                        elem_i,
+                                        ir.Constant(i64, 1),
+                                        name="union.next.i"
+                                    );
+                                    self.builder.store(next_i, loop_idx);
+                                    self.builder.branch(cond_bb);
+                                    self.builder.position_at_end(end_bb);
+                                    # Keep the LHS set as the value (no change to pointer)
+                                    value = lhs_set;
+                                    is_inplace_set_op = True;
+                                    # Release the RHS set since we've consumed its elements
+                                    rhs_release = self.set_release_fns.get(
+                                        set_elem_name
+                                    );
+                                    if rhs_release is not None {
+                                        rhs_cast2 = self.builder.bitcast(
+                                            rhs_set,
+                                            self.set_types[set_elem_name].as_pointer(),
+                                            name="rhs.release.cast"
+                                        );
+                                        self.builder.call(rhs_release, [rhs_cast2]);
+                                    }
                                 }
                             }
                         }
@@ -866,8 +889,56 @@ impl NaIRGenPass._codegen_assignment(nd: uni.Assignment) -> None {
             # New variable — allocate and store
             var_type = value.type;
             if nd.type_tag and nd.type_tag.tag {
-                var_type = self._resolve_jac_type(nd.type_tag.tag);
-                value = self._coerce_type(value, var_type);
+                tag_node = nd.type_tag.tag;
+                # Bare unparameterized collection annotations (list/dict/set/frozenset):
+                # infer the variable type from the RHS value rather than defaulting,
+                # so `a: list = [1, 2]`, `d: dict = {"k": v}`, `s: set = {1, 2}` all work
+                # regardless of element types.
+                bare_name: (str | None) = None;
+                if isinstance(tag_node, uni.Name) {
+                    bare_name = tag_node.value;
+                } elif uni?.BuiltinType and isinstance(tag_node, uni.BuiltinType) {
+                    bare_name = tag_node.value;
+                }
+                infer_from_val = (
+                    bare_name in {"list","dict","set","frozenset"}
+                    and isinstance(value.type, ir.PointerType)
+                );
+                if infer_from_val {
+                    # Verify value is actually a known collection pointer
+                    is_coll = False;
+                    for (_, _ltype) in self.list_types.items() {
+                        if value.type == _ltype.as_pointer() {
+                            is_coll = True;
+                            break;
+                        }
+                    }
+                    if not is_coll {
+                        for (_, _dtype) in self.dict_types.items() {
+                            if value.type == _dtype.as_pointer() {
+                                is_coll = True;
+                                break;
+                            }
+                        }
+                    }
+                    if not is_coll {
+                        for (_, _stype) in self.set_types.items() {
+                            if value.type == _stype.as_pointer() {
+                                is_coll = True;
+                                break;
+                            }
+                        }
+                    }
+                    if not is_coll {
+                        infer_from_val = False;
+                    }
+                }
+                if infer_from_val {
+                    var_type = value.type;  # element type inferred from RHS literal
+                } else {
+                    var_type = self._resolve_jac_type(tag_node);
+                    value = self._coerce_type(value, var_type);
+                }
             }
             alloca = self._entry_alloca(var_type, var_name);
             self.builder.store(value, alloca);
@@ -920,6 +991,28 @@ impl NaIRGenPass._codegen_assignment(nd: uni.Assignment) -> None {
                 self.var_set_elem_type[var_name] = ename;
                 break;
             }
+        }
+        # Track tuple type for tuple variables
+        if isinstance(value.type, ir.PointerType)
+        and isinstance(value.type.pointee, ir.LiteralStructType) {
+            for (tkey, ttype) in self.tuple_types.items() {
+                if str(value.type.pointee) == str(ttype) {
+                    self.var_tuple_type[var_name] = tkey;
+                    break;
+                }
+            }
+        }
+        # Track complex variables
+        if value.type == self.complex_struct_type.as_pointer() {
+            self.var_complex.add(var_name);
+        }
+        # Track range variables
+        if value.type == self.range_struct_type.as_pointer() {
+            self.var_range.add(var_name);
+        }
+        # Track slice variables
+        if value.type == self.slice_struct_type.as_pointer() {
+            self.var_slice.add(var_name);
         }
     }
 }

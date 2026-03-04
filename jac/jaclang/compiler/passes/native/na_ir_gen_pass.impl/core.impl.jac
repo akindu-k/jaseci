@@ -66,13 +66,38 @@ impl NaIRGenPass.init(
     self._list_type_hint: (str | None) = None;  # hint for empty list creation
     self._last_type_node_hint: (object | None) = None;  # Jac type AST of last evaluated expr
     # Inheritance / vtable support (Phase 5)
-    self.class_hierarchy: dict[(str, str)] = {};  # child → parent
+    self.class_hierarchy: dict[(str, str)] = {};  # child → primary parent (backward compat)
+    self.class_parents: dict[str, list[str]] = {};  # child → [parent1, parent2, ...]
+    self.mro_order: dict[str, list[str]] = {};  # class → C3 MRO [self, parent1, ...]
+    self.parent_field_start: dict[str, dict[str, int]] = {};  # child → {ancestor → first_field_idx}
+    self.arch_ast_map: dict[str, object] = {};  # class_name → Archetype AST node
     self.has_vtable: dict[(str, bool)] = {};
     self.vtable_layouts: dict[(str, list[str])] = {};
     self.vtable_method_indices: dict[(str, dict)] = {};
     self.vtable_globals: dict[(str, ir.GlobalVariable)] = {};
     # Tuple support (Phase 9)
     self.tuple_types: dict[(str, object)] = {};  # type_key → LiteralStructType
+    self.var_tuple_type: dict[(str, str)] = {};  # var_name → tuple_key
+    # Complex number support
+    self.complex_struct_type = self.llvm_module.context.get_identified_type(
+        "JacComplex"
+    );
+    self.complex_struct_type.set_body(
+        ir.DoubleType(), ir.DoubleType()
+    );  # {f64 real, f64 imag}
+    self.var_complex: set[str] = set();  # variable names known to be complex
+    # Range object support
+    self.range_struct_type = self.llvm_module.context.get_identified_type("JacRange");
+    self.range_struct_type.set_body(
+        ir.IntType(64), ir.IntType(64), ir.IntType(64)
+    );  # {i64 start, i64 stop, i64 step}
+    self.var_range: set[str] = set();  # variable names known to be range
+    # Slice object support (same layout as JacRange)
+    self.slice_struct_type = self.llvm_module.context.get_identified_type("JacSlice");
+    self.slice_struct_type.set_body(
+        ir.IntType(64), ir.IntType(64), ir.IntType(64)
+    );  # {i64 start, i64 stop, i64 step}
+    self.var_slice: set[str] = set();  # variable names known to be slice
     # Global variable support (Phase 11)
     self.global_vars: dict[(str, ir.GlobalVariable)] = {};  # name → global variable
     self.global_var_types: dict[(str, ir.Type)] = {};  # name → LLVM type

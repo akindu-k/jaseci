@@ -626,6 +626,18 @@ test "cli defaults to run with file" {
     assert "Hello World!" in stdout;
 }
 
+test "cli implicit run passes through flags before filename" {
+    process = subprocess.Popen(
+        ["jac", "--no-cache", fixture_path("hello.jac")],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    );
+    (stdout, stderr) = process.communicate();
+    assert process.returncode == 0 , f"Expected exit 0, got {process.returncode}: {stderr}";
+    assert "Hello World!" in stdout;
+}
+
 test "cli error exit codes" {
     # Test run command with syntax error
     captured_stderr = io.StringIO();
@@ -1558,4 +1570,27 @@ test "bare lt in jsx content is treated as text" {
     }
 
     assert result == 0 , f"should compile successfully, got errors: {stderr}";
+}
+
+test "jir_registry is up to date" {
+    """Verify jir_registry.jac matches what gen_jir_registry.jac would generate.
+
+    Fails with a descriptive message if the registry is out of date, e.g. because
+    unitree node classes were added or changed without re-running `jac gen-jir-registry`.
+    """
+    captured = io.StringIO();
+    old_stdout = sys.stdout;
+    sys.stdout = captured;
+
+    result: int;
+    try {
+        result = tools.gen_jir_registry(verify=True);
+    } finally {
+        sys.stdout = old_stdout;
+    }
+
+    assert result == 0 , (
+        "jir_registry.jac is out of date. "
+        "Run `jac gen-jir-registry` to regenerate it."
+    );
 }
