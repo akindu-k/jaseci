@@ -4,6 +4,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.11.4 (Unreleased)
 
+- **Automatic Port Fallback for `jac start`**: When starting the built-in HTTP server, if the specified port is already in use, the server now automatically finds and uses the next available port instead of crashing with "Address already in use". A warning message displays when using an alternative port. The `on_ready` callback signature updated to `Callable[[int], None]` to pass the actual bound port.
+- 9 small refactors/changes.
 - 15 small refactors/changes.
 - **Fix: LSP Impl File Diagnostics**: Editing `.impl.jac` or `.test.jac` now shows errors correctly across all related files.
 - **Fix: Type Checker Support for `__getattr__`**: Classes defining `__getattr__` no longer produce false "has no attribute" errors. Dynamic attribute access now correctly resolves to the `__getattr__` return type, and `Any` is callable (enabling proxy patterns like `console.error("msg")`). IDE hover shows dynamic attributes as `(dynamic attribute) name: type`.
