@@ -1,44 +1,9 @@
 """Compact test for MongoDB user operations using testcontainers."""
 
 import os;
-import pytest;
-import unittest.mock;
 
 import from jac_scale.user_manager { JacScaleUserManager }
 import from jac_scale.config_loader { reset_scale_config }
-
-"""Mock config that returns MongoDB URI."""
-obj MockMongoConfig {
-    has mongodb_uri: str;
-
-    def get_database_config -> dict {
-        return {'mongodb_uri': self.mongodb_uri, 'redis_url': None};
-    }
-
-    def get_jwt_config -> dict {
-        return {"secret": "test_secret", "algorithm": "HS256", "exp_delta_days": 1};
-    }
-
-    def get_sso_config -> dict {
-        return {"host": "http://localhost:8000/sso"};
-    }
-
-    def get_kubernetes_config -> dict {
-        return {"namespace": "default"};
-    }
-
-    def get_monitoring_config -> dict {
-        return {"enabled": False};
-    }
-
-    def get_admin_config -> dict {
-        return {
-            "username": "admin",
-            "password": "admin123",
-            "require_password_reset": True
-        };
-    }
-}
 
 """Test MongoDB user CRUD operations with testcontainers."""
 test "mongodb user operations" {
@@ -48,16 +13,45 @@ test "mongodb user operations" {
     # Start MongoDB container
     with MongoDbContainer("mongo:7.0") as mongo {
         mongo_uri = mongo.get_connection_url();
-        reset_scale_config();
-        mock_config = MockMongoConfig(mongodb_uri=mongo_uri);
-        # Use a temporary directory to avoid conflicts with other tests
+
+        # Use a temporary directory for the test environment
         with tempfile.TemporaryDirectory() as tmpdir {
-            # Patch both the config_loader and user_manager modules
-            with unittest.mock.patch(
-                "jac_scale.config_loader.get_scale_config", return_value=mock_config
-            ), unittest.mock.patch(
-                "jac_scale.user_manager.get_scale_config", return_value=mock_config
-            ) {
+            # Create a minimal jac.toml in the temp directory
+            toml_content = """
+[project]
+name = "test-mongo-user-manager"
+version = "1.0.0"
+
+[plugins.scale.database]
+# MongoDB URI will be set via environment variable
+
+[plugins.scale.jwt]
+secret = "test_secret"
+algorithm = "HS256"
+exp_delta_days = 1
+
+[plugins.scale.sso]
+host = "http://localhost:8000/sso"
+
+[plugins.scale.admin]
+username = "admin"
+default_password = "admin123"
+require_password_reset = true
+""";
+            toml_path = os.path.join(tmpdir, "jac.toml");
+            with open(toml_path, 'w') as f {
+                f.write(toml_content);
+            }
+
+            # Set MongoDB URI via environment variable (the config loader reads from os.environ)
+            old_mongodb_uri = os.environ.get('MONGODB_URI');
+            os.environ['MONGODB_URI'] = mongo_uri;
+
+            try {
+                # Reset config to force reload with new environment
+                reset_scale_config();
+
+                # Initialize user manager with the temp directory as project root
                 um = JacScaleUserManager(base_path=tmpdir);
                 # Test: Create user
                 result = um.create_user("test_user", "password123");
@@ -173,6 +167,18 @@ test "mongodb user operations" {
                 usernames_final = {u["username"] for u in users};
                 assert "renamed_user" in usernames_final;
                 assert "admin" in usernames_final;
+
+                # Cleanup
+                um.close();
+            } finally {
+                # Restore original environment variable
+                if old_mongodb_uri is not None {
+                    os.environ['MONGODB_URI'] = old_mongodb_uri;
+                } else {
+                    os.environ.pop('MONGODB_URI', None);
+                }
+                # Reset config after test
+                reset_scale_config();
             }
         }
     }
