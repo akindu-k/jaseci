@@ -114,6 +114,18 @@ obj PersistentMemory(Memory) {
 
     """Bulk store multiple anchors efficiently."""
     def bulk_put(anchors: Iterable[Anchor]) -> None abs;
+
+    """Partially update an anchor's archetype fields to avoid race conditions.
+
+    Only updates the specified fields in the archetype, leaving other fields unchanged.
+    This prevents race conditions when multiple requests modify different fields of the
+    same anchor concurrently.
+
+    Args:
+        anchor: The anchor to update
+        fields: Dict mapping field names to new values. If None, performs full update (equivalent to put).
+    """
+    def partial_update(anchor: Anchor, fields: (dict[str, object] | None) = None) -> None abs;
 }
 
 # =============================================================================

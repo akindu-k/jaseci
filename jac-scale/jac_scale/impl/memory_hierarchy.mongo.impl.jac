@@ -219,6 +219,63 @@ impl MongoBackend.bulk_put(anchors: Iterable[Anchor]) -> None {
     }
 }
 
+"""Partially update an anchor's archetype fields (MongoDB implementation).
+
+Uses MongoDB's atomic field-level updates ($set) to avoid race conditions.
+This allows multiple concurrent requests to modify different fields of the same
+anchor without overwriting each other's changes.
+
+Args:
+    anchor: The anchor to update
+    fields: Dict mapping field names to new values. If None, performs full update.
+"""
+impl MongoBackend.partial_update(
+    anchor: Anchor, fields: (dict[str, object] | None) = None
+) -> None {
+    if self.client is None or not anchor.persistent {
+        return;
+    }
+    _id = to_uuid(anchor.id);
+    # If no fields specified, fall back to full put
+    if fields is None {
+        self.put(anchor);
+        return;
+    }
+    try {
+        # Build MongoDB $set operation for only the specified archetype fields
+        # We need to serialize each field value and update within the nested data.archetype object
+        update_ops = {};
+        for (field_name, field_value) in fields.items() {
+            # Serialize the field value
+            serialized_value = Serializer._serialize_value(field_value, include_type=True);
+            # Use MongoDB dot notation to update nested field in data.archetype
+            update_ops[f"data.archetype.{field_name}"] = serialized_value;
+        }
+        if update_ops {
+            result = self.collection.update_one(
+                {'_id': str(_id)},
+                {'$set': update_ops},
+                upsert=False  # Don't create if doesn't exist - partial update requires existing document
+            );
+            if result.matched_count == 0 {
+                # Document doesn't exist yet, fall back to full put
+                logger.debug(
+                    f"MongoDB partial_update: document {_id} not found, falling back to full put"
+                );
+                self.put(anchor);
+            } else {
+                logger.debug(
+                    f"MongoDB partial_update: updated {len(update_ops)} fields for anchor {_id}"
+                );
+            }
+        }
+    } except Exception as e {
+        logger.error(f"MongoDB partial_update failed: {e}");
+        # On error, fall back to full put
+        self.put(anchor);
+    }
+}
+
 """Load anchor from raw MongoDB document."""
 impl MongoBackend._load_anchor(raw: dict[(str, Any)]) -> (Anchor | None) {
     if 'data' not in raw {

@@ -441,6 +441,63 @@ impl SqliteMemory.bulk_put(anchors: Iterable[Anchor]) -> None {
     }
 }
 
+"""Partially update an anchor's archetype fields (SQLite implementation).
+
+For SQLite, we need to read the existing anchor, update only the specified fields,
+then write it back. This is less efficient than MongoDB's atomic field updates,
+but still safer than full replacement in concurrent scenarios.
+"""
+impl SqliteMemory.partial_update(
+    anchor: Anchor, fields: (dict[str, object] | None) = None
+) -> None {
+    import from jaclang { JacRuntimeInterface as Jac }
+    if not anchor.persistent or not Jac.check_write_access(anchor) {
+        return;
+    }
+    # If no fields specified, fall back to full put
+    if fields is None {
+        self.put(anchor);
+        return;
+    }
+    # Lazily create connection if needed
+    self._ensure_connection();
+    key = str(anchor.id);
+    try {
+        # Get existing anchor from database
+        cursor = self.__conn__.execute("SELECT data FROM anchors WHERE id = ?", (key, ));
+        row = cursor.fetchone();
+        if row {
+            stored = loads(row[0]);
+            # Update only the specified fields in the archetype
+            if stored.is_populated() and anchor.is_populated() {
+                for (field_name, field_value) in fields.items() {
+                    if hasattr(stored.archetype, field_name) {
+                        setattr(stored.archetype, field_name, field_value);
+                    }
+                }
+                # Write back the modified anchor
+                self.__conn__.execute(
+                    "INSERT OR REPLACE INTO anchors (id, data) VALUES (?, ?)",
+                    (key, dumps(stored))
+                );
+                self.__conn__.commit();
+                # Update in-memory cache
+                self.__mem__[anchor.id] = stored;
+            } else {
+                # If not populated, fall back to full put
+                self.put(anchor);
+            }
+        } else {
+            # If not in database yet, just do a full put
+            self.put(anchor);
+        }
+    } except Exception as e {
+        logger.warning(f"SqliteMemory.partial_update failed: {e}");
+        # Fall back to full put on error
+        self.put(anchor);
+    }
+}
+
 """Get garbage collection list."""
 impl SqliteMemory.get_gc -> list[Anchor] {
     return list(self.__gc__);
