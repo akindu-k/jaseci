@@ -1,10 +1,7 @@
 impl JacScaleUserManager.postinit -> None {
-    import os;
-    # Check if MongoDB is configured
     db_config = get_scale_config().get_database_config();
     mongodb_uri = db_config.get('mongodb_uri');
 
-    # Load SSO config first (before database initialization)
     sso_config = get_scale_config().get_sso_config();
     for platform in Platforms {
         key = platform.value.lower();
@@ -23,32 +20,26 @@ impl JacScaleUserManager.postinit -> None {
         };
     }
 
-    # Now initialize database connection
     if mongodb_uri is not None {
-        # Use MongoDB
         import from jac_scale.db { get_mongo_client }
         client = get_mongo_client();
         self._mongo_db = client['jac_db'];
         self._users_col = self._mongo_db['users'];
         self._sso_col = self._mongo_db['sso_accounts'];
-        # Ensure indexes
+
         self._users_col.create_index('username', unique=True);
         self._users_col.create_index('token', unique=True, sparse=True);
         self._sso_col.create_index([('platform', 1), ('external_id', 1)], unique=True);
         self._sso_col.create_index('user_id');
-        # Mark that we're using MongoDB (no SQLite connection)
+
         self._using_mongodb = True;
     } else {
-        # Fallback to SQLite - call parent's postinit which will set up _conn
         self._using_mongodb = False;
         self._mongo_db = None;
         self._users_col = None;
         self._sso_col = None;
-        # Let parent initialize SQLite
         super.postinit();
-        # Add JacScale-specific columns if they don't exist
         self._ensure_connection();
-        # Create SSO accounts table
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS sso_accounts (
@@ -65,7 +56,6 @@ impl JacScaleUserManager.postinit -> None {
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_sso_accounts_user_id ON sso_accounts(user_id)"
         );
-        # Add JacScale-specific user columns
         cursor = self._conn.execute("PRAGMA table_info(users)");
         existing_columns = {row[1] for row in cursor.fetchall()};
         if 'role' not in existing_columns {
@@ -88,27 +78,22 @@ impl JacScaleUserManager.postinit -> None {
     }
 }
 
-# """Override parent's _ensure_connection - call parent only if using SQLite."""
+"""Override parent's _ensure_connection - call parent only if using SQLite."""
 impl JacScaleUserManager._ensure_connection -> None {
-    # Only call parent's _ensure_connection if we're using SQLite
     if self._users_col is None {
         super._ensure_connection();
     }
-    # MongoDB doesn't need connection management (uses connection pooling)
 }
 
 """Create a new user with their own root node. Returns dict with user data or error."""
 impl JacScaleUserManager.create_user(username: str, password: str) -> dict[str, str] {
-    # Fallback to SQLite if MongoDB is not configured
     if self._users_col is None {
         return super.create_user(username, password);
     }
-    # MongoDB implementation
     import from jaclang.jac0core.constructs { Root }
     import from jaclang { JacRuntime as Jac }
-    import hashlib;
     import secrets;
-    # Check if user already exists
+
     if self._users_col.count_documents({'username': username}, limit=1) > 0 {
         return {'error': 'User already exists'};
     }
@@ -138,12 +123,9 @@ impl JacScaleUserManager.create_user(username: str, password: str) -> dict[str, 
 impl JacScaleUserManager.authenticate(
     username: str, password: str
 ) -> (dict[(str, str)] | None) {
-    # Fallback to SQLite if MongoDB is not configured
     if self._users_col is None {
         return super.authenticate(username, password);
     }
-    # MongoDB implementation
-    import hashlib;
     password_hash = hashlib.sha256(password.encode()).hexdigest();
     user = self._users_col.find_one(
         {'username': username, 'password_hash': password_hash},
@@ -166,22 +148,18 @@ impl JacScaleUserManager.validate_token(token: str) -> (str | None) {
 
 """Get user's root node ID."""
 impl JacScaleUserManager.get_root_id(username: str) -> (str | None) {
-    # Fallback to SQLite if MongoDB is not configured
     if self._users_col is None {
         return super.get_root_id(username);
     }
-    # MongoDB implementation
     user = self._users_col.find_one({'username': username}, {'root_id': 1, '_id': 0});
     return user['root_id'] if user else None;
 }
 
 """Get user data by username."""
 impl JacScaleUserManager.get_user(username: str) -> (dict[(str, str)] | None) {
-    # Fallback to SQLite if MongoDB is not configured
     if self._users_col is None {
         return super.get_user(username);
     }
-    # MongoDB implementation
     user = self._users_col.find_one(
         {'username': username}, {'token': 1, 'root_id': 1, '_id': 0}
     );
@@ -193,11 +171,9 @@ impl JacScaleUserManager.get_user(username: str) -> (dict[(str, str)] | None) {
 
 """Check if a user exists."""
 impl JacScaleUserManager.user_exists(username: str) -> bool {
-    # Fallback to SQLite if MongoDB is not configured
     if self._users_col is None {
         return super.user_exists(username);
     }
-    # MongoDB implementation
     return self._users_col.count_documents({'username': username}, limit=1) > 0;
 }
 
@@ -205,12 +181,9 @@ impl JacScaleUserManager.user_exists(username: str) -> bool {
 impl JacScaleUserManager.update_username(
     current_username: str, new_username: str
 ) -> dict[str, str] {
-    # Fallback to SQLite if MongoDB is not configured
     if self._users_col is None {
         return super.update_username(current_username, new_username);
     }
-    # MongoDB implementation
-    # Check if new username already exists
     if self._users_col.count_documents({'username': new_username}, limit=1) > 0 {
         return {'error': 'Username already taken'};
     }
@@ -220,11 +193,11 @@ impl JacScaleUserManager.update_username(
     if result.modified_count == 0 {
         return {'error': 'User not found'};
     }
-    # Also update SSO references
+    # Update SSO references
     self._sso_col.update_many(
         {'user_id': current_username}, {'$set': {'user_id': new_username}}
     );
-    # Get updated user data
+
     user = self._users_col.find_one(
         {'username': new_username}, {'token': 1, 'root_id': 1, '_id': 0}
     );
@@ -239,12 +212,9 @@ impl JacScaleUserManager.update_username(
 impl JacScaleUserManager.update_password(
     username: str, current_password: str, new_password: str
 ) -> dict[str, str] {
-    # Fallback to SQLite if MongoDB is not configured
     if self._users_col is None {
         return super.update_password(username, current_password, new_password);
     }
-    # MongoDB implementation
-    import hashlib;
     # Verify current password
     current_password_hash = hashlib.sha256(current_password.encode()).hexdigest();
     if self._users_col.count_documents(
@@ -495,7 +465,6 @@ impl JacScaleUserManager.sso_callback(
 impl JacScaleUserManager.link_sso_account(
     user_id: str, platform: str, external_id: str, email: str
 ) -> dict[str, str] {
-    # Fallback to SQLite if MongoDB is not configured
     if self._sso_col is None {
         self._ensure_connection();
         # Check if this SSO account is already linked
@@ -558,7 +527,6 @@ impl JacScaleUserManager.link_sso_account(
 impl JacScaleUserManager.unlink_sso_account(
     user_id: str, platform: str
 ) -> dict[str, str] {
-    # Fallback to SQLite if MongoDB is not configured
     if self._sso_col is None {
         self._ensure_connection();
         cursor = self._conn.execute(
@@ -589,7 +557,6 @@ impl JacScaleUserManager.unlink_sso_account(
 
 """Get all SSO accounts linked to a user."""
 impl JacScaleUserManager.get_sso_accounts(user_id: str) -> list[dict[str, str]] {
-    # Fallback to SQLite if MongoDB is not configured
     if self._sso_col is None {
         self._ensure_connection();
         cursor = self._conn.execute(
@@ -639,7 +606,6 @@ impl JacScaleUserManager.get_sso_accounts(user_id: str) -> list[dict[str, str]] 
 impl JacScaleUserManager.get_user_by_sso(
     platform: str, external_id: str
 ) -> (dict[str, str] | None) {
-    # Fallback to SQLite if MongoDB is not configured
     if self._sso_col is None {
         self._ensure_connection();
         cursor = self._conn.execute(
@@ -680,7 +646,6 @@ impl JacScaleUserManager.get_user_by_sso(
 # ============================================================================
 """Get user's role."""
 impl JacScaleUserManager.get_user_role(username: str) -> (str | None) {
-    # Fallback to SQLite if MongoDB is not configured
     if self._users_col is None {
         self._ensure_connection();
         cursor = self._conn.execute(
@@ -708,7 +673,7 @@ impl JacScaleUserManager.set_user_role(username: str, role: str) -> dict[str, st
     if role not in valid_roles {
         return {'error': f"Invalid role. Must be one of: {', '.join(valid_roles)}"};
     }
-    # Fallback to SQLite if MongoDB is not configured
+
     if self._users_col is None {
         self._ensure_connection();
         cursor = self._conn.execute(
@@ -746,7 +711,6 @@ impl JacScaleUserManager.is_admin(username: str) -> bool {
 
 """Check if user requires password reset."""
 impl JacScaleUserManager.requires_password_reset(username: str) -> bool {
-    # Fallback to SQLite if MongoDB is not configured
     if self._users_col is None {
         self._ensure_connection();
         cursor = self._conn.execute(
@@ -773,7 +737,6 @@ impl JacScaleUserManager.requires_password_reset(username: str) -> bool {
 impl JacScaleUserManager.set_requires_password_reset(
     username: str, requires_reset: bool
 ) -> dict[str, str] {
-    # Fallback to SQLite if MongoDB is not configured
     if self._users_col is None {
         self._ensure_connection();
         cursor = self._conn.execute(
@@ -798,7 +761,6 @@ impl JacScaleUserManager.set_requires_password_reset(
 
 """Check if password is required for user (SSO users may not need password)."""
 impl JacScaleUserManager.is_password_required(username: str) -> bool {
-    # Fallback to SQLite if MongoDB is not configured
     if self._users_col is None {
         self._ensure_connection();
         cursor = self._conn.execute(
@@ -826,7 +788,6 @@ impl JacScaleUserManager.is_password_required(username: str) -> bool {
 impl JacScaleUserManager.set_password_required(
     username: str, required: bool
 ) -> dict[str, str] {
-    # Fallback to SQLite if MongoDB is not configured
     if self._users_col is None {
         self._ensure_connection();
         cursor = self._conn.execute(
@@ -941,7 +902,6 @@ impl JacScaleUserManager.bootstrap_admin_user -> dict[str, str] {
 impl JacScaleUserManager.list_all_users(
     limit: int = 100, offset: int = 0
 ) -> list[dict[str, Any]] {
-    # Fallback to SQLite if MongoDB is not configured
     if self._users_col is None {
         self._ensure_connection();
         cursor = self._conn.execute(
@@ -1003,7 +963,6 @@ impl JacScaleUserManager.list_all_users(
 
 """Delete a user (admin only)."""
 impl JacScaleUserManager.delete_user(username: str) -> dict[str, str] {
-    # Fallback to SQLite if MongoDB is not configured
     if self._users_col is None {
         self._ensure_connection();
         # Prevent deleting admin user with all-zeros UUID

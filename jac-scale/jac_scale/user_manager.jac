@@ -1,4 +1,5 @@
 import jwt;
+import hashlib;
 import from datetime { UTC, datetime, timedelta }
 import from typing { Any }
 import from fastapi { Request, Response }
@@ -34,7 +35,7 @@ obj JacScaleUserManager(UserManager) {
         _sso_col: (Collection | None) by postinit;
 
     def postinit -> None;
-    def _ensure_connection -> None;  # need to implement this
+    def _ensure_connection -> None; 
 
     def create_user(username: str, password: str) -> dict[str, str];
     def authenticate(username: str, password: str) -> (dict[(str, str)] | None);
@@ -46,7 +47,7 @@ obj JacScaleUserManager(UserManager) {
         username: str, current_password: str, new_password: str
     ) -> dict[str, str];
 
-    def close -> None;  # I need to implement this
+    def close -> None;  
 
     # JWT methods
     def create_jwt_token(username: str, include_role: bool = True) -> str;
