@@ -36,7 +36,6 @@ obj JacScaleUserManager(UserManager) {
 
     def postinit -> None;
     def _ensure_connection -> None;
-
     def create_user(username: str, password: str) -> dict[str, str];
     def authenticate(username: str, password: str) -> (dict[(str, str)] | None);
     def get_root_id(username: str) -> (str | None);
@@ -48,7 +47,6 @@ obj JacScaleUserManager(UserManager) {
     ) -> dict[str, str];
 
     def close -> None;
-
     # JWT methods
     def create_jwt_token(username: str, include_role: bool = True) -> str;
     def validate_jwt_token(token: str) -> (str | None);
