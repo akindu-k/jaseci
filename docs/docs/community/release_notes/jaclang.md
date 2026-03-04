@@ -4,6 +4,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.11.4 (Unreleased)
 
+- **Fix: Type Checker Support for `__getattr__`**: Classes defining `__getattr__` no longer produce false "has no attribute" errors. Dynamic attribute access now correctly resolves to the `__getattr__` return type, and `Any` is callable (enabling proxy patterns like `console.error("msg")`). IDE hover shows dynamic attributes as `(dynamic attribute) name: type`.
 - 15 small refactors/changes.
 - **HMR Terminal Output Cleanup**: Styled HMR logs with `console.success/error/warning` and stripped absolute paths from compile errors.
 - **Fix: Implicit `run` Not Detecting Flags Before Filename**: `jac --autonative file.jac` failed to insert the implicit `run` subcommand because the detection only checked if the first argument was a `.jac` file. Now scans all arguments for a `.jac`/`.py` file, so flags like `--autonative` and `--no-cache` before the filename are correctly passed through to `jac run`.
