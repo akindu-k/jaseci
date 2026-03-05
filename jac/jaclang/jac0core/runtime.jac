@@ -95,7 +95,6 @@ class JacPersistence {
             }
 
             # Remove from L1 cache to force reload from L3 on next access
-            # This ensures other execution contexts get fresh data
             if jctx.mem?.__mem__ and anchor.id in jctx.mem.__mem__ {
                 del jctx.mem.__mem__[anchor.id];
             }

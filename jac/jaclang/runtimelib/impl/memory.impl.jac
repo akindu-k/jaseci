@@ -440,7 +440,7 @@ impl SqliteMemory.bulk_put(anchors: Iterable[Anchor]) -> None {
     }
 }
 
-"""Partially update an anchor's archetype fields (SQLite implementation)."""
+"""Partially update an anchor's archetype fields."""
 impl SqliteMemory.partial_update(
     anchor: Anchor, fields: (dict[str, object] | None) = None
 ) -> None {
