@@ -440,12 +440,7 @@ impl SqliteMemory.bulk_put(anchors: Iterable[Anchor]) -> None {
     }
 }
 
-"""Partially update an anchor's archetype fields (SQLite implementation).
-
-For SQLite, we need to read the existing anchor, update only the specified fields,
-then write it back. This is less efficient than MongoDB's atomic field updates,
-but still safer than full replacement in concurrent scenarios.
-"""
+"""Partially update an anchor's archetype fields (SQLite implementation)."""
 impl SqliteMemory.partial_update(
     anchor: Anchor, fields: (dict[str, object] | None) = None
 ) -> None {
@@ -470,7 +465,8 @@ impl SqliteMemory.partial_update(
             # Update only the specified fields in the archetype
             if stored.is_populated() and anchor.is_populated() {
                 for (field_name, field_value) in fields.items() {
-                    if hasattr(stored.archetype, field_name) {
+                    if stored.archetype?.__dict__
+                    and field_name in stored.archetype.__dict__ {
                         setattr(stored.archetype, field_name, field_value);
                     }
                 }

@@ -81,48 +81,23 @@ glob plugin_manager = plugin.PluginManager('jac'),
 
 """Jac Persistence Utilities."""
 class JacPersistence {
-    """Update specific fields of an archetype in persistent storage.
-
-    This performs a partial update that only modifies the specified fields,
-    preventing race conditions when multiple requests update different fields
-    of the same anchor concurrently.
-
-    Args:
-        archetype: The archetype to update
-        fields: Dict mapping field names to new values
-
-    Example:
-        # Update only the 'status' field without overwriting other fields
-        JacPersistence.partial_update(my_node, {'status': 'completed'})
-    """
     static def partial_update(archetype: Archetype, fields: dict[str, object]) -> None {
         anchor = archetype.__jac__;
         jctx = JacRuntimeInterface.get_context();
-        # Check if memory backend supports partial updates
-        if hasattr(jctx.mem, 'l3') and jctx.mem.l3 and hasattr(jctx.mem.l3, 'partial_update') {
-            # Use partial update on L3 (persistent storage)
+
+        if jctx.mem?.l3 and jctx.mem.l3?.partial_update {
             jctx.mem.l3.partial_update(anchor, fields);
-            # Also update L2 cache if available with full put (cache doesn't need partial)
-            if hasattr(jctx.mem, 'l2') and jctx.mem.l2 {
+
+            if jctx.mem?.l2 {
                 jctx.mem.l2.put(anchor);
             }
-        } elif hasattr(jctx.mem, 'partial_update') {
-            # Direct memory backend with partial_update support
+        } elif jctx.mem?.partial_update {
             jctx.mem.partial_update(anchor, fields);
         } else {
-            # Fall back to full put if partial update not available
             jctx.mem.put(anchor);
         }
     }
 
-    """Save an archetype to persistent storage (full update).
-
-    This is a convenience method equivalent to the standard put operation.
-    For concurrent-safe field updates, use partial_update() instead.
-
-    Args:
-        archetype: The archetype to save
-    """
     static def save(archetype: Archetype) -> None {
         anchor = archetype.__jac__;
         jctx = JacRuntimeInterface.get_context();
