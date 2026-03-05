@@ -1,6 +1,6 @@
 node Task {
-    has id: int,
-        title: str,
+    has id: int = 0,
+        title: str = "",
         completed: bool = False;
 }
 
@@ -78,6 +78,9 @@ walker:pub UpdateTaskTitle {
 
         for task in [-->Task] {
             if (self.id == task.id) {
+                # Update the field in memory
+                task.title = self.title;
+                # Persist only this field to storage
                 JacPersistence.partial_update(
                     cast(Archetype, task), {"title": self.title}
                 );
@@ -100,6 +103,9 @@ walker:pub UpdateTaskCompleted {
 
         for task in [-->Task] {
             if (self.id == task.id) {
+                # Update the field in memory
+                task.completed = self.completed;
+                # Persist only this field to storage
                 JacPersistence.partial_update(
                     cast(Archetype, task), {"completed": self.completed}
                 );
