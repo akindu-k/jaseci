@@ -219,16 +219,7 @@ impl MongoBackend.bulk_put(anchors: Iterable[Anchor]) -> None {
     }
 }
 
-"""Partially update an anchor's archetype fields (MongoDB implementation).
-
-Uses MongoDB's atomic field-level updates ($set) to avoid race conditions.
-This allows multiple concurrent requests to modify different fields of the same
-anchor without overwriting each other's changes.
-
-Args:
-    anchor: The anchor to update
-    fields: Dict mapping field names to new values. If None, performs full update.
-"""
+"""Partially update an anchor's archetype fields (MongoDB implementation)."""
 impl MongoBackend.partial_update(
     anchor: Anchor, fields: (dict[str, object] | None) = None
 ) -> None {
@@ -247,7 +238,9 @@ impl MongoBackend.partial_update(
         update_ops = {};
         for (field_name, field_value) in fields.items() {
             # Serialize the field value
-            serialized_value = Serializer._serialize_value(field_value, include_type=True);
+            serialized_value = Serializer._serialize_value(
+                field_value, include_type=True
+            );
             # Use MongoDB dot notation to update nested field in data.archetype
             update_ops[f"data.archetype.{field_name}"] = serialized_value;
         }
@@ -265,7 +258,9 @@ impl MongoBackend.partial_update(
                 self.put(anchor);
             } else {
                 logger.debug(
-                    f"MongoDB partial_update: updated {len(update_ops)} fields for anchor {_id}"
+                    f"MongoDB partial_update: updated {len(
+                        update_ops
+                    )} fields for anchor {_id}"
                 );
             }
         }

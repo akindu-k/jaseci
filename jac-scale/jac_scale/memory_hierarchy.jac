@@ -114,6 +114,9 @@ obj MongoBackend(PersistentMemory) {
     # PersistentMemory-specific
     def sync -> None;
     def bulk_put(anchors: Iterable[Anchor]) -> None;
+    def partial_update(
+        anchor: Anchor, fields: (dict[str, object] | None) = None
+    ) -> None;
     # Internal
     def _load_anchor(raw: dict[(str, Any)]) -> (Anchor | None);
 }
