@@ -406,3 +406,100 @@ test "data persists after server restart for sqlite" {
         }
     }
 }
+
+test "concurrent partial updates to different fields" {
+    if not JAC_FILE.exists() {
+        raise FileNotFoundError(f"Missing Jac file: {JAC_FILE}") ;
+    }
+
+    data_dir = FIXTURES_DIR / ".jac" / "data";
+    if data_dir.exists() {
+        import shutil;
+        shutil.rmtree(data_dir);
+    }
+
+    mongo_container = MongoDbContainer("mongo:latest");
+    mongo_container.start();
+    mongo_uri = mongo_container.get_connection_url();
+    os.environ["MONGODB_URI"] = mongo_uri;
+
+    port = get_free_port();
+    base_url = f"http://localhost:{port}";
+    server = start_server(FIXTURES_DIR, JAC_FILE, port);
+
+    try {
+        # Create a task
+        res = requests.post(
+            f"{base_url}/walker/CreateTask",
+            json={"id": 999, "title": "Original Title"},
+            timeout=2
+        );
+        assert res.status_code == 200;
+
+        # Concurrently update different fields
+        import from concurrent.futures { ThreadPoolExecutor, as_completed }
+
+        def update_title -> dict {
+            r = requests.post(
+                f"{base_url}/walker/UpdateTaskTitle",
+                json={"id": 999, "title": "Updated Title"},
+                timeout=2
+            );
+            return r.json();
+        }
+
+        def update_completed -> dict {
+            r = requests.post(
+                f"{base_url}/walker/UpdateTaskCompleted",
+                json={"id": 999, "completed": True},
+                timeout=2
+            );
+            return r.json();
+        }
+
+        # Run concurrent updates
+        with ThreadPoolExecutor(max_workers=2) as executor {
+            futures = [executor.submit(update_title), executor.submit(update_completed)];
+            for future in as_completed(futures) {
+                result = future.result();
+            }
+        }
+
+        # Wait a moment for updates to propagate
+        time.sleep(0.3);
+
+        # Verify both fields were updated
+        res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=2);
+        response_data = cast(
+            dict[str, Any], extract_transport_response_data(res.json())
+        );
+        tasks = response_data["reports"][0];
+
+        task = None;
+        for t in tasks {
+            if t["id"] == 999 {
+                task = t;
+                break;
+            }
+        }
+
+        assert task is not None , "Task 999 not found";
+        assert task["title"] == "Updated Title" , f"Title not updated: {task['title']}";
+        assert task["completed"] == True , f"Completed not updated: {task['completed']}";
+    } finally {
+        if server {
+            server.terminate();
+            with contextlib.suppress(Exception) {
+                server.wait(timeout=2);
+            }
+        }
+        mongo_container.stop();
+        time.sleep(0.5);
+        gc.collect();
+
+        if data_dir.exists() {
+            import shutil;
+            shutil.rmtree(data_dir);
+        }
+    }
+}
