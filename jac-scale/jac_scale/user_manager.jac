@@ -3,8 +3,6 @@ import hashlib;
 import from datetime { UTC, datetime, timedelta }
 import from typing { Any }
 import from fastapi { Request, Response }
-import from pymongo.database { Database }
-import from pymongo.collection { Collection }
 import from jaclang.runtimelib.server { UserManager }
 import from jaclang.runtimelib.transport { TransportResponse, Meta }
 import from jac_scale.enums { Platforms, Operations }
@@ -12,6 +10,7 @@ import from jac_scale.utils { generate_random_password }
 import from jac_scale.config_loader { get_scale_config }
 import from jac_scale.sso_provider { SSOProvider, SSOUserInfo }
 import from jac_scale.google_sso_provider { GoogleSSOProvider }
+import from jac_scale.mongo_storage { MongoUserStorage }
 
 # Load configuration
 glob _jwt_config = get_scale_config().get_jwt_config(),
@@ -30,12 +29,11 @@ enum UserRole {
 obj JacScaleUserManager(UserManager) {
     has SUPPORTED_PLATFORMS: dict = {},
         ADMIN_USER_ID: str = '00000000-0000-0000-0000-000000000000',
-        _mongo_db: (Database | None) by postinit,
-        _users_col: (Collection | None) by postinit,
-        _sso_col: (Collection | None) by postinit;
+        _storage: (MongoUserStorage | None) by postinit;
 
     def postinit -> None;
     def _ensure_connection -> None;
+    def _init_sqlite_schema -> None;
     def create_user(username: str, password: str) -> dict[str, str];
     def authenticate(username: str, password: str) -> (dict[(str, str)] | None);
     def get_root_id(username: str) -> (str | None);
