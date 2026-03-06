@@ -721,21 +721,22 @@ impl JFastApiServer._create_endpoint_function(
                     not in ('str', 'int', 'float', 'bool', 'list', 'dict', 'string', 'integer', 'number', 'boolean', 'object')
                 );
                 if is_custom {
+                    # Use repr() for safe string literal generation in code
                     callback_args_lines.append(
                         f"        # Convert custom object {param_type} from Pydantic model"
                     );
                     callback_args_lines.append(
-                        f"        _pydantic_val = body_data.{param_name}"
+                        f"        _pydantic_val_{param_name} = body_data.{param_name}"
                     );
                     callback_args_lines.append(
-                        f"        if isinstance(_pydantic_val, BaseModel):"
+                        f"        if isinstance(_pydantic_val_{param_name}, BaseModel):"
                     );
                     callback_args_lines.append(
-                        f"            callback_args['{param_name}'] = _convert_pydantic_to_jac('{param_type}', _pydantic_val)"
+                        f"            callback_args[{repr(param_name)}] = _convert_pydantic_to_jac({repr(param_type)}, _pydantic_val_{param_name})"
                     );
                     callback_args_lines.append(f"        else:");
                     callback_args_lines.append(
-                        f"            callback_args['{param_name}'] = _pydantic_val"
+                        f"            callback_args[{repr(param_name)}] = _pydantic_val_{param_name}"
                     );
                 } else {
                     callback_args_lines.append(
