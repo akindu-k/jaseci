@@ -286,10 +286,12 @@ impl format(
                 original_code = prog.mod.main.source.code;
 
                 if not formatted_code or len(formatted_code.strip()) == 0 {
-                    for error in prog.errors_had {
-                        console.error(f"{error}");
+                    if prog.errors_had {
+                        for error in prog.errors_had {
+                            console.error(f"{error}");
+                        }
+                        return (False, False, 0);
                     }
-                    return (False, False, 0);
                 }
 
                 changed = formatted_code != original_code;
