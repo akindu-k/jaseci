@@ -4,6 +4,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## byllm 0.5.5 (Unreleased)
 
+- Small refactors/formatting fixes.
+
 ## byllm 0.5.4 (Latest Release)
 
 - 2 small refactors/changes.

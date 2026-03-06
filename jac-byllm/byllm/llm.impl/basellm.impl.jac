@@ -66,7 +66,7 @@ impl BaseLLM.invoke(mt_run: MTRuntime) -> object {
             # gpt-4o returned plain text that can't be parsed — attempt recovery.
             recovery_resp = self._attempt_recovery(mt_run);
             if recovery_resp is None {
-                raise ;
+                raise;
             }
             if recovery_resp.tool_calls {
                 for tool_call in recovery_resp.tool_calls {
@@ -441,7 +441,7 @@ impl BaseLLM._invoke_streaming(
                 # gpt-4o returned plain text that can't be parsed — attempt recovery.
                 recovery_resp = self._attempt_recovery(mt_run);
                 if recovery_resp is None {
-                    raise ;
+                    raise;
                 }
                 yield from self._yield_recovery_result(
                     recovery_resp, iter_count, mt_run
