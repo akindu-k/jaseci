@@ -31,10 +31,7 @@ impl JacScaleUserManager.postinit -> None {
         self._users_col.create_index('token', unique=True, sparse=True);
         self._sso_col.create_index([('platform', 1), ('external_id', 1)], unique=True);
         self._sso_col.create_index('user_id');
-
-        self._using_mongodb = True;
     } else {
-        self._using_mongodb = False;
         self._mongo_db = None;
         self._users_col = None;
         self._sso_col = None;
@@ -201,6 +198,9 @@ impl JacScaleUserManager.update_username(
     user = self._users_col.find_one(
         {'username': new_username}, {'token': 1, 'root_id': 1, '_id': 0}
     );
+    if not user {
+        return {'error': 'User not found after update'};
+    }
     return {
         'username': new_username,
         'token': user['token'],
@@ -506,7 +506,6 @@ impl JacScaleUserManager.link_sso_account(
         return {'error': 'This SSO account is already linked to another user'};
     }
     # Link the SSO account
-    import from datetime { datetime, UTC }
     self._sso_col.insert_one(
         {
             'user_id': user_id,
