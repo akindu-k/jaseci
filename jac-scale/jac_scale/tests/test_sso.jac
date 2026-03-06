@@ -98,7 +98,7 @@ obj MockGoogleSSO {
         return "google";
     }
 
-    def __enter__ -> MockGoogleSSO {
+    def __enter__ -> "MockGoogleSSO" {
         return self;
     }
 
