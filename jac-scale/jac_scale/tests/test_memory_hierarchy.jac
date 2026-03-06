@@ -409,7 +409,7 @@ test "data persists after server restart for sqlite" {
 
 test "concurrent partial updates to different fields" {
     if not JAC_FILE.exists() {
-        raise FileNotFoundError(f"Missing Jac file: {JAC_FILE}") ;
+        raise FileNotFoundError(f"Missing Jac file: {JAC_FILE}");
     }
 
     data_dir = FIXTURES_DIR / ".jac" / "data";
