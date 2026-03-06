@@ -7,7 +7,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Partial Updates for Race-Condition-Free Concurrent Modifications**: When multiple requests update different fields of the same node/edge simultaneously, changes are now preserved instead of overwriting each other. Use `JacPersistence.partial_update(node, {"field": value})` to update only specific fields in MongoDB/SQLite storage. The implementation uses MongoDB's atomic `$set` operations for truly concurrent-safe updates and automatically invalidates L1/L2 caches to prevent stale reads. Example: Two concurrent walkers updating `task.status` and `task.priority` on the same task both succeed without data loss.
 - **Automatic Port Fallback**: When starting the server with `jac start`, if the specified port is already in use, the server now automatically finds and uses the next available port instead of crashing with "Address already in use". A warning message displays when using an alternative port. Supports up to 10 port retries with cross-platform compatibility (Linux and Windows).
 - [fix]Fix for internet facing aws load balancer
-- 2 Minor refactors/changes.
+- 3 Minor refactors/changes.
 - update jac-scale plugin documentation with missing features
 - APP_NAME, K8s_NAMESPACE, DOCKER_USERNAME, DOCKER_PASSWORD are no longer read from environment variables and must be configured via `jac.toml.
 
