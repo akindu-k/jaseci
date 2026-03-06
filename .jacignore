@@ -227,6 +227,7 @@ serve.core.impl.jac
 api.cl.jac
 cli.jac
 cli.impl.jac
+test_js_generation.jac
 builtin_printgraph.jac
 builtin_printgraph_json.jac
 builtin_printgraph_mermaid.jac
