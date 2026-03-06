@@ -199,6 +199,7 @@ impl JacScaleUserManager.get_sso(platform: str, operation: str) -> (SSOProvider 
     credentials = self.SUPPORTED_PLATFORMS[platform];
     redirect_uri = f"{SSO_HOST}/{platform}/{operation}/callback";
     if platform == Platforms.GOOGLE.value {
+        import from jac_scale.google_sso_provider { GoogleSSOProvider }
         return GoogleSSOProvider(
             client_id=credentials['client_id'],
             client_secret=credentials['client_secret'],
@@ -215,7 +216,7 @@ impl JacScaleUserManager.sso_initiate(
     if platform not in [p.value for p in Platforms] {
         return TransportResponse.fail(
             code='INVALID_PLATFORM',
-            message=f"Invalid platform '{platform}'. Supported: {', '.join(
+            message=f"Invalid platform '{platform}'. Supported platforms: {', '.join(
                 [p.value for p in Platforms]
             )}",
             meta=Meta(extra={'http_status': 400})
@@ -224,7 +225,7 @@ impl JacScaleUserManager.sso_initiate(
     if platform not in self.SUPPORTED_PLATFORMS {
         return TransportResponse.fail(
             code='SSO_NOT_CONFIGURED',
-            message=f"SSO for '{platform}' not configured.",
+            message=f"SSO for platform '{platform}' is not configured. Please set SSO_{platform.upper()}_CLIENT_ID and SSO_{platform.upper()}_CLIENT_SECRET environment variables.",
             meta=Meta(extra={'http_status': 501})
         );
     }
@@ -239,7 +240,7 @@ impl JacScaleUserManager.sso_initiate(
     if not sso {
         return TransportResponse.fail(
             code='SSO_INIT_FAILED',
-            message=f"Failed to initialize SSO for '{platform}'",
+            message=f"Failed to initialize SSO for platform '{platform}'",
             meta=Meta(extra={'http_status': 500})
         );
     }
@@ -253,21 +254,23 @@ impl JacScaleUserManager.sso_callback(
     if platform not in [p.value for p in Platforms] {
         return TransportResponse.fail(
             code='INVALID_PLATFORM',
-            message=f"Invalid platform",
+            message=f"Invalid platform '{platform}'. Supported platforms: {', '.join(
+                [p.value for p in Platforms]
+            )}",
             meta=Meta(extra={'http_status': 400})
         );
     }
     if platform not in self.SUPPORTED_PLATFORMS {
         return TransportResponse.fail(
             code='SSO_NOT_CONFIGURED',
-            message=f"SSO not configured",
+            message=f"SSO for platform '{platform}' is not configured. Please set SSO_{platform.upper()}_CLIENT_ID and SSO_{platform.upper()}_CLIENT_SECRET environment variables.",
             meta=Meta(extra={'http_status': 501})
         );
     }
     if operation not in [o.value for o in Operations] {
         return TransportResponse.fail(
             code='INVALID_OPERATION',
-            message=f"Invalid operation",
+            message=f"Invalid operation '{operation}'. Must be 'login' or 'register'",
             meta=Meta(extra={'http_status': 400})
         );
     }
@@ -275,7 +278,7 @@ impl JacScaleUserManager.sso_callback(
     if not sso {
         return TransportResponse.fail(
             code='SSO_INIT_FAILED',
-            message=f"Failed to init SSO",
+            message=f"Failed to initialize SSO for platform '{platform}'",
             meta=Meta(extra={'http_status': 500})
         );
     }
@@ -285,7 +288,7 @@ impl JacScaleUserManager.sso_callback(
         if not email {
             return TransportResponse.fail(
                 code='EMAIL_MISSING',
-                message=f"Email not provided",
+                message=f"Email not provided by {platform}",
                 meta=Meta(extra={'http_status': 400})
             );
         }
@@ -294,7 +297,7 @@ impl JacScaleUserManager.sso_callback(
             if not user {
                 return TransportResponse.fail(
                     code='USER_NOT_FOUND',
-                    message='User not found',
+                    message='User not found. Please register first.',
                     meta=Meta(extra={'http_status': 404})
                 );
             }
@@ -313,7 +316,7 @@ impl JacScaleUserManager.sso_callback(
             if self.get_user(email) {
                 return TransportResponse.fail(
                     code='USER_EXISTS',
-                    message='User exists',
+                    message='User already exists. Please login instead.',
                     meta=Meta(extra={'http_status': 400})
                 );
             }
@@ -321,7 +324,7 @@ impl JacScaleUserManager.sso_callback(
             if 'error' in result {
                 return TransportResponse.fail(
                     code='USER_CREATION_FAILED',
-                    message=result.get('error', 'Failed'),
+                    message=result.get('error', 'User creation failed'),
                     meta=Meta(extra={'http_status': 400})
                 );
             }
@@ -334,13 +337,13 @@ impl JacScaleUserManager.sso_callback(
     } except Exception as e {
         return TransportResponse.fail(
             code='AUTHENTICATION_FAILED',
-            message=f"Auth failed: {str(e)}",
+            message=f"Authentication failed: {str(e)}",
             meta=Meta(extra={'http_status': 500})
         );
     }
     return TransportResponse.fail(
         code='UNKNOWN_ERROR',
-        message='Unknown error',
+        message='An unknown error occurred',
         meta=Meta(extra={'http_status': 500})
     );
 }

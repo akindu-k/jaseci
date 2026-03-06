@@ -9,7 +9,6 @@ import from jac_scale.enums { Platforms, Operations }
 import from jac_scale.utils { generate_random_password }
 import from jac_scale.config_loader { get_scale_config }
 import from jac_scale.sso_provider { SSOProvider, SSOUserInfo }
-import from jac_scale.google_sso_provider { GoogleSSOProvider }
 import from jac_scale.mongo_storage { MongoUserStorage }
 
 # Load configuration
