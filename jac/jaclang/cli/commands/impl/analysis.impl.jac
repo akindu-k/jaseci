@@ -284,6 +284,14 @@ impl format(
             try {
                 formatted_code = prog.mod.main.gen.jac;
                 original_code = prog.mod.main.source.code;
+
+                if not formatted_code or len(formatted_code.strip()) == 0 {
+                    for error in prog.errors_had {
+                        console.error(f"{error}");
+                    }
+                    return (False, False, 0);
+                }
+
                 changed = formatted_code != original_code;
                 write_formatted_code(formatted_code, str(path_obj));
 
