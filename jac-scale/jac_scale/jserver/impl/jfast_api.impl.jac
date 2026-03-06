@@ -181,9 +181,8 @@ impl JFastApiServer._get_or_create_pydantic_model_for_jac_class(
         return None;
     }
     # Get the init method
-    init_method = getattr(jac_class, 'init', None) or getattr(
-        jac_class, '__init__', None
-    );
+    init_method = getattr(jac_class, 'init', None)
+    or getattr(jac_class, '__init__', None);
     if not init_method or not callable(init_method) {
         return None;
     }
@@ -223,7 +222,7 @@ impl JFastApiServer._get_or_create_pydantic_model_for_jac_class(
                 nested_model = self._get_or_create_pydantic_model_for_jac_class(
                     type_name
                 );
-                field_type = nested_model if nested_model else `dict;
+                field_type = nested_model or `dict;
             } else {
                 field_type = self._get_python_type(type_name);
             }
@@ -237,10 +236,7 @@ impl JFastApiServer._get_or_create_pydantic_model_for_jac_class(
             pydantic_fields[param_name] = (field_type, Field(...));
         } else {
             # Optional field with default
-            pydantic_fields[param_name] = (
-                (field_type | None),
-                Field(param.default)
-            );
+            pydantic_fields[param_name] = ((field_type | None), Field(param.default));
         }
     }
     if not pydantic_fields {
@@ -707,7 +703,9 @@ impl JFastApiServer._create_endpoint_function(
     callback_args_lines: list[str] = [];
     # Build map of param names to their types for custom object conversion
     param_type_info: dict[(str, str)] = {
-        p.name: p.data_type for p in parameters if p.name
+        p.name: p.data_type
+        for p in parameters
+        if p.name
     };
     if body_model {
         for param in body_params {
@@ -717,8 +715,19 @@ impl JFastApiServer._create_endpoint_function(
                 param_type = param_type_info.get(param_name, '');
                 is_custom = (
                     param_type
-                    and param_type.lower()
-                    not in ('str', 'int', 'float', 'bool', 'list', 'dict', 'string', 'integer', 'number', 'boolean', 'object')
+                    and param_type.lower() not in (
+                        'str',
+                        'int',
+                        'float',
+                        'bool',
+                        'list',
+                        'dict',
+                        'string',
+                        'integer',
+                        'number',
+                        'boolean',
+                        'object'
+                    )
                 );
                 if is_custom {
                     # Use repr() for safe string literal generation in code
@@ -732,7 +741,9 @@ impl JFastApiServer._create_endpoint_function(
                         f"        if isinstance(_pydantic_val_{param_name}, BaseModel):"
                     );
                     callback_args_lines.append(
-                        f"            callback_args[{repr(param_name)}] = _convert_pydantic_to_jac({repr(param_type)}, _pydantic_val_{param_name})"
+                        f"            callback_args[{repr(
+                            param_name
+                        )}] = _convert_pydantic_to_jac({repr(param_type)}, _pydantic_val_{param_name})"
                     );
                     callback_args_lines.append(f"        else:");
                     callback_args_lines.append(
