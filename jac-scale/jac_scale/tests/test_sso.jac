@@ -183,7 +183,7 @@ def _get_response_body(result: JSONResponse | TransportResponse) -> str {
         }
         return json.dumps(response_dict);
     } else {
-        raise TypeError(f"Unexpected response type: {type(result)}") ;
+        raise TypeError(f"Unexpected response type: {type(result)}");
     }
 }
 
