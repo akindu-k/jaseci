@@ -4,6 +4,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.2.5 (Unreleased)
 
+**Request-Scoped L1 Memory Cache**: L1 (in-memory) cache is now request-scoped instead of server-scoped, eliminating stale data issues in multi-instance deployments. Each HTTP request gets a fresh L1 cache that is automatically cleared when the request completes. This prevents data staleness across requests, eliminates orphaned object references, and improves memory management by preventing unbounded L1 growth. Implemented via Python's `ContextVar` for thread-safe and async-safe request isolation. CLI and test environments continue using global context (backward compatible). The middleware is automatically registered in `JFastApiServer.init()` with no configuration required.
+
 ## jac-scale 0.2.4 (Latest Release)
 
 - **Automatic Port Fallback**: When starting the server with `jac start`, if the specified port is already in use, the server now automatically finds and uses the next available port instead of crashing with "Address already in use". A warning message displays when using an alternative port. Supports up to 10 port retries with cross-platform compatibility (Linux and Windows).

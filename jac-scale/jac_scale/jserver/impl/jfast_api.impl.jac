@@ -842,4 +842,36 @@ impl JFastApiServer.init(
     self.app = app or FastAPI();
     self._models: dict[(str, type[BaseModel])] = {};
     self.__server_created = False;
+
+    # Add request-scoped context middleware for L1 cache isolation
+    import from jaclang.jac0core.runtime { JacRuntime, JacRuntimeInterface }
+
+    async def request_context_middleware(request: Request, call_next) {
+        # Create fresh execution context for this request
+        ctx = JacRuntimeInterface.create_j_context(user_root=None);
+
+        # Set user root if authenticated (from AuthMiddleware)
+        if request.state?.user_root_id and request.state.user_root_id {
+            try {
+                ctx.set_user_root(request.state.user_root_id);
+            } except Exception {
+            # User root might not exist, keep using system root
+            }
+        }
+
+        # Set as request-scoped context
+        JacRuntime.set_request_context(ctx);
+
+        try {
+            # Process request with fresh context
+            response = await call_next(request);
+            return response;
+        } finally {
+            # Cleanup: commit changes and clear L1 cache
+            JacRuntime.clear_request_context();
+        }
+    }
+
+    # Register as HTTP middleware
+    self.app.middleware('http')(request_context_middleware);
 }
