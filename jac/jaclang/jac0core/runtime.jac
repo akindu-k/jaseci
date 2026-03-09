@@ -93,7 +93,6 @@ class JacPersistence {
             if jctx.mem?.l2 and jctx.mem.l2?.invalidate {
                 jctx.mem.l2.invalidate(anchor.id);
             }
-
             # Note: L1 cache is NOT invalidated to avoid orphaned references.
             # L1 may be stale within the same request, but this is safer than
             # breaking in-flight object references.
