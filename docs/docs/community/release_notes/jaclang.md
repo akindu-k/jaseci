@@ -4,6 +4,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.12.1 (Unreleased)
 
+- **Fix: Native Cross-Module Global Variable Access**: Module-level globals declared in one `.na.jac` file are now correctly accessible from importing modules. Previously, accessing such a global caused a segfault at runtime.
 - 3 small refactors/changes.
 - **Fix: HMR Recursive recompilation**: Fixed client-side code recursive recompilation process, preventing cyclic recompilation, and ensuring that all dependencies are up to date.
 - **Fix: HTTP Server Authentication for Imported `:pub` Functions**: Fixed server incorrectly requiring authentication (401) for imported `:pub` functions. The server now inspects source file ASTs to determine access levels for imported function endpoints, matching the existing behavior for imported walkers.
