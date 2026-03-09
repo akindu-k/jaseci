@@ -1,5 +1,4 @@
 import jwt;
-import hashlib;
 import from datetime { UTC, datetime, timedelta }
 import from typing { Any }
 import from fastapi { Request, Response }
