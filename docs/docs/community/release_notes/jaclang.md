@@ -5,6 +5,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 ## jaclang 0.12.1 (Unreleased)
 
 - 3 small refactors/changes.
+- **Fix: HMR Recursive recompilation**: Fixed client-side code recursive recompilation process, preventing cyclic recompilation, and ensuring that all dependencies are up to date.
 - **Fix: HTTP Server Authentication for Imported `:pub` Functions**: Fixed server incorrectly requiring authentication (401) for imported `:pub` functions. The server now inspects source file ASTs to determine access levels for imported function endpoints, matching the existing behavior for imported walkers.
 - **Compiler Warns on `@classmethod`/`@staticmethod` in `obj` Definitions**: Using `@classmethod` or `@staticmethod` inside `obj`, `node`, `edge`, or `walker` now emits a warning. Use the `static` keyword instead, or switch to `class` for Python-specific decorator features. Compilation warnings are now also surfaced during `jac run`.
 - **Fix: Union Type Member Access Errors**: `x.attr` on a union type now errors when the attribute is missing from any variant (previously silently returned `UnknownType`). Reports which variant(s) lack the attribute.
@@ -17,6 +18,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 ## jaclang 0.12.0 (Latest Release)
 
 - 27 small refactors/changes.
+
 - **Fix: Formatter Semicolon & Decorator Spacing**: Fixed spacing bugs in the formatter where `@` decorators produced `@ decorator` instead of `@decorator`, and statement semicolons produced `raise ;` instead of `raise;`.
 - **Fix: Type Checker Validates Args Against Parameterless `init`**: The type checker now correctly reports an error when arguments are passed to a constructor whose `init` takes no parameters. Named args raise `Named argument does not match any parameter` and extra positional args raise `Too many positional arguments`. Calling with no args (`MyObj()`) remains valid.
 - **Automatic Port Fallback for `jac start`**: When starting the built-in HTTP server, if the specified port is already in use, the server now automatically finds and uses the next available port instead of crashing with "Address already in use". A warning message displays when using an alternative port. The `on_ready` callback signature updated to `Callable[[int], None]` to pass the actual bound port.
