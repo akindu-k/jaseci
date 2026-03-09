@@ -104,7 +104,10 @@ obj MongoUserStorage {
         user = self.users_col.find_one(
             {'username': username}, {'password_hash': 1, '_id': 0}
         );
-        if not user or not bcrypt.checkpw(current_password.encode(), user['password_hash'].encode()) {
+        if not user
+        or not bcrypt.checkpw(
+            current_password.encode(), user['password_hash'].encode()
+        ) {
             return {'error': 'Current password is incorrect'};
         }
         new_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode();
