@@ -1,6 +1,6 @@
 """MongoDB storage backend for user management."""
 
-import bcrypt;
+import hashlib;
 import from datetime { UTC, datetime }
 import from typing { Any }
 import from pymongo.collection { Collection }
@@ -23,7 +23,7 @@ obj MongoUserStorage {
         Jac.commit(user_root);
         root_id = user_root.__jac__.id.hex;
         token = secrets.token_urlsafe(32);
-        password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode();
+        password_hash = hashlib.sha256(password.encode()).hexdigest();
         self.users_col.insert_one(
             {
                 'username': username,
@@ -40,11 +40,12 @@ obj MongoUserStorage {
     }
 
     def authenticate(username: str, password: str) -> (dict[str, str] | None) {
+        password_hash = hashlib.sha256(password.encode()).hexdigest();
         user = self.users_col.find_one(
-            {'username': username},
-            {'token': 1, 'root_id': 1, 'password_hash': 1, '_id': 0}
+            {'username': username, 'password_hash': password_hash},
+            {'token': 1, 'root_id': 1, '_id': 0}
         );
-        if user and bcrypt.checkpw(password.encode(), user['password_hash'].encode()) {
+        if user {
             return {
                 'username': username,
                 'token': user['token'],
@@ -102,16 +103,16 @@ obj MongoUserStorage {
     def update_password(
         username: str, current_password: str, new_password: str
     ) -> dict[str, str] {
+        current_hash = hashlib.sha256(current_password.encode()).hexdigest();
         user = self.users_col.find_one(
             {'username': username}, {'password_hash': 1, '_id': 0}
         );
-        if not user
-        or not bcrypt.checkpw(
-            current_password.encode(), user['password_hash'].encode()
-        ) {
+        if self.users_col.count_documents(
+            {'username': username, 'password_hash': current_hash}, limit=1
+        ) == 0 {
             return {'error': 'Current password is incorrect'};
         }
-        new_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode();
+        new_hash = hashlib.sha256(new_password.encode()).hexdigest();
         self.users_col.update_one(
             {'username': username}, {'$set': {'password_hash': new_hash}}
         );
