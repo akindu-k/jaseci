@@ -4,6 +4,7 @@ import bcrypt;
 import from datetime { UTC, datetime }
 import from typing { Any }
 import from pymongo.collection { Collection }
+import from jaclang.jac0core.constant { Constants as Con }
 
 obj MongoUserStorage {
     has users_col: Collection,
@@ -266,7 +267,7 @@ obj MongoUserStorage {
 
     def list_all_users(limit: int = 100, offset: int = 0) -> list[dict[str, Any]] {
         cursor = self.users_col.find(
-            {'username': {'$ne': '__guest__'}}, {'_id': 0, 'password_hash': 0}
+            {'username': {'$ne': Con.GUEST.value}}, {'_id': 0, 'password_hash': 0}
         ).sort(
             'username', 1
         ).skip(

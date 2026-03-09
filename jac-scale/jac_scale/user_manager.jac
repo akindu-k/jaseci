@@ -10,6 +10,7 @@ import from jac_scale.utils { generate_random_password }
 import from jac_scale.config_loader { get_scale_config }
 import from jac_scale.sso_provider { SSOProvider, SSOUserInfo }
 import from jac_scale.mongo_storage { MongoUserStorage }
+import from jaclang.jac0core.constant { Constants  as Con }
 
 # Load configuration
 glob _jwt_config = get_scale_config().get_jwt_config(),

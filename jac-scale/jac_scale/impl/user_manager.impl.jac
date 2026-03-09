@@ -548,7 +548,7 @@ impl JacScaleUserManager.list_all_users(
     self._ensure_connection();
     cursor = self._conn.execute(
         "SELECT username, root_id, role, requires_password_reset, is_password_required, user_id FROM users WHERE username != ? ORDER BY username LIMIT ? OFFSET ?",
-        ('__guest__', limit, offset)
+        (Con.GUEST.value, limit, offset)
     );
     return [
         {
