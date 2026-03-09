@@ -162,7 +162,8 @@ impl JacScaleUserManager.create_jwt_token(
 impl JacScaleUserManager.get_jwt_claims(token: str) -> (dict | None) {
     try {
         return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM]);
-    } except Exception {
+    } except Exception as e {
+        logger.debug(f"Failed to decode JWT token: {str(e)}");
         return None;
     }
 }
@@ -172,7 +173,8 @@ impl JacScaleUserManager.validate_jwt_token(token: str) -> (str | None) {
         decoded = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM]);
         username = decoded['username'];
         return username if self.user_exists(username) else None;
-    } except Exception {
+    } except Exception as e {
+        logger.debug(f"Failed to validate JWT token: {str(e)}");
         return None;
     }
 }
@@ -184,7 +186,8 @@ impl JacScaleUserManager.refresh_jwt_token(token: str) -> (str | None) {
         );
         username = decoded.get('username');
         return self.create_jwt_token(username) if username else None;
-    } except Exception {
+    } except Exception as e {
+        logger.debug(f"Failed to refresh JWT token: {str(e)}");
         return None;
     }
 }
@@ -582,8 +585,6 @@ impl JacScaleUserManager.delete_user(username: str) -> dict[str, str] {
 }
 
 impl JacScaleUserManager.bootstrap_admin_user -> dict[str, str] {
-    import logging;
-    logger = logging.getLogger(__name__);
     admin_config = get_scale_config().get_admin_config();
     if not admin_config.get('enabled', True) {
         return {'message': 'Admin portal is disabled'};
@@ -608,7 +609,13 @@ impl JacScaleUserManager.bootstrap_admin_user -> dict[str, str] {
                         (self.ADMIN_USER_ID, admin_username)
                     );
                     self._conn.commit();
-                } except Exception { }
+                } except Exception as e {
+                    logger.error(
+                        f"Failed to set user_id for admin user '{admin_username}': {str(
+                            e
+                        )}"
+                    );
+                }
             }
             logger.info(f"Existing user '{admin_username}' promoted to admin role");
         }
@@ -638,7 +645,13 @@ impl JacScaleUserManager.bootstrap_admin_user -> dict[str, str] {
                 (self.ADMIN_USER_ID, admin_username)
             );
             self._conn.commit();
-        } except Exception { }
+        } except Exception as e {
+            logger.error(
+                f"Failed to set user_id for newly created admin user '{admin_username}': {str(
+                    e
+                )}"
+            );
+        }
     }
     logger.warning(
         f"Admin user '{admin_username}' created with default password. Please change immediately!"
