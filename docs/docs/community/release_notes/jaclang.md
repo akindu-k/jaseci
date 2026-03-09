@@ -4,6 +4,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.12.1 (Unreleased)
 
+- **Request-Scoped Execution Context**: `JacRuntime.get_context()` now uses Python's `ContextVar` to support request-scoped execution contexts in web servers, while maintaining backward compatibility with CLI and test environments. Web servers (via jac-scale) automatically get fresh execution contexts per request with isolated L1 memory caches, preventing stale data issues in multi-instance deployments. Added `JacRuntime.set_request_context()` and `JacRuntime.clear_request_context()` methods for request lifecycle management. Global context behavior (session-scoped L1) is preserved for non-web environments.
 - 3 small refactors/changes.
 - **Fix: HTTP Server Authentication for Imported `:pub` Functions**: Fixed server incorrectly requiring authentication (401) for imported `:pub` functions. The server now inspects source file ASTs to determine access levels for imported function endpoints, matching the existing behavior for imported walkers.
 - **Compiler Warns on `@classmethod`/`@staticmethod` in `obj` Definitions**: Using `@classmethod` or `@staticmethod` inside `obj`, `node`, `edge`, or `walker` now emits a warning. Use the `static` keyword instead, or switch to `class` for Python-specific decorator features. Compilation warnings are now also surfaced during `jac run`.
