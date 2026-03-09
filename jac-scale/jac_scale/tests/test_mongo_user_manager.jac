@@ -1,7 +1,6 @@
 """Compact test for MongoDB user operations using testcontainers."""
 
 import os;
-
 import from jac_scale.user_manager { JacScaleUserManager }
 import from jac_scale.config_loader { reset_scale_config }
 
@@ -13,9 +12,7 @@ test "mongodb user operations" {
     # Start MongoDB container
     with MongoDbContainer("mongo:7.0") as mongo {
         mongo_uri = mongo.get_connection_url();
-        # Use a temporary directory for the test environment
         with tempfile.TemporaryDirectory() as tmpdir {
-            # Create a minimal jac.toml in the temp directory
             toml_content = """
 [project]
 name = "test-mongo-user-manager"
@@ -41,14 +38,10 @@ require_password_reset = true
             with open(toml_path, 'w') as f {
                 f.write(toml_content);
             }
-            # Set MongoDB URI via environment variable (the config loader reads from os.environ)
             old_mongodb_uri = os.environ.get('MONGODB_URI');
             os.environ['MONGODB_URI'] = mongo_uri;
             try {
-                # Reset config to force reload with new environment
                 reset_scale_config();
-
-                # Initialize user manager with the temp directory as project root
                 um = JacScaleUserManager(base_path=tmpdir);
                 # Test: Create user
                 result = um.create_user("test_user", "password123");
@@ -165,7 +158,6 @@ require_password_reset = true
                 assert "renamed_user" in usernames_final;
                 assert "admin" in usernames_final;
 
-                # Cleanup
                 um.close();
             } finally {
                 # Restore original environment variable
