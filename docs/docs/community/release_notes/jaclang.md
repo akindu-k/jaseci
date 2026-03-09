@@ -5,6 +5,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 ## jaclang 0.12.1 (Unreleased)
 
 **Persistent Memory: Partial Update API for Race-Condition-Free Updates**: Added `partial_update()` method to the `PersistentMemory` interface, enabling field level updates in `SqliteMemory` and jac-scale's `MongoBackend`. Use `JacPersistence.partial_update(archetype, {"field": value})` from `jaclang.jac0core.runtime` to update only specific fields without replacing the entire anchor. This prevents race conditions when multiple requests modify different fields concurrently. The implementation includes automatic L1/L2 cache invalidation to ensure fresh reads across execution contexts.
+
 - **Fix: HTTP Server Authentication for Imported `:pub` Functions**: Fixed server incorrectly requiring authentication (401) for imported `:pub` functions. The server now inspects source file ASTs to determine access levels for imported function endpoints, matching the existing behavior for imported walkers.
 - **Compiler Warns on `@classmethod`/`@staticmethod` in `obj` Definitions**: Using `@classmethod` or `@staticmethod` inside `obj`, `node`, `edge`, or `walker` now emits a warning. Use the `static` keyword instead, or switch to `class` for Python-specific decorator features. Compilation warnings are now also surfaced during `jac run`.
 - 2 small refactors/changes.
