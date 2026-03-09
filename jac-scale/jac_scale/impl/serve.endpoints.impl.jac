@@ -115,7 +115,6 @@ impl JacAPIServerEndpoints.create_walker_callback(
                 );
             }
         }
-        import from jaclang.jac0core.constant { Constants as Con }
         if nd {
             kwargs['_jac_spawn_node'] = nd;
         }

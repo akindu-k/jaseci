@@ -236,7 +236,6 @@ impl JacAPIServerCore.start(
     }
     self.register_root_asset_endpoint();
     self._configure_openapi_security();
-    import from jaclang.jac0core.constant { Constants as Con }
     self.user_manager.create_user(Con.GUEST.value, '__no_password__');
     # Find an available port (may differ from requested if port is in use)
     original_port = self.port;
