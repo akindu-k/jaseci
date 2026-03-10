@@ -411,6 +411,13 @@ test "concurrent requests get isolated L1 caches" {
     # Validates: 10 parallel requests create unique tasks with no L1 cross-contamination
     import concurrent.futures;
 
+    # Clean up data files
+    data_dir = FIXTURES_DIR / ".jac" / "data";
+    if data_dir.exists() {
+        import shutil;
+        shutil.rmtree(data_dir);
+    }
+
     mongo_container = MongoDbContainer("mongo:latest");
     mongo_container.start();
     os.environ["MONGODB_URI"] = mongo_container.get_connection_url();
@@ -426,19 +433,25 @@ test "concurrent requests get isolated L1 caches" {
                 json={"id": task_id, "title": f"Task {task_id}"},
                 timeout=5
             );
-            assert res.status_code == 200;
+            assert res.status_code == 200 , f"Failed to create task {task_id}: {res.text}";
             return task_id;
         }
 
         # 10 parallel requests
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor {
-            task_ids = list(executor.map(create_task, range(10)));
+            created_ids = list(executor.map(create_task, range(10)));
         }
+
+        assert len(created_ids) == 10 , f"Only created {len(created_ids)} tasks";
 
         # Verify all 10 unique tasks persisted
         res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=5);
-        all_tasks = cast(dict[str, Any], extract_transport_response_data(res.json()))["reports"][0];
-        assert {t["id"] for t in all_tasks} == set(range(10));
+        response_data = extract_transport_response_data(res.json());
+        all_tasks = cast(dict[str, Any], response_data)["reports"][0];
+        task_ids = {t["id"] for t in all_tasks};
+        assert task_ids == set(range(10)) , f"Expected IDs 0-9, got {len(
+            all_tasks
+        )} tasks: {sorted(task_ids)}";
     } finally {
         server.terminate();
         with contextlib.suppress(Exception) {
@@ -446,6 +459,12 @@ test "concurrent requests get isolated L1 caches" {
         }
         mongo_container.stop();
         gc.collect();
+
+        # Clean up
+        if data_dir.exists() {
+            import shutil;
+            shutil.rmtree(data_dir);
+        }
     }
 }
 
@@ -457,7 +476,9 @@ test "L1 cache cleared between requests" {
     redis_port = redis_container.get_exposed_port(6379);
 
     os.environ["REDIS_URL"] = f"redis://{redis_host}:{redis_port}/0";
-    redis_client = redis.Redis(host=redis_host, port=int(redis_port), decode_responses=False);
+    redis_client = redis.Redis(
+        host=redis_host, port=int(redis_port), decode_responses=False
+    );
 
     port = get_free_port();
     base_url = f"http://localhost:{port}";
@@ -465,7 +486,9 @@ test "L1 cache cleared between requests" {
 
     try {
         # Request 1: Create task
-        requests.post(f"{base_url}/walker/CreateTask", json={"id": 1, "title": "Test"}, timeout=5);
+        requests.post(
+            f"{base_url}/walker/CreateTask", json={"id": 1, "title": "Test"}, timeout=5
+        );
 
         # Request 2: Read task - if L1 wasn't cleared, Redis won't be hit
         redis_size_before = redis_client.dbsize();
@@ -473,7 +496,9 @@ test "L1 cache cleared between requests" {
         redis_size_after = redis_client.dbsize();
 
         # Proves L2 was accessed (L1 was empty)
-        assert redis_size_after > redis_size_before;
+        assert redis_size_after > redis_size_before , (
+            f"Redis size should increase (before: {redis_size_before}, after: {redis_size_after})"
+        );
     } finally {
         server.terminate();
         with contextlib.suppress(Exception) {
@@ -517,8 +542,13 @@ test "concurrent writes persist all data" {
 
         # Verify all 15 unique tasks persisted
         res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=5);
-        all_tasks = cast(dict[str, Any], extract_transport_response_data(res.json()))["reports"][0];
-        assert len({t["id"] for t in all_tasks}) == 15;
+        all_tasks = cast(dict[str, Any], extract_transport_response_data(res.json()))[
+            "reports"
+        ][0];
+        task_ids = {t["id"] for t in all_tasks};
+        assert len(task_ids) == 15 , f"Expected 15 unique tasks, got {len(task_ids)}: {sorted(
+            task_ids
+        )}";
     } finally {
         server.terminate();
         with contextlib.suppress(Exception) {
