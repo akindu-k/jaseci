@@ -844,18 +844,47 @@ impl JFastApiServer.init(
     self.__server_created = False;
 
     # Add request-scoped context middleware for L1 cache isolation
-    import from jaclang.jac0core.runtime { JacRuntime, JacRuntimeInterface }
-
     async def request_context_middleware(request: Request, call_next) {
+        # Create isolated execution context with fresh L1 cache per request.
+        #
+        # This middleware ensures each HTTP request gets its own ExecutionContext with:
+        # - Fresh L1 (__mem__) cache to prevent cross-request data leakage
+        # - Proper user root configuration from authentication
+        # - Automatic cleanup and commit on request completion
+        #
+        # Uses Python's ContextVar for thread-safe and async-safe isolation.
+
         # Create fresh execution context for this request
         ctx = JacRuntimeInterface.create_j_context(user_root=None);
+        user_id = getattr(request.state, 'user_root_id', None)
+            if request?.state
+            else None;
+
+        logger.debug(
+            f"Request {id(request)}: Creating isolated context "
+            f"(user_root_id={user_id})"
+        );
 
         # Set user root if authenticated (from AuthMiddleware)
-        if request.state?.user_root_id and request.state.user_root_id {
+        if user_id {
             try {
-                ctx.set_user_root(request.state.user_root_id);
-            } except Exception {
-            # User root might not exist, keep using system root
+                ctx.set_user_root(user_id);
+                logger.debug(f"Request {id(request)}: Set user_root to {user_id}");
+            } except ValueError as e {
+                # Invalid user root ID (malformed UUID or non-existent anchor)
+                logger.warning(
+                    f"Request {id(request)}: Invalid user_root_id '{user_id}': {e}. "
+                    f"Using system root instead."
+                );
+                # Continue with system root (already set in ctx.postinit)
+            } except Exception as e {
+                # Unexpected error (DB failure, network issue, etc.)
+                logger.error(
+                    f"Request {id(request)}: Failed to set user_root '{user_id}': {e}",
+                    exc_info=True
+                );
+                # Re-raise to fail the request (don't silently continue with wrong user)
+                raise;
             }
         }
 
@@ -865,10 +894,35 @@ impl JFastApiServer.init(
         try {
             # Process request with fresh context
             response = await call_next(request);
+
+            logger.debug(
+                f"Request {id(request)}: Completed successfully "
+                f"(L1 cache had {len(ctx.mem.get_mem())} objects)"
+            );
+
             return response;
+        } except Exception as e {
+            # Log request failure before cleanup
+            logger.error(
+                f"Request {id(request)}: Failed during execution: {e}", exc_info=True
+            );
+            raise;
         } finally {
             # Cleanup: commit changes and clear L1 cache
-            JacRuntime.clear_request_context();
+            try {
+                l1_size = len(ctx.mem.get_mem());
+                JacRuntime.clear_request_context();
+                logger.debug(
+                    f"Request {id(request)}: Cleared context "
+                    f"(committed and freed {l1_size} L1 objects)"
+                );
+            } except Exception as e {
+                # Log cleanup failure but don't prevent response from returning
+                logger.error(
+                    f"Request {id(request)}: Failed to clear context: {e}",
+                    exc_info=True
+                );
+            }
         }
     }
 
