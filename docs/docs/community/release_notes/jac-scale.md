@@ -6,6 +6,10 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 **Request-Scoped L1 Memory Cache**: L1 (in-memory) cache is now request-scoped instead of server-scoped, eliminating stale data issues in multi-instance deployments. Each HTTP request gets a fresh L1 cache that is automatically cleared when the request completes. This prevents data staleness across requests, eliminates orphaned object references, and improves memory management by preventing unbounded L1 growth. Implemented via Python's `ContextVar` for thread-safe and async-safe request isolation. CLI and test environments continue using global context (backward compatible). The middleware is automatically registered in `JFastApiServer.init()` with no configuration required.
 
+- **Fix: Parser Strictness Compliance**: Moved docstrings before signatures in `kubernetes_utils.impl.jac` and converted nested function docstring to comment in `api.cl.jac` to comply with the stricter RD parser.
+- [Internal] Refactor: Extract graph visualizer HTML into a standalone template file.
+- **User storage now supports both MongoDB and SQLite**: User authentication and management automatically uses SQLite when MongoDB is not configured, maintaining full backward compatibility with existing installations.
+
 ## jac-scale 0.2.4 (Latest Release)
 
 - **Automatic Port Fallback**: When starting the server with `jac start`, if the specified port is already in use, the server now automatically finds and uses the next available port instead of crashing with "Address already in use". A warning message displays when using an alternative port. Supports up to 10 port retries with cross-platform compatibility (Linux and Windows).
@@ -38,6 +42,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - k8s metrics dashboard in prometheus and grafana
 - Jac status command to check deployment status of each component of k8s
 - **Chore: Codebase Reformatted**: All `.jac` files reformatted with improved `jac format` (better line-breaking, comment spacing, and ternary indentation).
+- **Fix: Root-Level Font/Asset 404s**: Added `.jac/client/dist/` as a search candidate in `serve_root_asset`, fixing 404s for font files (`.woff2`, `.ttf`, etc.) bundled by Vite with root-relative `@font-face url()` paths.
 
 ## jac-scale 0.2.1
 
