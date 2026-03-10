@@ -475,6 +475,10 @@ test "L1 cache cleared between requests" {
     redis_host = redis_container.get_container_host_ip();
     redis_port = redis_container.get_exposed_port(6379);
 
+    mongo_container = MongoDbContainer("mongo:latest");
+    mongo_container.start();
+
+    os.environ["MONGODB_URI"] = mongo_container.get_connection_url();
     os.environ["REDIS_URL"] = f"redis://{redis_host}:{redis_port}/0";
     redis_client = redis.Redis(
         host=redis_host, port=int(redis_port), decode_responses=False
@@ -504,6 +508,7 @@ test "L1 cache cleared between requests" {
         with contextlib.suppress(Exception) {
             server.wait(timeout=2);
         }
+        mongo_container.stop();
         redis_container.stop();
         gc.collect();
     }
