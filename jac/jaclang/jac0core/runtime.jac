@@ -2637,7 +2637,6 @@ class JacRuntime(JacRuntimeInterface) {
         if ctx is not None {
             ctx.close();  # Commit and clear L1
         }
-        # ContextVar automatically cleared when request context ends
     }
 }
 

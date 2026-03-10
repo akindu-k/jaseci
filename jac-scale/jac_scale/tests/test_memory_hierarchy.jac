@@ -411,7 +411,6 @@ test "concurrent requests get isolated L1 caches" {
     # Validates: 10 parallel requests create unique tasks with no L1 cross-contamination
     import concurrent.futures;
 
-    # Clean up data files
     data_dir = FIXTURES_DIR / ".jac" / "data";
     if data_dir.exists() {
         import shutil;
@@ -460,7 +459,6 @@ test "concurrent requests get isolated L1 caches" {
         mongo_container.stop();
         gc.collect();
 
-        # Clean up
         if data_dir.exists() {
             import shutil;
             shutil.rmtree(data_dir);
@@ -470,7 +468,6 @@ test "concurrent requests get isolated L1 caches" {
 
 test "sequential requests work correctly" {
     # Validates: Multiple sequential requests don't cause crashes or data corruption
-    # (Testing that request context middleware doesn't break normal operation)
     mongo_container = MongoDbContainer("mongo:latest");
     mongo_container.start();
     os.environ["MONGODB_URI"] = mongo_container.get_connection_url();
