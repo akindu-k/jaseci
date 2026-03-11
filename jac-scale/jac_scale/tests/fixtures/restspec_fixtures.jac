@@ -147,11 +147,28 @@ node UserProfile {
         name: str = "";
 }
 
+"""Walker to create a UserProfile node for testing."""
+walker:pub CreateUserProfile {
+    has user_id: str,
+        name: str;
+
+    can create_node with Root entry {
+        profile = UserProfile(user_id=self.user_id, name=self.name);
+        here ++> profile;
+        report {
+            "message": "UserProfile created",
+            "node_id": str(profile.__jac__.id),
+            "user_id": profile.user_id,
+            "name": profile.name
+        };
+    }
+}
+
 walker:pub LoadUserProfile {
     can load_profile with UserProfile entry {
         report {
             "message": "LoadUserProfile executed on node",
-            "node_id": here.__jac__.id,
+            "node_id": str(here.__jac__.id),
             "user_id": here.user_id,
             "name": here.name
         };

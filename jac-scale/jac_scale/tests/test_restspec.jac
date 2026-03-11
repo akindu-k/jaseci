@@ -7,7 +7,7 @@ import from jac_scale.tests.scale_test_client {
 }
 
 test "custom method walker" {
-    client = make_client("test_restspec.jac");
+    client = make_client("restspec_fixtures.jac");
     try {
         response = client.get("/walker/GetWalker");
         assert response.status_code == 200;
@@ -19,7 +19,7 @@ test "custom method walker" {
 }
 
 test "custom path walker" {
-    client = make_client("test_restspec.jac");
+    client = make_client("restspec_fixtures.jac");
     try {
         response = client.get("/custom/walker");
         assert response.status_code == 200;
@@ -32,7 +32,7 @@ test "custom path walker" {
 }
 
 test "post method walker" {
-    client = make_client("test_restspec.jac");
+    client = make_client("restspec_fixtures.jac");
     try {
         response = client.post("/walker/PostWalker");
         assert response.status_code == 200;
@@ -45,7 +45,7 @@ test "post method walker" {
 }
 
 test "default method walker" {
-    client = make_client("test_restspec.jac");
+    client = make_client("restspec_fixtures.jac");
     try {
         response = client.post("/walker/DefaultWalker");
         assert response.status_code == 200;
@@ -58,7 +58,7 @@ test "default method walker" {
 }
 
 test "custom method func" {
-    client = make_client("test_restspec.jac");
+    client = make_client("restspec_fixtures.jac");
     try {
         client.post("/user/register", json={"username": "u1", "password": "p1"});
         login = client.post("/user/login", json={"username": "u1", "password": "p1"});
@@ -76,7 +76,7 @@ test "custom method func" {
 }
 
 test "custom path func" {
-    client = make_client("test_restspec.jac");
+    client = make_client("restspec_fixtures.jac");
     try {
         client.post("/user/register", json={"username": "u1", "password": "p1"});
         login = client.post("/user/login", json={"username": "u1", "password": "p1"});
@@ -95,7 +95,7 @@ test "custom path func" {
 }
 
 test "post method func" {
-    client = make_client("test_restspec.jac");
+    client = make_client("restspec_fixtures.jac");
     try {
         client.post("/user/register", json={"username": "u1", "password": "p1"});
         login = client.post("/user/login", json={"username": "u1", "password": "p1"});
@@ -114,7 +114,7 @@ test "post method func" {
 }
 
 test "default method func" {
-    client = make_client("test_restspec.jac");
+    client = make_client("restspec_fixtures.jac");
     try {
         client.post("/user/register", json={"username": "u1", "password": "p1"});
         login = client.post("/user/login", json={"username": "u1", "password": "p1"});
@@ -133,7 +133,7 @@ test "default method func" {
 }
 
 test "get walker with params" {
-    client = make_client("test_restspec.jac");
+    client = make_client("restspec_fixtures.jac");
     try {
         response = client.get(
             "/walker/GetWalkerWithParams", params={"name": "Alice", "age": 30}
@@ -149,7 +149,7 @@ test "get walker with params" {
 }
 
 test "get func with params" {
-    client = make_client("test_restspec.jac");
+    client = make_client("restspec_fixtures.jac");
     try {
         client.post("/user/register", json={"username": "u1", "password": "p1"});
         login = client.post("/user/login", json={"username": "u1", "password": "p1"});
@@ -171,7 +171,7 @@ test "get func with params" {
 }
 
 test "openapi specs" {
-    client = make_client("test_restspec.jac");
+    client = make_client("restspec_fixtures.jac");
     try {
         spec = client.get("/openapi.json").json();
         paths = spec["paths"];
@@ -203,7 +203,7 @@ test "openapi specs" {
 # Single server instance for all path-param assertions — no per-case restart.
 # ============================================================================
 test "restspec path parameters" {
-    client = make_client("test_restspec.jac");
+    client = make_client("restspec_fixtures.jac");
     try {
         # Obtain an auth token (functions require auth, walkers are public)
         client.post("/user/register", json={"username": "u_pp", "password": "p_pp"});
@@ -289,7 +289,7 @@ test "restspec path parameters" {
 }
 
 test "walker with default node parameter route" {
-    client = make_client("test_restspec.jac");
+    client = make_client("restspec_fixtures.jac");
     try {
         spec = client.get("/openapi.json").json();
         paths = spec["paths"];
@@ -327,6 +327,32 @@ test "walker with default node parameter route" {
             assert nd_param["in"] == "path" , "nd parameter should be in path";
             assert nd_param["required"] == True , "nd parameter should be required";
         }
+    } finally {
+        client.close();
+    }
+}
+
+test "walker with node parameter functional test" {
+    client = make_client("restspec_fixtures.jac");
+    try {
+        # First, create a UserProfile node to test with
+        create_response = client.post(
+            "/walker/CreateUserProfile", json={"user_id": "user123", "name": "Alice"}
+        );
+        assert create_response.status_code == 200;
+        create_data = extract_data(create_response.json());
+        node_id = create_data["reports"][0]["node_id"];
+
+        response = client.post(f"/walker/LoadUserProfile/{node_id}", json={});
+
+        assert response.status_code == 200 , f"Expected 200. Got: {response.status_code}, Body: {response.text}";
+
+        data = extract_data(response.json());
+
+        assert data["reports"][0]["message"] == "LoadUserProfile executed on node";
+        assert data["reports"][0]["node_id"] == node_id;
+        assert data["reports"][0]["user_id"] == "user123";
+        assert data["reports"][0]["name"] == "Alice";
     } finally {
         client.close();
     }
