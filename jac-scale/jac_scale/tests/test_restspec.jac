@@ -287,3 +287,47 @@ test "restspec path parameters" {
         client.close();
     }
 }
+
+test "walker with default node parameter route" {
+    client = make_client("test_restspec.jac");
+    try {
+        spec = client.get("/openapi.json").json();
+        paths = spec["paths"];
+
+        walker_paths_with_param = [
+            p
+            for p in paths.keys()
+            if "/walker/" in p and "{" in p
+        ];
+
+        has_nd_param = any("{nd}" in p for p in walker_paths_with_param);
+
+        assert has_nd_param , f"Walker routes should use '{{nd}}'. Found: {walker_paths_with_param}";
+
+        test_route = next(
+            (
+                p
+                for p in walker_paths_with_param
+                if "{nd}" in p
+            ),
+            None
+        );
+        if test_route {
+            method = "post" if "post" in paths[test_route] else "get";
+            params = paths[test_route][method]["parameters"];
+            nd_param = next(
+                (
+                    p
+                    for p in params
+                    if p.get("name") == "nd"
+                ),
+                None
+            );
+            assert nd_param is not None , "Should have a path parameter named 'nd'";
+            assert nd_param["in"] == "path" , "nd parameter should be in path";
+            assert nd_param["required"] == True , "nd parameter should be required";
+        }
+    } finally {
+        client.close();
+    }
+}
