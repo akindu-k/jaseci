@@ -45,8 +45,9 @@ impl ScaleTieredMemory.init(use_cache: bool = True) -> None {
 }
 
 
-"""Commit changes: sync L3 persistence layer (no-op for MongoDB, smart sync for SQLite)."""
+"""Commit changes: sync L3 persistence layer."""
 impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
+    import from jaclang { JacRuntimeInterface as Jac }
     if self.l3 is None {
         return;
     }
@@ -72,13 +73,34 @@ impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
         }
         return;
     }
-    # Batch commit: Let L3 handle sync (SQLite does smart change detection)
-    # For MongoDB, this is a no-op since writes are immediate
-    # For SQLite, this does change detection and only writes modified anchors
-    try {
-        self.l3.sync();
-    } except Exception as e {
-        logger.warning(f"ScaleTieredMemory.commit sync failed: {e}");
+    # Batch commit: Different strategies for MongoDB vs SQLite
+    # - MongoDB: Write-through on put(), but need to flush L1 on commit for data loaded from L3
+    # - SQLite: Has smart sync() with hash-based change detection
+    if self._persistence_type == PersistenceType.MONGODB {
+        # For MongoDB, ensure all L1 anchors are in L3
+        # This is needed because anchors loaded from L3 might not have been written back
+        for (_, mem_anchor) in list(self.__mem__.items()) {
+            if not mem_anchor.persistent or not Jac.check_write_access(mem_anchor) {
+                continue;
+            }
+            try {
+                self.l3.put(mem_anchor);
+            } except Exception as e {
+                logger.warning(
+                    f"ScaleTieredMemory.commit flush failed for anchor "
+                    f"{mem_anchor.id}: {e}"
+                );
+            }
+        }
+    } else {
+        # For SQLite, use the smart sync() which does hash-based change detection
+        try {
+            if self.l3 {
+                self.l3.sync();
+            }
+        } except Exception as e {
+            logger.warning(f"ScaleTieredMemory.commit sync failed: {e}");
+        }
     }
 }
 
