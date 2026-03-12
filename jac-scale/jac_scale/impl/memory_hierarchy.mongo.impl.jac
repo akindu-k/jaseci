@@ -17,6 +17,11 @@ impl MongoBackend.postinit -> None {
     }
 }
 
+"""Set reference to parent TieredMemory's __mem__ for sync()."""
+impl MongoBackend.set_memory_ref(mem: dict[UUID, Anchor]) -> None {
+    self._mem_ref = mem;
+}
+
 """Check if MongoDB is available and connected."""
 impl MongoBackend.is_available -> bool {
     if not self.mongo_url {
@@ -181,9 +186,31 @@ impl MongoBackend.commit(anchor: (Anchor | None) = None) -> None {
 }
 
 # PersistentMemory-specific methods
-"""Sync - no-op for MongoDB (writes are immediate)."""
+"""Sync - flush L1 memory to MongoDB (similar to SqliteMemory.sync).
+
+Iterates through parent TieredMemory's __mem__ and ensures all persistent anchors
+are written to MongoDB. This is needed because:
+1. Anchors loaded from MongoDB into L1 need to be written back on shutdown
+2. Provides consistent behavior with SqliteMemory.sync()
+"""
 impl MongoBackend.sync -> None {
-# No-op: MongoDB writes are immediate
+    import from jaclang { JacRuntimeInterface as Jac }
+    # If no memory reference, can't sync (this is a programming error)
+    if not self._mem_ref or not self.client {
+        return;
+    }
+    # Iterate through L1 memory and ensure all persistent anchors are in MongoDB
+    for (_, anchor) in list(self._mem_ref.items()) {
+        if not anchor.persistent or not Jac.check_write_access(anchor) {
+            continue;
+        }
+        try {
+            # Write to MongoDB (idempotent - safe to write multiple times)
+            self.put(anchor);
+        } except Exception as e {
+            logger.warning(f"MongoDB sync failed for anchor {anchor.id}: {e}");
+        }
+    }
 }
 
 """Bulk store multiple anchors."""

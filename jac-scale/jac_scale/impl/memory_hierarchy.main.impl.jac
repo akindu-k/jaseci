@@ -22,6 +22,8 @@ impl ScaleTieredMemory.init(use_cache: bool = True) -> None {
     mongo_backend = MongoBackend();
     if mongo_backend.is_available() {
         self.l3 = mongo_backend;
+        # Give MongoDB access to L1 memory for sync()
+        mongo_backend.set_memory_ref(self.__mem__);
         self._persistence_type = PersistenceType.MONGODB;
         logger.debug("MongoDB persistence backend initialized");
         # Show subtle message (optional - uncomment to enable)
@@ -45,26 +47,21 @@ impl ScaleTieredMemory.init(use_cache: bool = True) -> None {
 }
 
 
-"""Commit changes: sync L3 persistence layer."""
+"""Commit changes: delegate to L3's sync() which handles change detection."""
 impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
-    import from jaclang { JacRuntimeInterface as Jac }
     if self.l3 is None {
         return;
     }
-    # Single anchor commit - ensure it's written to L3
+    # Single anchor commit
     if anchor is not None {
-        # Early return if anchor is not valid for persistence
         if not anchor.persistent {
             return;
         }
-        # Early return if no write access
         if not Jac.check_write_access(anchor) {
             return;
         }
         try {
-            # Ensure anchor is written to L3 (may be redundant if put() already wrote it)
             self.l3.put(anchor);
-            # Also update L2 cache if available
             if self.l2 {
                 self.l2.put(anchor);
             }
@@ -73,31 +70,12 @@ impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
         }
         return;
     }
-    # Batch commit: Different strategies for MongoDB vs SQLite
-    # - MongoDB: Write-through on put(), but need to flush L1 on commit for data loaded from L3
-    # - SQLite: Has smart sync() with hash-based change detection
-    if self._persistence_type == PersistenceType.MONGODB {
-        # For MongoDB, ensure all L1 anchors are in L3
-        # This is needed because anchors loaded from L3 might not have been written back
-        for (_, mem_anchor) in list(self.__mem__.items()) {
-            if not mem_anchor.persistent or not Jac.check_write_access(mem_anchor) {
-                continue;
-            }
-            try {
-                self.l3.put(mem_anchor);
-            } except Exception as e {
-                logger.warning(
-                    f"ScaleTieredMemory.commit flush failed for anchor "
-                    f"{mem_anchor.id}: {e}"
-                );
-            }
-        }
-    } else {
-        # For SQLite, use the smart sync() which does hash-based change detection
+    # Batch commit: delegate to L3's sync()
+    # - SQLite: sync() does hash-based change detection (only writes changed anchors)
+    # - MongoDB: sync() needs to flush L1 cache to ensure loaded data persists
+    if self.l3 {
         try {
-            if self.l3 {
-                self.l3.sync();
-            }
+            self.l3.sync();
         } except Exception as e {
             logger.warning(f"ScaleTieredMemory.commit sync failed: {e}");
         }
