@@ -351,9 +351,7 @@ test "no unnecessary saves on read-only operations" {
 
         # Initial count after server start
         initial_count = collection.count_documents({});
-        assert initial_count == 4 , (
-            f"Initial count should be 4, got {initial_count}"
-        );
+        assert initial_count == 4 , (f"Initial count should be 4, got {initial_count}");
 
         # Make a read-only request (walker with no data changes)
         token = register_user(base_url, "readonly_user", "pass123");
@@ -378,7 +376,9 @@ test "no unnecessary saves on read-only operations" {
         );
 
         # Now create a task (this should write)
-        post_request(base_url, "/walker/CreateTask", {"id": 999, "title": "Test"}, token);
+        post_request(
+            base_url, "/walker/CreateTask", {"id": 999, "title": "Test"}, token
+        );
 
         after_write_count = collection.count_documents({});
         assert after_write_count > after_readonly_count , (

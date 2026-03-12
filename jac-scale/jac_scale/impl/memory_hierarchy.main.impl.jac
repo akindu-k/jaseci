@@ -8,7 +8,6 @@ impl ScaleTieredMemory.init(use_cache: bool = True) -> None {
     # L1: Initialize volatile memory (inherited from VolatileMemory via TieredMemory)
     self.__mem__ = {};
     self.__gc__ = set();
-    self.__dirty__ = set();
     # L2: Try to initialize Redis cache (replaces LocalCacheMemory)
     redis_backend = RedisBackend();
     self._cache_available = redis_backend.is_available();
@@ -45,28 +44,13 @@ impl ScaleTieredMemory.init(use_cache: bool = True) -> None {
     }
 }
 
-"""Override put to track dirty anchors for deferred L3 writes."""
-impl ScaleTieredMemory.put(anchor: Anchor) -> None {
-    import from jaclang { JacRuntimeInterface as Jac }
-    # Always write to L1 (self.__mem__ inherited from VolatileMemory)
-    self.__mem__[anchor.id] = anchor;
-    # Write-through to L2 (cache) if enabled - cache is always write-through
-    if self.l2 {
-        self.l2.put(anchor);
-    }
-    # Track as dirty for deferred L3 write (happens in commit())
-    # This avoids writing to L3 on every put() and batches writes at commit time
-    if self.l3 and anchor.persistent and Jac.check_write_access(anchor) {
-        self.__dirty__.add(anchor.id);
-    }
-}
 
-"""Commit changes: flush only dirty L1 anchors to persistent storage (MongoDB/SQLite)."""
+"""Commit changes: sync L3 persistence layer (no-op for MongoDB, smart sync for SQLite)."""
 impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
     if self.l3 is None {
         return;
     }
-    # Single anchor commit
+    # Single anchor commit - ensure it's written to L3
     if anchor is not None {
         # Early return if anchor is not valid for persistence
         if not anchor.persistent {
@@ -77,60 +61,25 @@ impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
             return;
         }
         try {
+            # Ensure anchor is written to L3 (may be redundant if put() already wrote it)
             self.l3.put(anchor);
             # Also update L2 cache if available
             if self.l2 {
                 self.l2.put(anchor);
             }
-            # Remove from dirty set after successful commit
-            self.__dirty__.discard(anchor.id);
         } except Exception as e {
             logger.warning(f"ScaleTieredMemory.commit(anchor) failed: {e}");
         }
         return;
     }
-    # Early return if no dirty anchors - nothing to commit
-    if not self.__dirty__ {
-        logger.debug("ScaleTieredMemory.commit: No dirty anchors, skipping");
-        return;
+    # Batch commit: Let L3 handle sync (SQLite does smart change detection)
+    # For MongoDB, this is a no-op since writes are immediate
+    # For SQLite, this does change detection and only writes modified anchors
+    try {
+        self.l3.sync();
+    } except Exception as e {
+        logger.warning(f"ScaleTieredMemory.commit sync failed: {e}");
     }
-    # Flush only dirty L1 anchors to L3 (and L2 if available)
-    dirty_ids = list(self.__dirty__);
-    committed_ids: list[UUID] = [];
-    for anchor_id in dirty_ids {
-        # Get anchor from L1 memory
-        mem_anchor = self.__mem__.get(anchor_id);
-        if not mem_anchor {
-            # Anchor was deleted, remove from dirty set
-            self.__dirty__.discard(anchor_id);
-            continue;
-        }
-        if not mem_anchor.persistent or not Jac.check_write_access(mem_anchor) {
-            # No longer persistent or no write access, skip but keep in dirty set
-            continue;
-        }
-        try {
-            self.l3.put(mem_anchor);
-            if self.l2 {
-                self.l2.put(mem_anchor);
-            }
-            # Track successfully committed anchors
-            committed_ids.append(anchor_id);
-        } except Exception as e {
-            logger.warning(
-                f"ScaleTieredMemory.commit flush failed for anchor "
-                f"{mem_anchor.id}: {e}"
-            );
-        }
-    }
-    # Clear dirty flags for successfully committed anchors
-    for committed_id in committed_ids {
-        self.__dirty__.discard(committed_id);
-    }
-    logger.debug(
-        f"ScaleTieredMemory.commit: Committed {len(committed_ids)} of "
-        f"{len(dirty_ids)} dirty anchors"
-    );
 }
 
 """Close all backends."""
@@ -148,5 +97,4 @@ impl ScaleTieredMemory.close -> None {
     # Clear L1 (inherited from VolatileMemory)
     self.__mem__.clear();
     self.__gc__.clear();
-    self.__dirty__.clear();
 }
