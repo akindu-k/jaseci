@@ -139,9 +139,11 @@ Storage configuration comes from environment variables or jac.toml.
 """
 obj ScaleTieredMemory(TieredMemory) {
     has _cache_available: bool = False,
-        _persistence_type: PersistenceType = PersistenceType.NONE;
+        _persistence_type: PersistenceType = PersistenceType.NONE,
+        __dirty__: set[UUID] = set();
 
     def init(use_cache: bool = True) -> None;
+    def put(anchor: Anchor) -> None;
     def commit(anchor: (Anchor | None) = None) -> None;
     def close -> None;
 }

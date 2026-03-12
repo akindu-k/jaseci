@@ -314,6 +314,111 @@ test "data persists after server restart for mongo db" {
     }
 }
 
+test "no unnecessary saves on read-only operations" {
+    if not JAC_FILE.exists() {
+        raise FileNotFoundError(f"Missing Jac file: {JAC_FILE}");
+    }
+
+    # Clean up data files
+    data_dir = FIXTURES_DIR / ".jac" / "data";
+    if data_dir.exists() {
+        import shutil;
+        shutil.rmtree(data_dir);
+    }
+
+    # Start MongoDB container
+    mongo_container = MongoDbContainer("mongo:latest");
+    mongo_container.start();
+    mongo_uri = mongo_container.get_connection_url();
+    os.environ["MONGODB_URI"] = mongo_uri;
+    mongo_client = MongoClient(mongo_uri);
+
+    # Start Redis container
+    redis_container = RedisContainer("redis:latest", port=6379);
+    redis_container.start();
+    redis_host = redis_container.get_container_host_ip();
+    redis_port = redis_container.get_exposed_port(6379);
+    redis_url = f"redis://{redis_host}:{redis_port}/0";
+    os.environ["REDIS_URL"] = redis_url;
+
+    port = get_free_port();
+    base_url = f"http://localhost:{port}";
+    server = start_server(FIXTURES_DIR, JAC_FILE, port);
+
+    try {
+        db = mongo_client["jac_db"];
+        collection = db["_anchors"];
+
+        # Initial count after server start
+        initial_count = collection.count_documents({});
+        assert initial_count == 4 , (
+            f"Initial count should be 4, got {initial_count}"
+        );
+
+        # Make a read-only request (walker with no data changes)
+        token = register_user(base_url, "readonly_user", "pass123");
+
+        # Count after user creation
+        after_user_count = collection.count_documents({});
+        assert after_user_count == 5 , (
+            f"After user creation should be 5, got {after_user_count}"
+        );
+
+        # Make multiple read-only requests
+        for _ in range(3) {
+            res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=2);
+            assert res.status_code == 200;
+        }
+
+        # Count should remain the same - no writes should occur
+        after_readonly_count = collection.count_documents({});
+        assert after_readonly_count == after_user_count , (
+            f"Read-only operations should not create new docs. "
+            f"Expected {after_user_count}, got {after_readonly_count}"
+        );
+
+        # Now create a task (this should write)
+        post_request(base_url, "/walker/CreateTask", {"id": 999, "title": "Test"}, token);
+
+        after_write_count = collection.count_documents({});
+        assert after_write_count > after_readonly_count , (
+            "Write operation should increase doc count"
+        );
+
+        # Another read should not change the count
+        requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=2);
+        final_count = collection.count_documents({});
+        assert final_count == after_write_count , (
+            f"Final count after read should match previous count. "
+            f"Expected {after_write_count}, got {final_count}"
+        );
+    } finally {
+        if server {
+            server.terminate();
+            with contextlib.suppress(Exception) {
+                server.wait(timeout=2);
+            }
+        }
+
+        system_dbs = {"admin","config","local"};
+        for db_name in mongo_client.list_database_names() {
+            if db_name not in system_dbs {
+                mongo_client.drop_database(db_name);
+            }
+        }
+
+        mongo_container.stop();
+        redis_container.stop();
+        time.sleep(0.5);
+        gc.collect();
+
+        if data_dir.exists() {
+            import shutil;
+            shutil.rmtree(data_dir);
+        }
+    }
+}
+
 test "data persists after server restart for sqlite" {
     if not JAC_FILE.exists() {
         raise FileNotFoundError(f"Missing Jac file: {JAC_FILE}");
