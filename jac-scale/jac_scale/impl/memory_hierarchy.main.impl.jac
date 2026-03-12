@@ -45,24 +45,19 @@ impl ScaleTieredMemory.init(use_cache: bool = True) -> None {
     }
 }
 
-"""Override put to track dirty anchors for optimized commits."""
+"""Override put to track dirty anchors for deferred L3 writes."""
 impl ScaleTieredMemory.put(anchor: Anchor) -> None {
     import from jaclang { JacRuntimeInterface as Jac }
     # Always write to L1 (self.__mem__ inherited from VolatileMemory)
     self.__mem__[anchor.id] = anchor;
-    # Track as dirty if persistent and has write access
-    if anchor.persistent and Jac.check_write_access(anchor) {
-        self.__dirty__.add(anchor.id);
-    }
-    # Write-through to L2 (cache) if enabled
+    # Write-through to L2 (cache) if enabled - cache is always write-through
     if self.l2 {
         self.l2.put(anchor);
     }
-    # Write-through to L3 with access control check
-    if self.l3 and anchor.persistent {
-        if Jac.check_write_access(anchor) {
-            self.l3.put(anchor);
-        }
+    # Track as dirty for deferred L3 write (happens in commit())
+    # This avoids writing to L3 on every put() and batches writes at commit time
+    if self.l3 and anchor.persistent and Jac.check_write_access(anchor) {
+        self.__dirty__.add(anchor.id);
     }
 }
 
