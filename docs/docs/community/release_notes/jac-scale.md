@@ -4,6 +4,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.2.6 (Unreleased)
 
+- **Fix: Prevent Unnecessary Database Writes on Read-Only Operations**: Refactored `ScaleTieredMemory.commit()` to delegate to the L3 backend's `sync()` method instead of iterating and flushing all L1 anchors on every commit. Previously, every walker execution (including read-only ones) triggered a full write of all in-memory anchors to MongoDB/SQLite, causing unnecessary I/O, performance degradation, and potential race conditions. Now, `commit()` calls `self.l3.sync()` which uses backend-appropriate change detection — SQLite uses hash-based detection (only writes changed anchors), and MongoDB iterates L1 memory to persist only persistent anchors with write access. Added `_mem_ref` field and `set_memory_ref()` to `MongoBackend` for L1 cache access during sync. Includes new test `"no unnecessary saves on read-only operations"` verifying read-only walkers don't create MongoDB documents.
+
 ## jac-scale 0.2.5 (Latest Release)
 
 - **Fix: Walker Route OpenAPI Parameter Naming**: Fixed inconsistency where walker routes with node parameters used `{nd}` in URL paths but declared `node` in OpenAPI schema, causing FastAPI validation errors (`"Field required"` for parameter `node`). The OpenAPI schema now correctly uses `nd` to match the actual path variable and function parameter. This fixes requests to `/walker/{walker_name}/{node_id}` endpoints. Note: `node` is a reserved Jac keyword, so `nd` is used as the parameter name throughout.
