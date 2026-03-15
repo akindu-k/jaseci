@@ -186,26 +186,17 @@ impl MongoBackend.commit(anchor: (Anchor | None) = None) -> None {
 }
 
 # PersistentMemory-specific methods
-"""Sync - flush L1 memory to MongoDB (similar to SqliteMemory.sync).
-
-Iterates through parent TieredMemory's __mem__ and ensures all persistent anchors
-are written to MongoDB. This is needed because:
-1. Anchors loaded from MongoDB into L1 need to be written back on shutdown
-2. Provides consistent behavior with SqliteMemory.sync()
-"""
+"""Sync - flush L1 memory to MongoDB"""
 impl MongoBackend.sync -> None {
     import from jaclang { JacRuntimeInterface as Jac }
-    # If no memory reference, can't sync (this is a programming error)
     if not self._mem_ref or not self.client {
         return;
     }
-    # Iterate through L1 memory and ensure all persistent anchors are in MongoDB
     for (_, anchor) in list(self._mem_ref.items()) {
         if not anchor.persistent or not Jac.check_write_access(anchor) {
             continue;
         }
         try {
-            # Write to MongoDB (idempotent - safe to write multiple times)
             self.put(anchor);
         } except Exception as e {
             logger.warning(f"MongoDB sync failed for anchor {anchor.id}: {e}");
