@@ -6,6 +6,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 - **Fix: Prevent Unnecessary Database Writes on Read-Only Operations**: Refactored `ScaleTieredMemory.commit()` to delegate to the L3 backend's `sync()` method instead of iterating and flushing all L1 anchors on every commit. Previously, every walker execution (including read-only ones) triggered a full write of all in-memory anchors to MongoDB/SQLite, causing unnecessary I/O, performance degradation, and potential race conditions. Now, `commit()` calls `self.l3.sync()` which uses backend-appropriate change detection -- SQLite uses hash-based detection (only writes changed anchors), and MongoDB iterates L1 memory to persist only persistent anchors with write access. Added `_mem_ref` field and `set_memory_ref()` to `MongoBackend` for L1 cache access during sync. Includes new test `"no unnecessary saves on read-only operations"` verifying read-only walkers don't create MongoDB documents.
 - **Client-Side Error Reporting Endpoint**: Added `POST /cl/__error__` endpoint to `JacAPIServerCore` for receiving client-side JavaScript errors. Errors are logged via the `jaclang.client_errors` logger and printed to the dev console with stack traces for visibility.
+- **Source-Mapped Error Stack Traces**: Client error stack traces received at `/cl/__error__` are now resolved from bundled JS locations to original `.jac` file paths and exact line numbers via the centralized `SourceMapper` with two-layer resolution.
+- **Client Error Rate Limiting**: The `/cl/__error__` endpoint now deduplicates identical error messages (10s window) and caps at 20 errors per minute to prevent log flooding from render loops or repeated failures.
 
 ## jac-scale 0.2.6 (Latest Release)
 
@@ -122,7 +124,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 ## jac-scale 0.1.7
 
 - **KWESC_NAME syntax changed from `<>` to backtick**: Updated keyword-escaped names from `<>` prefix to backtick prefix to match the jaclang grammar change.
-- **Update syntax for TYPE_OP removal**: Replaced backtick type operator syntax (`` `root ``) with `Root` and filter syntax (``(`?Type)``) with `(?:Type)` across all docs, tests, examples, and README.
+- **Update syntax for TYPE_OP removal**: Replaced backtick type operator syntax (`` `root ``) with `Root` and filter syntax (``(`?Type)``) with `[?:Type]` across all docs, tests, examples, and README.
 
 ## jac-scale 0.1.6
 

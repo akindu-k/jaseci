@@ -833,9 +833,26 @@ impl JacAPIServerCore._register_client_error_endpoint -> None {
                 status_code=400, content={"error": "Missing required field: message"}
             );
         }
+        # Rate limit and deduplicate
+        import from jaclang.runtimelib.source_mapping {
+            SourceMapper,
+            _error_rate_limiter
+        }
+        if not _error_rate_limiter.should_log(message) {
+            return JSONResponse(
+                status_code=200, content={"ok": True, "throttled": True}
+            );
+        }
         stack = data.get('stack', '');
         url = data.get('url', '');
         source = data.get('source', '');
+        # Resolve stack trace to .jac files via source maps
+        if stack and self.base_path {
+            try {
+                mapper = SourceMapper.from_bundle(self.base_path);
+                stack = mapper.resolve_stack_trace(stack);
+            } except Exception { }
+        }
         log_parts = [f"[Client] {message}"];
         if stack {
             log_parts.append(f"  Stack: {stack}");

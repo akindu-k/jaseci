@@ -7,6 +7,7 @@ errors back to the server for logging and observability.
 import io;
 import json;
 import logging;
+import uuid;
 import from pathlib { Path }
 import from tempfile { TemporaryDirectory }
 import from jaclang.runtimelib.testing { JacTestClient }
@@ -69,12 +70,13 @@ test "client error is logged to server console" {
         logger = logging.getLogger("jaclang.client_errors");
         (buf, handler, old_level) = capture_log_start(logger);
         try {
-            error_msg = "Cannot use 'in' operator to search for '@' in undefined";
+            # Use unique message to avoid rate limiter dedup across test runs
+            error_msg = f"Test error {uuid.uuid4().hex}";
             client.post(
                 "/cl/__error__",
                 json={
                     "message": error_msg,
-                    "stack": "TypeError: Cannot use 'in' operator\n    at LoginPage (login.jac:42)",
+                    "stack": "TypeError: test\n    at TestFunc (test.jac:1)",
                     "url": "http://localhost:8001/",
                     "source": "window.onerror",
                     "timestamp": "2026-03-14T12:00:00Z"

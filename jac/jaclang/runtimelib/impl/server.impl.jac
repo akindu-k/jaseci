@@ -1608,24 +1608,40 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                         self, 400, {'error': 'Missing required field: message'}
                     );
                 } else {
-                    stack = data.get('stack', '');
-                    url = data.get('url', '');
-                    source = data.get('source', '');
-                    log_parts = [f"[Client] {message}"];
-                    if stack {
-                        log_parts.append(f"  Stack: {stack}");
+                    # Rate limit and deduplicate
+                    import from jaclang.runtimelib.source_mapping {
+                        SourceMapper,
+                        _error_rate_limiter
                     }
-                    if url {
-                        log_parts.append(f"  URL: {url}");
+                    if not _error_rate_limiter.should_log(message) {
+                        Jac.send_json(self, 200, {'ok': True, 'throttled': True});
+                    } else {
+                        stack = data.get('stack', '');
+                        url = data.get('url', '');
+                        source = data.get('source', '');
+                        # Resolve stack trace to .jac files via source maps
+                        if stack and server.base_path {
+                            try {
+                                mapper = SourceMapper.from_bundle(server.base_path);
+                                stack = mapper.resolve_stack_trace(stack);
+                            } except Exception { }
+                        }
+                        log_parts = [f"[Client] {message}"];
+                        if stack {
+                            log_parts.append(f"  Stack: {stack}");
+                        }
+                        if url {
+                            log_parts.append(f"  URL: {url}");
+                        }
+                        if source {
+                            log_parts.append(f"  Source: {source}");
+                        }
+                        import logging;
+                        logging.getLogger("jaclang.client_errors").error(
+                            '\n'.join(log_parts)
+                        );
+                        Jac.send_json(self, 200, {'ok': True});
                     }
-                    if source {
-                        log_parts.append(f"  Source: {source}");
-                    }
-                    import logging;
-                    logging.getLogger("jaclang.client_errors").error(
-                        '\n'.join(log_parts)
-                    );
-                    Jac.send_json(self, 200, {'ok': True});
                 }
             } else {
                 Jac.send_json(self, 404, {'error': 'Not found'});
