@@ -94,7 +94,11 @@ obj NaIRGenPass(ModuleCodegenPass) {
     def _forward_declare_archetype_names(module: uni.Module) -> None;
     def _register_imported_struct_types -> None;
     def _walk_imported_module(imported_mod: uni.Module) -> None;
+    def _walk_imported_module_types(imported_mod: uni.Module) -> None;
+    def _walk_imported_module_type_names(imported_mod: uni.Module) -> None;
+    def _walk_imported_module_abilities(imported_mod: uni.Module) -> None;
     def _register_imported_archetype(arch: uni.Archetype) -> None;
+    def _forward_declare_archetype_methods(arch: uni.Archetype) -> None;
     def _register_imported_globals(nd: uni.GlobalVars) -> None;
     def _forward_declare_imported_ability(nd: uni.Ability) -> None;
     def _register_archetypes(module: uni.Module) -> None;
