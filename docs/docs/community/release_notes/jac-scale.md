@@ -2,11 +2,16 @@
 
 This document provides a summary of new features, improvements, and bug fixes in each version of **Jac-Scale**. For details on changes that might require updates to your existing code, please refer to the [Breaking Changes](../breaking-changes.md) page.
 
-## jac-scale 0.2.6 (Unreleased)
+## jac-scale 0.2.7 (Unreleased)
 
 - **Fix: Prevent Unnecessary Database Writes on Read-Only Operations**: Refactored `ScaleTieredMemory.commit()` to delegate to the L3 backend's `sync()` method instead of iterating and flushing all L1 anchors on every commit. Previously, every walker execution (including read-only ones) triggered a full write of all in-memory anchors to MongoDB/SQLite, causing unnecessary I/O, performance degradation, and potential race conditions. Now, `commit()` calls `self.l3.sync()` which uses backend-appropriate change detection -- SQLite uses hash-based detection (only writes changed anchors), and MongoDB iterates L1 memory to persist only persistent anchors with write access. Added `_mem_ref` field and `set_memory_ref()` to `MongoBackend` for L1 cache access during sync. Includes new test `"no unnecessary saves on read-only operations"` verifying read-only walkers don't create MongoDB documents.
+- **Client-Side Error Reporting Endpoint**: Added `POST /cl/__error__` endpoint to `JacAPIServerCore` for receiving client-side JavaScript errors. Errors are logged via the `jaclang.client_errors` logger and printed to the dev console with stack traces for visibility.
 
-## jac-scale 0.2.5 (Latest Release)
+## jac-scale 0.2.6 (Latest Release)
+
+- **Domain & TLS support (`--enable-tls`)**: Added custom domain name routing and automatic HTTPS via cert-manager + Let's Encrypt. Set `domain` in `jac.toml`, deploy normally, point your CNAME to the NLB, then run `jac start app.jac --scale --enable-tls` to enable HTTPS without a full redeploy. cert-manager is installed automatically and certificates are renewed automatically. Configurable via `domain` and `cert_manager_email` in `[plugins.scale.kubernetes]`.
+
+## jac-scale 0.2.5
 
 - **Fix: Walker Route OpenAPI Parameter Naming**: Fixed inconsistency where walker routes with node parameters used `{nd}` in URL paths but declared `node` in OpenAPI schema, causing FastAPI validation errors (`"Field required"` for parameter `node`). The OpenAPI schema now correctly uses `nd` to match the actual path variable and function parameter. This fixes requests to `/walker/{walker_name}/{node_id}` endpoints. Note: `node` is a reserved Jac keyword, so `nd` is used as the parameter name throughout.
 - **Fix: K8s deployment time regression**: NGINX Ingress controller now starts in parallel with databases/monitoring, restoring test runtimes.

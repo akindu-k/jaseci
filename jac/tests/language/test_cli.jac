@@ -227,7 +227,7 @@ test "jac cli error output has no raw ansi codes" {
     }
     output = captured_output.getvalue();
     # Ensure the error was actually reported
-    assert "The 'new' keyword is not supported in Jac" in output;
+    assert "'new' is not supported in Jac" in output;
     # Raw ANSI escape codes (\x1b[) must not appear in error output.
     # The console layer handles styling; pretty_print should not inject raw codes.
     assert "\x1b[" not in output , f"Raw ANSI escape codes found in error output:\n{repr(
@@ -451,7 +451,7 @@ test "run specific test only" {
     old_stdout = sys.stdout;
     sys.stdout = captured;
     try {
-        analysis.test(fixture_path("jactest_main.jac"), test_name="from_2_to_10");
+        analysis.test(fixture_path("jactest_main.jac"), test_name="from 2 to 10");
         stdout = captured.getvalue();
         stderr = captured_stderr.getvalue();
     } finally {
