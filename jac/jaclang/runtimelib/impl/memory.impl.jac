@@ -477,13 +477,13 @@ impl SqliteMemory.partial_update(
                             setattr(stored.archetype, field_name, field_value);
                         }
                     }
-                    # Write back the modified anchor
+                    # Write back the modified anchor to database
                     self.__conn__.execute(
                         "INSERT OR REPLACE INTO anchors (id, data) VALUES (?, ?)",
                         (key, dumps(stored))
                     );
-                    # Update in-memory cache
-                    self.__mem__[anchor.id] = stored;
+                    # Update in-memory cache with the incoming anchor
+                    self.__mem__[anchor.id] = anchor;
                 } else {
                     # If not populated, rollback and fall back to full put
                     self.__conn__.rollback();
