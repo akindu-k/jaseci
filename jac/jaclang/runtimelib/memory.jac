@@ -88,7 +88,6 @@ Implementations must guarantee data durability after sync().
 obj PersistentMemory(Memory) {
     def sync -> None abs;
     def bulk_put(anchors: Iterable[Anchor]) -> None abs;
-
     """Partially update an anchor's archetype fields to avoid race conditions."""
     def partial_update(
         anchor: Anchor, fields: (dict[str, object] | None) = None
