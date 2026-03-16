@@ -310,16 +310,10 @@ impl Archetype.__setattr__(self: Archetype, name: str, value: object) -> None {
         anchor = self.__dict__['__jac__'];
         if anchor.persistent {
             # Track this field as dirty for partial update
-            # Thread-safe implementation using lock
             if '__jac_dirty_fields__' not in self.__dict__ {
-                import threading;
                 object.__setattr__(self, '__jac_dirty_fields__', set());
-                object.__setattr__(self, '__jac_dirty_lock__', threading.Lock());
             }
-            # Use lock to ensure thread-safe modifications
-            with self.__dict__['__jac_dirty_lock__'] {
-                self.__dict__['__jac_dirty_fields__'].add(name);
-            }
+            self.__dict__['__jac_dirty_fields__'].add(name);
         }
     }
 }
@@ -332,15 +326,7 @@ impl Archetype.__jac_dirty_fields__(self: Archetype) -> (set[str] | None) {
 """Clear dirty fields tracking after persistence."""
 impl Archetype.__jac_clear_dirty__(self: Archetype) -> None {
     if '__jac_dirty_fields__' in self.__dict__ {
-        # Thread-safe clear operation
-        if '__jac_dirty_lock__' in self.__dict__ {
-            with self.__dict__['__jac_dirty_lock__'] {
-                self.__dict__['__jac_dirty_fields__'].clear();
-            }
-        } else {
-            # Fallback for edge case where dirty fields exist without lock
-            self.__dict__['__jac_dirty_fields__'].clear();
-        }
+        self.__dict__['__jac_dirty_fields__'].clear();
     }
 }
 

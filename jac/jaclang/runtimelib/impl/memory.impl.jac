@@ -457,34 +457,51 @@ impl SqliteMemory.partial_update(
     self._ensure_connection();
     key = str(anchor.id);
     try {
-        # Get existing anchor from database
-        cursor = self.__conn__.execute("SELECT data FROM anchors WHERE id = ?", (key, ));
-        row = cursor.fetchone();
-        if row {
-            stored = loads(row[0]);
-            # Update only the specified fields in the archetype
-            if stored.is_populated() and anchor.is_populated() {
-                for (field_name, field_value) in fields.items() {
-                    if stored.archetype?.__dict__
-                    and field_name in stored.archetype.__dict__ {
-                        setattr(stored.archetype, field_name, field_value);
+        # Begin transaction with immediate lock to prevent lost updates
+        # IMMEDIATE lock prevents other writers from starting their transaction
+        # until this one completes, ensuring Read-Modify-Write atomicity
+        self.__conn__.execute("BEGIN IMMEDIATE");
+        try {
+            # Get existing anchor from database
+            cursor = self.__conn__.execute(
+                "SELECT data FROM anchors WHERE id = ?", (key, )
+            );
+            row = cursor.fetchone();
+            if row {
+                stored = loads(row[0]);
+                # Update only the specified fields in the archetype
+                if stored.is_populated() and anchor.is_populated() {
+                    for (field_name, field_value) in fields.items() {
+                        if stored.archetype?.__dict__
+                        and field_name in stored.archetype.__dict__ {
+                            setattr(stored.archetype, field_name, field_value);
+                        }
                     }
+                    # Write back the modified anchor
+                    self.__conn__.execute(
+                        "INSERT OR REPLACE INTO anchors (id, data) VALUES (?, ?)",
+                        (key, dumps(stored))
+                    );
+                    # Update in-memory cache
+                    self.__mem__[anchor.id] = stored;
+                } else {
+                    # If not populated, rollback and fall back to full put
+                    self.__conn__.rollback();
+                    self.put(anchor);
+                    return;
                 }
-                # Write back the modified anchor
-                self.__conn__.execute(
-                    "INSERT OR REPLACE INTO anchors (id, data) VALUES (?, ?)",
-                    (key, dumps(stored))
-                );
-                self.__conn__.commit();
-                # Update in-memory cache
-                self.__mem__[anchor.id] = stored;
             } else {
-                # If not populated, fall back to full put
+                # If not in database yet, rollback and just do a full put
+                self.__conn__.rollback();
                 self.put(anchor);
+                return;
             }
-        } else {
-            # If not in database yet, just do a full put
-            self.put(anchor);
+            # Commit the transaction
+            self.__conn__.commit();
+        } except Exception as inner_e {
+            # Rollback on any error during transaction
+            self.__conn__.rollback();
+            raise inner_e;
         }
     } except Exception as e {
         logger.warning(f"SqliteMemory.partial_update failed: {e}");
