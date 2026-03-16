@@ -1,6 +1,8 @@
 # Backend Integration
 
-Connect your frontend components to Jac walkers for data fetching and mutations.
+The real power of Jac's full-stack model is how seamlessly client components connect to server logic. Instead of manually defining REST endpoints, writing fetch calls, and parsing JSON, you simply call server-side functions or spawn walkers from your client code -- the compiler generates the HTTP layer automatically. Data goes from your graph through walkers, over the network, and into your React-style components with minimal boilerplate.
+
+This tutorial shows how to call backend functions from the frontend, use walkers for graph-based data operations, handle loading states, and structure your server-client communication.
 
 > **Prerequisites**
 >
@@ -12,7 +14,7 @@ Connect your frontend components to Jac walkers for data fetching and mutations.
 
 ## How It Works
 
-In Jac full-stack apps:
+In Jac full-stack apps, the compiler handles the client-server boundary for you. Here's the mental model:
 
 1. **Backend** = Functions or walkers that process data and return results
 2. **Frontend** = Components in `cl { }` blocks
@@ -59,7 +61,7 @@ import uuid;
 
 walker:pub get_tasks {
     can fetch with Root entry {
-        tasks = [-->](?:Task);
+        tasks = [-->][?:Task];
         report [
             {
                 "id": t.id,
@@ -95,7 +97,7 @@ walker:pub toggle_task {
     has task_id: str;
 
     can toggle with Root entry {
-        for task in [-->](?:Task) {
+        for task in [-->][?:Task] {
             if task.id == self.task_id {
                 task.completed = not task.completed;
                 report {"success": True, "completed": task.completed};
@@ -110,7 +112,7 @@ walker:pub delete_task {
     has task_id: str;
 
     can remove with Root entry {
-        for task in [-->](?:Task) {
+        for task in [-->][?:Task] {
             if task.id == self.task_id {
                 del task;
                 report {"success": True};
@@ -432,7 +434,7 @@ node Task {
 # === Backend: Walkers ===
 walker:pub get_tasks {
     can fetch with Root entry {
-        report [-->](?:Task);
+        report [-->][?:Task];
     }
 }
 
@@ -451,7 +453,7 @@ walker:pub toggle_task {
     has task_id: str;
 
     can toggle with Root entry {
-        for t in [-->](?:Task) {
+        for t in [-->][?:Task] {
             if t.id == self.task_id {
                 t.completed = not t.completed;
                 report t;

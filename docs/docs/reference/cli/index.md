@@ -1,6 +1,8 @@
 # CLI Reference
 
-The Jac CLI provides commands for running, building, testing, and deploying Jac applications.
+The `jac` command is your primary interface for working with Jac projects. It handles the full development lifecycle: running programs (`jac run`), type-checking code (`jac check`), running tests (`jac test`), formatting and linting (`jac format`, `jac lint`), managing dependencies (`jac add`, `jac install`), serving APIs (`jac start`), and even compiling to native binaries (`jac nacompile`). Think of it as combining the roles of `python`, `pip`, `pytest`, `black`, and `flask` into a single unified tool.
+
+The CLI is extensible through plugins. When you install plugins like `jac-scale` or `jac-client`, they add new commands and flags automatically -- for example, `jac start --scale` for Kubernetes deployment or `jac build --client desktop` for desktop app packaging.
 
 > **💡 Enhanced Output**: For beautiful, colorful terminal output with Rich formatting, install the optional `jac-super` plugin: `pip install jac-super`. All CLI commands will automatically use enhanced output with themes, panels, and spinners.
 
@@ -272,6 +274,15 @@ jac check myproject/ --ignore fixtures tests
 jac check . --ignore node_modules dist __pycache__
 ```
 
+Errors and warnings are displayed with structured diagnostic codes (e.g., `E1030`, `W2001`). You can suppress individual diagnostics inline with `# jac:ignore[CODE]`:
+
+<!-- jac-skip -->
+```jac
+x = some_func();  # jac:ignore[E1030]
+```
+
+See the full [Errors & Warnings](../diagnostics.md) reference for all diagnostic codes.
+
 ---
 
 ### jac test
@@ -298,11 +309,17 @@ jac test [-h] [-t TEST_NAME] [-f FILTER] [-x] [-m MAXFAIL] [-d DIRECTORY] [-v] [
 # Run all tests in a file
 jac test main.jac
 
+# Run a specific test - spaces in name (quoted)
+jac test main.jac -t "my test name"
+
+# Run a specific test - underscores in name
+jac test main.jac -t my_test_name
+
 # Run tests in directory
 jac test -d tests/
 
-# Run specific test
-jac test main.jac -t my_test
+# Run all tests in current directory
+jac test
 
 # Stop on first failure
 jac test main.jac -x
@@ -310,6 +327,14 @@ jac test main.jac -x
 # Verbose output
 jac test main.jac -v
 ```
+
+**Error handling:**
+
+| Mistake | Error shown |
+|---------|-------------|
+| `jac test --test_name foo` (no file or directory) | `--test_name requires a filepath` |
+| `jac test missing.jac` (file doesn't exist) | `File not found: 'missing.jac'` |
+| `jac test main.jac -t foo bar` (unquoted multi-word) | hint to use quotes |
 
 ---
 
@@ -345,6 +370,8 @@ jac format . --check
 ```
 
 > **Note**: For auto-linting (code corrections), use `jac lint --fix` instead. See [`jac lint`](#jac-lint) below.
+>
+> **Safety**: If the formatter detects that comments were displaced (e.g., moved to the end of the file), it emits error `E5051` and refuses to save the file. Run `jac format <file> -s` to inspect the output without writing.
 
 ---
 
@@ -378,7 +405,7 @@ jac lint .
 jac lint . --ignore fixtures
 ```
 
-> **Lint Rules**: Configure rules via [`[check.lint]`](../config/index.md#checklint) in `jac.toml`. All enabled rules are treated as errors.
+> **Lint Rules**: Configure rules via [`[check.lint]`](../config/index.md#checklint) in `jac.toml`. See [Lint Rules](../diagnostics.md#lint-rules-w3xxx--e3xxx) for the full list with diagnostic codes.
 
 ---
 

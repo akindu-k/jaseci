@@ -1,6 +1,6 @@
 # Frequently Asked Questions
 
-Common questions and answers. If you don't see your question below and couldn't find a solution in the docs, ask your question in our [Discord Community](https://discord.gg/6j3QNdtcN6) (We try to answer within 2hrs.)
+Answers to common questions about Jac, organized by topic. Click a category to expand it, then click a specific question to see the answer. If you don't see your question below and couldn't find a solution in the docs, ask your question in our [Discord Community](https://discord.gg/6j3QNdtcN6) (we try to answer within 2hrs).
 
 ---
 
@@ -39,7 +39,7 @@ Common questions and answers. If you don't see your question below and couldn't 
         Yes. Jac integrates seamlessly with Python libraries.
 
     ??? question "What's the learning curve coming from Python? How is Jac different from just using Python?"
-        Jac supersets Python -- you'll feel at home. Key differences:
+        Jac compiles to Python bytecode and shares familiar syntax -- you'll feel at home. Key differences:
 
         - Braces `{ }` instead of indentation
         - Semicolons `;` required

@@ -197,13 +197,12 @@ test "native layout tuple metadata for tokenize" {
     assert len(tl.element_types) == 2 , f"Expected 2 tuple elements, got {len(
         tl.element_types
     )}";
-    # Both elements should be List.ptr* (list of struct pointers)
+    # First element: list of Token structs, second element: i64 (error count)
     assert tl.element_types[0] == "List.ptr*" , f"Element 0: {tl.element_types[0]}";
-    assert tl.element_types[1] == "List.ptr*" , f"Element 1: {tl.element_types[1]}";
-    # Struct hints should identify Token and LexerError
-    assert tl.element_struct_hints[0] == "Token" , f"Hint 0: {tl.element_struct_hints[0]}";
-    assert tl.element_struct_hints[1] == "LexerError" , f"Hint 1: {tl.element_struct_hints[
-        1
+    assert tl.element_types[1] == "i64" , f"Element 1: {tl.element_types[1]}";
+    # Struct hint for first element should identify Token
+    assert tl.element_struct_hints[0] == "Token" , f"Hint 0: {tl.element_struct_hints[
+        0
     ]}";
 }
 
@@ -292,14 +291,14 @@ test "native tokenize returns correct tokens" {
     assert eng is not None;
     assert layout is not None;
 
-    # Call imported tokens module entry (init KEYWORDS dict) then lexer entry
-    tokens_entry_addr = eng.get_function_address("__jac_entry_tokens_na");
-    if tokens_entry_addr {
-        ct.CFUNCTYPE(None)(tokens_entry_addr)();
+    # Init globals: tokens module first (KEYWORDS dict), then lexer module
+    tokens_glob_addr = eng.get_function_address("__jac_glob_init_tokens_na");
+    if tokens_glob_addr {
+        ct.CFUNCTYPE(None)(tokens_glob_addr)();
     }
-    entry_addr = eng.get_function_address("jac_entry");
-    if entry_addr {
-        ct.CFUNCTYPE(None)(entry_addr)();
+    glob_init_addr = eng.get_function_address("__jac_glob_init");
+    if glob_init_addr {
+        ct.CFUNCTYPE(None)(glob_init_addr)();
     }
 
     ct_classes = build_ctypes_classes(layout);
@@ -314,8 +313,8 @@ test "native tokenize returns correct tokens" {
     result = wrapper("x = 1;", "test.jac");
     assert isinstance(result, tuple) , f"Expected tuple, got {type(result)}";
     assert len(result) == 2;
-    (tokens, errors) = result;
-    assert len(errors) == 0 , f"Unexpected errors: {errors}";
+    (tokens, error_count) = result;
+    assert error_count == 0 , f"Unexpected errors: {error_count}";
     # Expected tokens: NAME('x'), EQ('='), INT('1'), SEMI(';'), EOF('')
     assert len(tokens) >= 5 , f"Expected >= 5 tokens, got {len(tokens)}";
     # Check token values
@@ -344,13 +343,13 @@ test "native tokenize matches python lexer" {
     layout = ir.gen.native_layout;
     assert eng is not None;
 
-    tokens_entry_addr = eng.get_function_address("__jac_entry_tokens_na");
-    if tokens_entry_addr {
-        ct.CFUNCTYPE(None)(tokens_entry_addr)();
+    tokens_glob_addr = eng.get_function_address("__jac_glob_init_tokens_na");
+    if tokens_glob_addr {
+        ct.CFUNCTYPE(None)(tokens_glob_addr)();
     }
-    entry_addr = eng.get_function_address("jac_entry");
-    if entry_addr {
-        ct.CFUNCTYPE(None)(entry_addr)();
+    glob_init_addr = eng.get_function_address("__jac_glob_init");
+    if glob_init_addr {
+        ct.CFUNCTYPE(None)(glob_init_addr)();
     }
 
     ct_classes = build_ctypes_classes(layout);
@@ -396,13 +395,13 @@ test "native tokenize performance" {
     eng = ir.gen.native_engine;
     layout = ir.gen.native_layout;
 
-    tokens_entry_addr = eng.get_function_address("__jac_entry_tokens_na");
-    if tokens_entry_addr {
-        ct.CFUNCTYPE(None)(tokens_entry_addr)();
+    tokens_glob_addr = eng.get_function_address("__jac_glob_init_tokens_na");
+    if tokens_glob_addr {
+        ct.CFUNCTYPE(None)(tokens_glob_addr)();
     }
-    entry_addr = eng.get_function_address("jac_entry");
-    if entry_addr {
-        ct.CFUNCTYPE(None)(entry_addr)();
+    glob_init_addr = eng.get_function_address("__jac_glob_init");
+    if glob_init_addr {
+        ct.CFUNCTYPE(None)(glob_init_addr)();
     }
 
     ct_classes = build_ctypes_classes(layout);

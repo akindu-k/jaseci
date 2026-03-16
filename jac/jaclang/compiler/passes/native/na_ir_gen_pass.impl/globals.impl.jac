@@ -1,20 +1,9 @@
 """Global variable and enum registration for native compilation."""
 """Walk the module and register all native global variables."""
 impl NaIRGenPass._register_globals(module: uni.Module) -> None {
-    for stmt in module.body {
-        if isinstance(stmt, uni.NativeBlock) {
-            for inner in stmt.body {
-                if isinstance(inner, uni.GlobalVars) {
-                    self._codegen_global_vars(inner);
-                }
-            }
-        } elif isinstance(stmt, uni.GlobalVars) {
-            if (
-                isinstance(stmt, uni.ContextAwareNode)
-                and stmt.code_context == CodeContext.NATIVE
-            ) {
-                self._codegen_global_vars(stmt);
-            }
+    for stmt in ModuleCodegenPass.iter_context_stmts(module, CodeContext.NATIVE) {
+        if isinstance(stmt, uni.GlobalVars) {
+            self._codegen_global_vars(stmt);
         }
     }
 }
@@ -34,6 +23,9 @@ impl NaIRGenPass._codegen_global_vars(nd: uni.GlobalVars) -> None {
             var_type: ir.Type = ir.IntType(64);  # Default to i64
             if assign.type_tag and assign.type_tag.tag {
                 var_type = self._resolve_jac_type(assign.type_tag.tag);
+                # Track type annotation node for chained subscript+field access
+                # e.g. TABLE[i].field chains need the list[T] node to bitcast
+                self.var_type_node[var_name] = assign.type_tag.tag;
             } elif assign.value is not None {
                 # Infer type from initializer (e.g., glob game = Game())
                 inferred = self._infer_global_init_type(assign.value);
@@ -43,7 +35,7 @@ impl NaIRGenPass._codegen_global_vars(nd: uni.GlobalVars) -> None {
             }
             # Create LLVM global variable
             global_var = ir.GlobalVariable(self.llvm_module, var_type, name=var_name);
-            global_var.linkage = "internal";
+            global_var.linkage = "";
             # Try compile-time constant initialization for simple values
             const_init = self._codegen_const_expr(assign.value, var_type)
                 if assign.value is not None
@@ -140,20 +132,9 @@ impl NaIRGenPass._codegen_const_expr(
 
 """Walk the module and register all native enum types."""
 impl NaIRGenPass._register_enums(module: uni.Module) -> None {
-    for stmt in module.body {
-        if isinstance(stmt, uni.NativeBlock) {
-            for inner in stmt.body {
-                if isinstance(inner, uni.Enum) {
-                    self._codegen_enum(inner);
-                }
-            }
-        } elif isinstance(stmt, uni.Enum) {
-            if (
-                isinstance(stmt, uni.ContextAwareNode)
-                and stmt.code_context == CodeContext.NATIVE
-            ) {
-                self._codegen_enum(stmt);
-            }
+    for stmt in ModuleCodegenPass.iter_context_stmts(module, CodeContext.NATIVE) {
+        if isinstance(stmt, uni.Enum) {
+            self._codegen_enum(stmt);
         }
     }
 }

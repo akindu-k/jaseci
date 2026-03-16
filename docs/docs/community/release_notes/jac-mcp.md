@@ -1,11 +1,22 @@
 # jac-mcp Release Notes
 
-## jac-mcp 0.1.3 (Unreleased)
+## jac-mcp 0.1.6 (Unreleased)
+
+- **Fix SSE transport method issue**
+
+## jac-mcp 0.1.5 (Latest Release)
+
+## jac-mcp 0.1.4
+
+- **Fix streamable HTTP transport method issue**: Refactors the server initialization logic for the `streamable-http` transport method.
+- 1 small change/refactor.
+
+## jac-mcp 0.1.3
 
 - **Updated token definitions path**: Grammar resource now references `tokens.na.jac` (renamed from `tokens.jac`)
 - **Added backtick escaping pitfall**: New section documenting when keywords need backtick escaping and clarifying that special variable references (`self`, `super`, `root`, `here`, `visitor`, `init`, `postinit`) are used directly without backticks
 
-## jac-mcp 0.1.2 (Latest Release)
+## jac-mcp 0.1.2
 
 - **Compiler-validated MCP content**: Cross-validated all code snippets in pitfalls.md and patterns.md against the Jac compiler, fixing critical issues where the server was teaching syntax the compiler rejects
 - **Fixed `can` vs `def` guidance**: `can` is only for event-driven abilities (`can X with Y entry`); `def` is correct for regular methods. Updated pitfalls, patterns, and SERVER_INSTRUCTIONS accordingly

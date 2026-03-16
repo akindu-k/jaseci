@@ -1,6 +1,6 @@
 # Jac vs Traditional Stack: A Side-by-Side Comparison
 
-This document compares building the same Todo application using Jac versus a traditional Python + FastAPI + SQLite + TypeScript + React stack.
+A traditional full-stack web application requires separate projects, frameworks, and glue code -- a Python backend, a React frontend, an ORM, API route definitions, and serialization logic. In Jac, you write all of this in a single file: nodes are your data model, walkers are your API endpoints, and `cl { }` blocks are your UI components. This comparison builds the same Todo app both ways so you can see the difference.
 
 ---
 
@@ -19,7 +19,7 @@ def:pub get_todos -> list {
         Todo("raise funding", False),
         Todo("change the world", False)
     ];
-    return [{"title": t.title, "done": t.done} for t in [root-->](?:Todo)];
+    return [{"title": t.title, "done": t.done} for t in [root-->][?:Todo]];
 }
 
 cl def:pub app() -> JsxElement {

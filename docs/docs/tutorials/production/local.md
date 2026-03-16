@@ -1,6 +1,8 @@
 # Local API Server
 
-Run your Jac walkers as a production-ready HTTP API server.
+During development, `jac run` executes your program and exits. But production applications need to stay running and respond to HTTP requests from browsers, mobile apps, or other services. The `jac start` command transforms your Jac application into a persistent API server -- every walker and function marked with `:pub` or `:priv` access modifiers automatically becomes a REST endpoint, complete with authentication, JSON serialization, and API documentation.
+
+This means you go from "Jac program that runs locally" to "HTTP API server that clients can call" with a single command change -- no Flask routes, no Express middleware, no API framework needed.
 
 > **Prerequisites**
 >
@@ -11,7 +13,7 @@ Run your Jac walkers as a production-ready HTTP API server.
 
 ## Overview
 
-The `jac start` command turns your walkers into REST API endpoints automatically:
+The `jac start` command turns your walkers and functions into REST API endpoints automatically:
 
 ```mermaid
 graph LR
@@ -35,7 +37,7 @@ node Task {
 
 walker:pub get_tasks {
     can fetch with Root entry {
-        tasks = [-->](?:Task);
+        tasks = [-->][?:Task];
         report [{"id": t.id, "title": t.title, "done": t.done} for t in tasks];
     }
 }
@@ -157,7 +159,7 @@ walker:pub get_user {
     has user_id: str;
 
     can fetch with Root entry {
-        for user in [-->](?:User) {
+        for user in [-->][?:User] {
             if user.id == self.user_id {
                 report {
                     "id": user.id,
@@ -228,8 +230,8 @@ import json;
 walker save_state {
     can save with Root entry {
         data = {
-            "users": [u.__dict__ for u in [-->](?:User)],
-            "posts": [p.__dict__ for p in [-->](?:Post)]
+            "users": [u.__dict__ for u in [-->][?:User]],
+            "posts": [p.__dict__ for p in [-->][?:Post]]
         };
 
         with open("state.json", "w") as f {
@@ -387,7 +389,7 @@ node User {
 # List all users
 walker:pub list_users {
     can fetch with Root entry {
-        users = [-->](?:User);
+        users = [-->][?:User];
         report [{
             "id": u.id,
             "name": u.name,
@@ -401,7 +403,7 @@ walker:pub get_user {
     has user_id: str;
 
     can fetch with Root entry {
-        for u in [-->](?:User) {
+        for u in [-->][?:User] {
             if u.id == self.user_id {
                 report {
                     "id": u.id,
@@ -440,7 +442,7 @@ walker:pub update_user {
     has email: str = "";
 
     can update with Root entry {
-        for u in [-->](?:User) {
+        for u in [-->][?:User] {
             if u.id == self.user_id {
                 if self.name { u.name = self.name; }
                 if self.email { u.email = self.email; }
@@ -457,7 +459,7 @@ walker:pub delete_user {
     has user_id: str;
 
     can remove with Root entry {
-        for u in [-->](?:User) {
+        for u in [-->][?:User] {
             if u.id == self.user_id {
                 del u;
                 report {"deleted": True};

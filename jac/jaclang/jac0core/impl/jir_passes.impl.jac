@@ -157,7 +157,7 @@ impl JirWriter._write_node(buf: bytearray, ir_node: UniNode) -> None {
         non_empty = {
             k: v
             for (k, v) in overload_map.items()
-            if len(v) > 1
+            if v  # Preserve any overloads (was: len(v) > 1, which dropped single overloads)
         };
         _write_varint(buf, len(non_empty));
         for (sym_name, sym_list) in non_empty.items() {
@@ -363,9 +363,7 @@ impl JirWriter._count_symbols(module: Module) -> int {
 impl JirReader.read_module(data: bytes) -> (Module | None) {
     import from jaclang.jac0core.jir { HEADER_FMT, HEADER_SIZE, MAGIC, FORMAT_VERSION }
     try {
-        from
-        importlib.metadata
-        import version as _pkg_version;
+        import from importlib.metadata { version as _pkg_version }
         _current_jac_hash = zlib.crc32(_pkg_version('jaclang').encode()) & 0xFFFFFFFF;
     } except Exception {
         _current_jac_hash = 0;

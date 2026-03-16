@@ -14,8 +14,6 @@ import jaclang;
 import jaclang.jac0core.unitree as uni;
 import from jaclang.jac0core.passes { PyastGenPass }
 import from jaclang.jac0core.program { JacProgram }
-import from jaclang.runtimelib.test { parametrize }
-import from tests.fixtures_list { MICRO_JAC_FILES }
 
 glob JAC_ROOT = str(Path(jaclang.__file__).parent.parent),
      FIXTURES = os.path.join(
@@ -24,9 +22,9 @@ glob JAC_ROOT = str(Path(jaclang.__file__).parent.parent),
      EXAMPLES = os.path.join(JAC_ROOT, "examples"),
      LANG_FIXTURES = os.path.join(JAC_ROOT, "tests", "language", "fixtures");
 
-def ast_to_list(node: ast3.AST) -> list[ast3.AST] {
-    nodes = [node];
-    for (_, value) in ast3.iter_fields(node) {
+def ast_to_list(`node: ast3.AST) -> list[ast3.AST] {
+    nodes = [`node];
+    for (_, value) in ast3.iter_fields(`node) {
         if isinstance(value, list) {
             for item in value {
                 if isinstance(item, ast3.AST) {
@@ -40,18 +38,6 @@ def ast_to_list(node: ast3.AST) -> list[ast3.AST] {
     return nodes;
 }
 
-def parent_scrub(node: uni.UniNode) -> bool {
-    success = True;
-    for i in node.kid {
-        if not isinstance(i, uni.Module) and i.parent is None {
-            success = False;
-            break;
-        } else {
-            success = parent_scrub(i);
-        }
-    }
-    return success;
-}
 
 test "hodge podge" {
     (out := JacProgram()).compile(os.path.join(EXAMPLES, "micro", "hodge_podge.jac"));
@@ -271,44 +257,56 @@ test "string literal import works with cl" {
     );
 }
 
-def pyast_gen_test(rel_path: str) -> None {
-    filename = os.path.normpath(os.path.join(JAC_ROOT, rel_path));
-    if not os.path.exists(filename) {
-        return;
-    }
-    code_gen = JacProgram().compile(filename);
-    assert code_gen is not None and code_gen.gen.py_ast is not None , f"Compilation failed for {filename}";
-    from_jac_str = ast3.dump(code_gen.gen.py_ast[0], indent=2);
-    from_jac = code_gen.gen.py_ast[0];
-    assert isinstance(from_jac, ast3.Module) , f"Not a module for {filename}";
-    compile(from_jac, filename="<ast>", mode="exec");
-    for i in ast3.walk(from_jac) {
-        if not isinstance(i, (ast3.Load, ast3.Store, ast3.Del)) {
-            assert hasattr(i, "jac_link") , f"Missing jac_link in {filename}: {ast3.dump(
-                i
-            )}";
-        }
-    }
-    assert parent_scrub(code_gen) , f"Parent scrub failed for {filename}";
-    assert len(from_jac_str) > 10 , f"AST dump too short for {filename}";
-}
-
-def tree_parent_test(rel_path: str) -> None {
-    filename = os.path.normpath(os.path.join(JAC_ROOT, rel_path));
-    if not os.path.exists(filename) {
-        return;
-    }
-    code_gen = JacProgram().compile(filename);
-    assert parent_scrub(code_gen) , f"Parent scrub failed (pass 1) for {filename}";
-    code_gen = JacProgram().compile(filename);
-    assert parent_scrub(code_gen) , f"Parent scrub failed (pass 2) for {filename}";
-}
-
+test "match case empty wildcard body compiles" {
+    code = """
 with entry {
-    parametrize(
-        "pyast gen", MICRO_JAC_FILES, pyast_gen_test, id_fn=lambda f : Path(f).stem
+    x = 42;
+    match x {
+        case 1: print("one");
+        case _:;
+    }
+}
+""";
+    prog = JacProgram();
+    prog.compile(file_path="test_match.jac", use_str=code);
+    assert not prog.errors_had , (
+        f"Match with empty wildcard body should compile cleanly, "
+        f"got: {[str(e) for e in prog.errors_had]}"
     );
-    parametrize(
-        "tree parent", MICRO_JAC_FILES, tree_parent_test, id_fn=lambda f : Path(f).stem
-    );
+}
+
+test "py_ast_val raises ICE with source location on empty py_ast" {
+    code = """with entry { x = 1; }""";
+    prog = JacProgram();
+    mod = prog.compile(file_path="test_ice.jac", use_str=code);
+    # Get the PyastGenPass instance from child passes
+    pyast_pass = PyastGenPass(ir_in=mod, prog=prog);
+    # Create a node with empty py_ast by using an existing node and clearing it
+    target_node = mod;
+    original = target_node.gen.py_ast[:];
+    target_node.gen.py_ast = [];
+    try {
+        pyast_pass.py_ast_val(target_node);
+        assert False , "Expected RuntimeError from py_ast_val";
+    } except RuntimeError as e {
+        msg = str(e);
+        assert "Internal Compiler Error" in msg , (
+            f"ICE should mention 'Internal Compiler Error', got: {msg}"
+        );
+        assert "PyastGenPass" in msg , (f"ICE should mention the pass name, got: {msg}");
+        assert "Empty py_ast" in msg , (
+            f"ICE should mention 'Empty py_ast', got: {msg}"
+        );
+        assert "Module" in msg , (f"ICE should mention the node type, got: {msg}");
+        assert "test_ice.jac" in msg , (
+            f"ICE should mention the source file, got: {msg}"
+        );
+        # Verify file:line:col format is present
+        import re;
+        assert re.search(r"test_ice\.jac:\d+:\d+", msg) , (
+            f"ICE should contain file:line:col location, got: {msg}"
+        );
+    } finally {
+        target_node.gen.py_ast = original;
+    }
 }

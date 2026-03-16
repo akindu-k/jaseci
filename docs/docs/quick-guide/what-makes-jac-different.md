@@ -1,6 +1,6 @@
 # Core Concepts
 
-Most of Jac will be recognizable if you are familiar with another programming language like Python -- Jac supersets Python, so familiar constructs like functions, classes, imports, list comprehensions, and control flow all work as expected. You can explore those in depth in the [language reference](../reference/language/foundation.md).
+Most of Jac will be recognizable if you are familiar with another programming language like Python -- Jac compiles to Python bytecode and shares many of its constructs, so functions, classes, imports, list comprehensions, and control flow all work as expected. You can explore those in depth in the [language reference](../reference/language/foundation.md).
 
 This page focuses on the three concepts that Jac adds beyond traditional programming languages. These are the ideas the rest of the documentation builds on, introduced briefly so you have the vocabulary for the tutorials that follow. Through these concepts three important questions can be answered:
 
@@ -76,6 +76,11 @@ The server definitions are visible to the `cl` block. When the client calls `add
 
 Codespaces are similar to namespaces, but instead of organizing names, they organize where code executes. Interop between them -- function calls, spawn calls, type sharing -- is handled by the compiler and runtime.
 
+!!! note "`obj` vs `class` -- choosing the right archetype"
+    Cross-codespace interop requires the compiler to fully understand your type's structure. Jac's `obj` is designed for this: it enforces strict, declarative semantics -- fields declared with `has`, auto-generated constructors, no runtime monkey-patching -- so the same definition can compile to Python, JavaScript, or native code.
+
+    If you need Python-specific class features like metaclasses, `@classmethod`, `@property`, or other decorator-heavy patterns, use a regular Python `class`. Those features are inherently tied to the Python runtime and cannot cross codespace boundaries. Jac provides the `static` keyword for static methods and fields, which covers the most common use case.
+
 ---
 
 ## 2. How does Jac fully abstract away database organization and interactions and the complexity of multiuser persistent data?
@@ -115,7 +120,7 @@ When your app serves multiple users, each user gets their **own isolated `root`*
 
 ### Querying the graph
 
-The `[-->]` syntax gives you a list of connected nodes, and Jac's filter comprehensions `(?...)` let you narrow the results:
+The `[-->]` syntax gives you a list of connected nodes, and Jac's filter comprehensions `[?...]` let you narrow the results:
 
 ```jac
 with entry {
@@ -123,10 +128,10 @@ with entry {
     everything = [root-->];
 
     # Filter by node type
-    tasks = [root-->](?:Task);
+    tasks = [root-->][?:Task];
 
     # Filter by field value
-    pending = [root-->](?:Task, done == False);
+    pending = [root-->][?:Task, done == False];
 }
 ```
 
@@ -142,7 +147,7 @@ with entry {
     root +>: Scheduled(time="9:00am", priority=3) :+> Task(title="Morning run");
 
     # Query through typed edges
-    urgent = [root->:Scheduled:priority>=3:->](?:Task);
+    urgent = [root->:Scheduled:priority>=3:->][?:Task];
 }
 ```
 

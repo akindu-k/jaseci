@@ -1,5 +1,7 @@
 # Appendices
 
+Use these appendices when you need to look up a specific keyword, operator, or syntax rule. You'll also find a migration guide for Python developers and a provider configuration reference for byLLM.
+
 **In this part:**
 
 - [Appendix A: Complete Keyword Reference](#appendix-a-complete-keyword-reference) - All keywords
@@ -73,6 +75,7 @@
 | `return` | Statement | Return value |
 | `root` | OSP | Root node reference |
 | `self` | Reference | Current instance |
+| `Self` | Type | Enclosing archetype type (used in `class def` and type annotations) |
 | `sem` | Declaration | Semantic string |
 | `skip` | Control | Skip (nested context) |
 | `spawn` | OSP | Spawn walker |
@@ -95,7 +98,7 @@
 - The abstract keyword is `abs`, not `abstract`
 - Logical operators have both word and symbol forms: `and`/`&&`, `or`/`||`
 - `cl`, `sv`, and `na` are block keywords for client/server/native code separation
-- **Special variable references** (`self`, `super`, `root`, `here`, `visitor`, `init`, `postinit`) are used directly without backtick escaping -- they are built-in references, not identifiers. Only use backtick escaping when repurposing other keywords as regular identifiers (e.g., `` `type `` as a field name).
+- **Special variable references** (`self`, `Self`, `super`, `root`, `here`, `visitor`, `init`, `postinit`) are used directly without backtick escaping -- they are built-in references, not identifiers. `self` refers to the current instance; `Self` refers to the enclosing type (see [Class Methods](../language/functions-objects.md#6-static-methods-and-class-methods)). Only use backtick escaping when repurposing other keywords as regular identifiers (e.g., `` `type `` as a field name).
 
 ---
 

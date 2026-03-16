@@ -1,6 +1,8 @@
 # jac-client Reference
 
-Complete reference for jac-client, the full-stack web development plugin for Jac.
+jac-client adds client-side compilation to Jac so you can write React-style UI components using `cl { }` blocks or `.cl.jac` files. The compiler separates your code automatically -- server-side logic compiles to Python, while client-side components compile to JavaScript with React as the rendering engine.
+
+You also get project scaffolding (`jac create --use client`), npm dependency management, a Vite-powered dev server with HMR, and automatic HTTP bridge generation so your client components can call server walkers without manual API wiring. This reference covers installation, project structure, the module system, component authoring, and build configuration.
 
 ---
 
@@ -134,7 +136,7 @@ Public walkers automatically become REST endpoints:
 ```jac
 walker:pub GetUsers {
     can get with Root entry {
-        users = [-->](?:User);
+        users = [-->][?:User];
         report users;
     }
 }
@@ -892,7 +894,7 @@ Each authenticated user gets an isolated root node:
 walker:pub GetMyData {
     can get with Root entry {
         # 'root' is user-specific
-        my_data = [-->](?:MyData);
+        my_data = [-->][?:MyData];
         report my_data;
     }
 }
@@ -1202,6 +1204,8 @@ npm dependencies can also be declared in `jac.toml`:
 lodash = "^4.17.21"
 axios = "^1.6.0"
 ```
+
+**Core Dependencies**: The `jac-client-node` and `@jac-client/dev-deps` packages are required for all jac-client projects. If missing or outdated in `jac.toml`, they are automatically added or updated when the config is loaded (e.g., during `jac start`).
 
 For private packages from custom registries, see [NPM Registry Configuration](#npm-registry-configuration) above.
 

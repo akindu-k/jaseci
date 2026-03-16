@@ -1,6 +1,8 @@
 # Configuration Reference
 
-The `jac.toml` file is the central configuration for Jac projects. It defines project metadata, dependencies, command defaults, and plugin settings.
+The `jac.toml` file is the central configuration for Jac projects -- similar to `pyproject.toml` in Python or `package.json` in Node.js. It defines project metadata (name, version, entry point), manages dependencies (both PyPI and npm packages), sets defaults for CLI commands (test verbosity, server port, lint rules), configures plugins (LLM models, deployment targets), and supports environment-specific profiles (development vs. production).
+
+You typically don't need to edit `jac.toml` manually for basic projects. The `jac create` command generates one with sensible defaults, and commands like `jac add` and `jac config set` modify it for you. But understanding the full configuration surface is valuable when you need to customize build behavior, configure LLM providers, set up lint rules, or manage deployment settings.
 
 ## Creating a Project
 
@@ -218,20 +220,22 @@ select = ["combine-has", "remove-empty-parens"]
 
 **Available lint rules:**
 
-| Rule Name | Description | Group |
-|-----------|-------------|-------|
-| `combine-has` | Combine consecutive `has` statements with same modifiers | default |
-| `combine-glob` | Combine consecutive `glob` statements with same modifiers | default |
-| `staticmethod-to-static` | Convert `@staticmethod` decorator to `static` keyword | default |
-| `init-to-can` | Convert `def __init__` / `def __post_init__` to `can init` / `can postinit` | default |
-| `remove-empty-parens` | Remove empty parentheses from declarations (`def foo()` → `def foo`) | default |
-| `remove-kwesc` | Remove unnecessary backtick escaping from non-keyword names | default |
-| `hasattr-to-null-ok` | Convert `hasattr(obj, "attr")` to null-safe access (`obj?.attr`) | default |
-| `simplify-ternary` | Simplify `x if x else default` to `x or default` | default |
-| `remove-future-annotations` | Remove `import from __future__ { annotations }` (not needed in Jac) | default |
-| `fix-impl-signature` | Fix signature mismatches between declarations and implementations | default |
-| `remove-import-semi` | Remove trailing semicolons from `import from X { ... }` | default |
-| `no-print` | Error on bare `print()` calls (use console abstraction instead) | all |
+| Rule Name | Code | Description | Group |
+|-----------|------|-------------|-------|
+| `staticmethod-to-static` | `W3001` | Convert `@staticmethod` decorator to `static` keyword | default |
+| `combine-has` | `W3002` | Combine consecutive `has` statements with same modifiers | default |
+| `combine-glob` | `W3003` | Combine consecutive `glob` statements with same modifiers | default |
+| `init-to-can` | `W3004` | Convert `def __init__` / `def __post_init__` to `can init` / `can postinit` | default |
+| `remove-empty-parens` | `W3005` | Remove empty parentheses from declarations (`def foo()` → `def foo`) | default |
+| `remove-kwesc` | `W3006` | Remove unnecessary backtick escaping from non-keyword names | default |
+| `hasattr-to-null-ok` | `W3007` | Convert `hasattr(obj, "attr")` to null-safe access (`obj?.attr`) | default |
+| `simplify-ternary` | `W3008` | Simplify `x if x else default` to `x or default` | default |
+| `remove-future-annotations` | `W3009` | Remove `import from __future__ { annotations }` (not needed in Jac) | default |
+| `fix-impl-signature` | `W3010` | Fix signature mismatches between declarations and implementations | default |
+| `remove-import-semi` | `W3011` | Remove trailing semicolons from `import from X { ... }` | default |
+| `no-print` | `E3012` | Error on bare `print()` calls (use console abstraction instead) | all |
+
+Diagnostic codes can be suppressed inline with `# jac:ignore[CODE]` comments. See the full [Errors & Warnings](../diagnostics.md) reference for all diagnostic codes.
 
 **Excluding files from lint:**
 

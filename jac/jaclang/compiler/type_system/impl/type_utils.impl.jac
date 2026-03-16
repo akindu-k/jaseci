@@ -2,23 +2,43 @@
 
 This checks if a class has all the methods required by a protocol,
 including methods inherited from base classes via MRO.
-When an evaluator is provided, method signatures are compared using
-resolved types (via get_type_of_ability and _assign_callable), which
-handles complex types like generics, unions, and aliases correctly.
+
+Uses symbol table lookup to properly handle stub file classes where AST
+parent relationships may not be set correctly. When an evaluator is provided,
+method signatures are compared using resolved types (via get_type_of_ability
+and _assign_callable), which handles complex types like generics, unions, and
+aliases correctly.
 """
 impl class_implements_protocol(
     cls: types.ClassType, proto: types.ClassType, evaluator: Any = None
 ) -> bool {
-    proto_ast: uni.Archetype = proto.shared.symbol_table;
-    proto_methods = {method.sym_name: method for method in proto_ast.get_methods()};
+    # Get protocol methods from symbol table (handles stubs where get_methods() may fail)
+    proto_methods: dict[str, Any] = {};
+    proto_symtab = proto.shared.symbol_table;
+    if isinstance(proto_symtab, uni.UniScopeNode) {
+        for (name, sym) in proto_symtab.names_in_scope.items() {
+            # Include methods (Ability nodes) but skip special attributes
+            if sym.decl and isinstance(sym.decl.name_of, uni.Ability) {
+                proto_methods[name] = sym.decl.name_of;
+            }
+        }
+    }
+
+    # If no protocol methods found, protocol is trivially satisfied
+    if not proto_methods {
+        return True;
+    }
 
     # Collect methods from the class and all its MRO classes (first found wins)
     cls_methods: dict[str, Any] = {};
     for mro_cls in cls.shared.mro {
-        if isinstance(mro_cls.shared.symbol_table, uni.Archetype) {
-            for method in mro_cls.shared.symbol_table.get_methods() {
-                if method.sym_name not in cls_methods {
-                    cls_methods[method.sym_name] = method;
+        mro_symtab = mro_cls.shared.symbol_table;
+        if isinstance(mro_symtab, uni.UniScopeNode) {
+            for (name, sym) in mro_symtab.names_in_scope.items() {
+                if sym.decl and isinstance(sym.decl.name_of, uni.Ability) {
+                    if name not in cls_methods {
+                        cls_methods[name] = sym.decl.name_of;
+                    }
                 }
             }
         }
@@ -339,4 +359,324 @@ impl compute_mro_linearization(cls: types.ClassType) -> None {
         linearizations = new_linearizations;
     }
     cls.shared.mro = result;
+}
+
+"""
+Compute module source flags from file path.
+
+Similar to Pyright's SourceFileInfo which computes _isStubFile, _isTypingStubFile,
+_isTypeshedStubFile, _isBuiltInStubFile based on the file URI.
+
+These flags help determine how to handle types from the module:
+- is_stub_file: True for .pyi files (type stubs)
+- is_stdlib_stub: True for files from vendor/typeshed/stdlib/
+- is_typing_stub: True for typing.pyi or typing_extensions.pyi
+- is_builtin_stub: True for core builtin stubs (builtins.pyi, abc.pyi, etc.)
+"""
+impl compute_module_source_flags(file_path: str) -> ModuleSourceFlags {
+    flags = ModuleSourceFlags();
+
+    # Check if it's a stub file (.pyi)
+    flags.is_stub_file = file_path.endswith(".pyi");
+
+    if not flags.is_stub_file {
+        return flags;
+    }
+
+    # Check if it's from stdlib (vendor/typeshed/stdlib/)
+    # Normalize path separators for cross-platform compatibility
+    normalized_path = file_path.replace("\\", "/");
+    flags.is_stdlib_stub = "vendor/typeshed/stdlib/" in normalized_path;
+
+    # Check if it's a typing stub
+    # Similar to Pyright: _isTypingStubFile for typing.pyi and typing_extensions.pyi
+    if normalized_path.endswith("stdlib/typing.pyi")
+    or normalized_path.endswith("typing_extensions.pyi") {
+        flags.is_typing_stub = True;
+    }
+
+    # Check if it's a builtin stub (core Python stubs)
+    # Similar to Pyright's _isBuiltInStubFile list
+    if (
+        normalized_path.endswith("stdlib/builtins.pyi")
+        or normalized_path.endswith("stdlib/abc.pyi")
+        or normalized_path.endswith("stdlib/collections/__init__.pyi")
+        or normalized_path.endswith("stdlib/asyncio/futures.pyi")
+        or normalized_path.endswith("stdlib/asyncio/tasks.pyi")
+        or normalized_path.endswith("stdlib/dataclasses.pyi")
+        or normalized_path.endswith("stdlib/enum.pyi")
+        or normalized_path.endswith("stdlib/types.pyi")
+        or normalized_path.endswith("stdlib/typing.pyi")
+        or normalized_path.endswith("stdlib/_typeshed/__init__.pyi")
+    ) {
+        flags.is_builtin_stub = True;
+    }
+
+    return flags;
+}
+
+# -------------------------------------------------------------------------
+# Type specialization utilities (Pyright: typeUtils.ts)
+# -------------------------------------------------------------------------
+"""
+Convert a type to its instance form. (Pyright: convertToInstance)
+"""
+impl convert_to_instance(ty: types.TypeBase) -> types.TypeBase {
+    if ty.is_instantiable_class() {
+        assert isinstance(ty, types.ClassType);
+        return ty.clone_as_instance();
+    }
+    # Handle UnionType: convert each member type to instance form
+    if isinstance(ty, types.UnionType) {
+        converted = [convert_to_instance(t) for t in ty.types];
+        return types.UnionType(types=converted);
+    }
+    return ty;
+}
+
+"""
+Apply type variable substitutions to a type.
+
+This is the unified function for TypeVar substitution. Handles all cases:
+- Direct TypeVarType -> lookup in solution
+- Self type -> class_type instance
+- Nested TypeVars in ClassType
+- UnionType -> specialize each member
+- FunctionType -> specialize parameters and return type
+"""
+impl apply_solved_type_vars(
+    ty: types.TypeBase,
+    solution: dict[str, types.TypeBase],
+    class_type: (types.ClassType | None) = None
+) -> types.TypeBase {
+    # Case 1: Direct TypeVar replacement
+    if isinstance(ty, types.TypeVarType) {
+        # Self TypeVar -> class_type instance (Pyright: isSynthesizedSelf)
+        if ty.is_self and class_type is not None {
+            return class_type.clone_as_instance();
+        }
+        # Regular TypeVar -> lookup in solution by name
+        if ty.name and ty.name in solution {
+            resolved = solution[ty.name];
+            return convert_to_instance(resolved);
+        }
+        # TypeVar not in solution -> check class type_args by index
+        if class_type is not None and ty.name {
+            for (idx, tp) in enumerate(class_type.shared.type_params) {
+                if tp.name == ty.name {
+                    if idx < len(class_type.private.type_args) {
+                        resolved = class_type.private.type_args[idx];
+                        return convert_to_instance(resolved);
+                    } else {
+                        # TypeVar found but no type_arg available -> Unknown
+                        return types.UnknownType();
+                    }
+                }
+            }
+        }
+        # TypeVar not resolved -> return as is
+        return ty;
+    }
+
+    # Case 2: FunctionType -> specialize parameters and return type
+    if isinstance(ty, types.FunctionType) {
+        return _apply_to_function(ty, solution, class_type);
+    }
+
+    # Case 3: ClassType with type_args -> recursively specialize nested TypeVars
+    if isinstance(ty, types.ClassType) and ty.private.type_args {
+        new_args: list[types.TypeBase] = [];
+        any_changed = False;
+        for type_arg in ty.private.type_args {
+            specialized = apply_solved_type_vars(type_arg, solution, class_type);
+            new_args.append(specialized);
+            if specialized is not type_arg {
+                any_changed = True;
+            }
+        }
+        if any_changed {
+            return ty.specialize_generics(new_args);
+        }
+    }
+
+    # Case 4: UnionType -> specialize each member
+    if isinstance(ty, types.UnionType) {
+        new_types = [apply_solved_type_vars(t, solution, class_type) for t in ty.types];
+        return types.UnionType(types=new_types);
+    }
+
+    return ty;
+}
+
+"""
+Resolve the concrete type args that src supplies to target_base through the MRO.
+
+Walks the inheritance chain, accumulating TypeVar bindings through intermediate
+classes so that multi-level generic inheritance is properly resolved.
+"""
+impl resolve_type_args_for_base(
+    src: types.ClassType, target_base: types.ClassType
+) -> list[types.TypeBase] {
+    # Direct match: same class, return its type_args directly
+    if src.shared == target_base.shared {
+        return src.private.type_args if src.private else [];
+    }
+
+    # Quick check: is target_base even in src's MRO?
+    found_in_mro = False;
+    for mro_cls in src.shared.mro {
+        if mro_cls.shared == target_base.shared {
+            found_in_mro = True;
+            break;
+        }
+    }
+    if not found_in_mro {
+        return [];
+    }
+
+    # Build cumulative TypeVar solution by walking the MRO.
+    # Start with src's own type_params -> type_args mapping.
+    solution: dict[str, types.TypeBase] = {};
+    if src.shared.type_params and src.private and src.private.type_args {
+        for (idx, tp) in enumerate(src.shared.type_params) {
+            if tp.name and idx < len(src.private.type_args) {
+                solution[tp.name] = src.private.type_args[idx];
+            }
+        }
+    }
+
+    # Walk the MRO (which includes src itself as first entry).
+    # For each class in the MRO, if it has type_params and type_args,
+    # resolve the type_args using the current solution and add new bindings.
+    for mro_cls in src.shared.mro {
+        if mro_cls.shared.type_params
+        and mro_cls.private
+        and mro_cls.private.type_args {
+            for (idx, tp) in enumerate(mro_cls.shared.type_params) {
+                if tp.name and idx < len(mro_cls.private.type_args) {
+                    arg = mro_cls.private.type_args[idx];
+                    # Resolve any TypeVars in this arg using accumulated solution
+                    resolved = apply_solved_type_vars(arg, solution);
+                    solution[tp.name] = resolved;
+                }
+            }
+        }
+
+        # When we reach the target base, extract its type_args with full substitution
+        if mro_cls.shared == target_base.shared {
+            if mro_cls.private and mro_cls.private.type_args {
+                return [
+                    apply_solved_type_vars(arg, solution)
+                    for arg in mro_cls.private.type_args
+                ];
+            }
+            # MRO entry has no type_args — try to resolve target's type_params
+            # from accumulated solution (handles cases like class Foo(Bar[T]))
+            if target_base.shared.type_params {
+                result: list[types.TypeBase] = [];
+                for tp in target_base.shared.type_params {
+                    if tp.name and tp.name in solution {
+                        result.append(solution[tp.name]);
+                    } else {
+                        result.append(types.UnknownType());
+                    }
+                }
+                # Only return if we resolved at least one param
+                if any(not isinstance(r, types.UnknownType) for r in result) {
+                    return result;
+                }
+            }
+            return [];
+        }
+    }
+    return [];
+}
+
+"""
+Build a cumulative TypeVar name -> concrete type mapping for a specialized class.
+
+Walks the MRO accumulating bindings so that inherited TypeVars are resolved
+transitively. For example, if Box[int] extends Container[T] and Container[T]
+declares get() -> T, then build_type_var_solution(Box[int]) yields {U: int, T: int}.
+"""
+impl build_type_var_solution(class_type: types.ClassType) -> dict[str, types.TypeBase] {
+    solution: dict[str, types.TypeBase] = {};
+
+    # Start with the class's own type_params -> type_args
+    if class_type.shared.type_params
+    and class_type.private
+    and class_type.private.type_args {
+        for (idx, tp) in enumerate(class_type.shared.type_params) {
+            if tp.name and idx < len(class_type.private.type_args) {
+                solution[tp.name] = class_type.private.type_args[idx];
+            }
+        }
+    }
+
+    # Walk MRO and accumulate base class TypeVar mappings.
+    # Only add NEW bindings — never overwrite a concrete binding with a TypeVar.
+    for mro_cls in class_type.shared.mro {
+        if mro_cls.shared.type_params
+        and mro_cls.private
+        and mro_cls.private.type_args {
+            for (idx, tp) in enumerate(mro_cls.shared.type_params) {
+                if tp.name and idx < len(mro_cls.private.type_args) {
+                    arg = mro_cls.private.type_args[idx];
+                    resolved = apply_solved_type_vars(arg, solution);
+                    # Only bind if the resolved value is concrete (not a TypeVar).
+                    # Never overwrite an existing concrete binding.
+                    if not isinstance(resolved, types.TypeVarType) {
+                        if tp.name not in solution
+                        or isinstance(solution[tp.name], types.TypeVarType) {
+                            solution[tp.name] = resolved;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return solution;
+}
+
+"""Helper to apply type vars to a FunctionType."""
+def _apply_to_function(
+    func: types.FunctionType,
+    solution: dict[str, types.TypeBase],
+    class_type: (types.ClassType | None)
+) -> types.FunctionType {
+    # Clone the function
+    clone = types.FunctionType(
+        func_name=func.func_name,
+        return_type=func.return_type,
+        parameters=[
+            types.Parameter(
+                name=param.name,
+                category=param.category,
+                param_type=param.param_type,
+                default_value=param.default_value,
+                is_self=param.is_self,
+                is_cls=param.is_cls,
+                param_kind=param.param_kind
+            ) for param in func.parameters
+        ]
+    );
+
+    # Specialize parameter types
+    for param in clone.parameters {
+        if param.param_type {
+            param.param_type = apply_solved_type_vars(
+                param.param_type, solution, class_type
+            );
+        }
+    }
+
+    # Specialize return type
+    if clone.return_type {
+        clone.return_type = apply_solved_type_vars(
+            clone.return_type, solution, class_type
+        );
+    }
+
+    return clone;
 }

@@ -2322,9 +2322,7 @@ impl EsastGenPass._inject_runtime_import(name: str, nd: uni.UniNode) -> None {
 """Transform an EventSignature ability (can with entry/exit) to useEffect call."""
 impl EsastGenPass._transform_to_useeffect(nd: uni.Ability) -> None {
     # Get the body statements
-    inner = (
-        nd.body.body if isinstance(nd.body, uni.ImplDef) else self._get_body_inner(nd)
-    );
+    inner = self.unwrap_body(nd);
     body_stmts = self._collect_stmt_body(inner);
     # Determine if this is entry or exit
     is_entry = nd.signature.event.name == Tok.KW_ENTRY;
@@ -2589,9 +2587,7 @@ impl EsastGenPass.exit_ability(nd: uni.Ability) -> None {
             }
         }
     }
-    inner = (
-        nd.body.body if isinstance(nd.body, uni.ImplDef) else self._get_body_inner(nd)
-    );
+    inner = self.unwrap_body(nd);
     body_stmts = self._collect_stmt_body(inner);
     body_stmts = self._prepend_hoisted(nd, body_stmts);
     block = self.sync_loc(
@@ -2645,9 +2641,7 @@ impl EsastGenPass.exit_enum(nd: uni.Enum) -> None {
         }
     }
     properties: list[(es.Property | es.SpreadElement)] = [];
-    inner = (
-        nd.body.body if isinstance(nd.body, uni.ImplDef) else self._get_body_inner(nd)
-    );
+    inner = self.unwrap_body(nd);
     if inner {
         for stmt in inner {
             if isinstance(stmt, uni.Assignment) {
@@ -2711,9 +2705,7 @@ impl EsastGenPass.exit_archetype(nd: uni.Archetype) -> None {
     }
     body_stmts: list[es.MethodDefinition | es.PropertyDefinition | es.StaticBlock] = [];
     has_members: list[uni.ArchHas] = [];
-    inner = (
-        nd.body.body if isinstance(nd.body, uni.ImplDef) else self._get_body_inner(nd)
-    );
+    inner = self.unwrap_body(nd);
     if inner {
         for stmt in inner {
             if isinstance(stmt, uni.ArchHas) {
@@ -3432,10 +3424,7 @@ impl EsastGenPass._prepare_spawn_call(
     left_walker = self._resolve_spawn_walker(nd.left, left_expr);
     right_walker = self._resolve_spawn_walker(nd.right, right_expr);
     if (left_walker and right_walker) {
-        self.log_warning(
-            'Both sides of spawn look like walker instantiations; defaulting to the right-hand expression.',
-            node_override=nd
-        );
+        self.emit(W5013, node_override=nd);
         target = self._resolve_spawn_target(nd.left, left_expr);
         return SpawnCallParts(`walker=right_walker, target=target);
     }
@@ -3447,10 +3436,7 @@ impl EsastGenPass._prepare_spawn_call(
         target = self._resolve_spawn_target(nd.left, left_expr);
         return SpawnCallParts(`walker=right_walker, target=target);
     }
-    self.log_error(
-        'Spawn expressions must include a walker constructor on one side.',
-        node_override=nd
-    );
+    self.emit(E5010, node_override=nd);
     return None;
 }
 
@@ -3546,10 +3532,7 @@ impl EsastGenPass._build_spawn_arg_object(
             if (positional_index < len(ordered_fields))
             else f"arg{positional_index}";
         if (positional_index >= len(ordered_fields)) {
-            self.log_warning(
-                'Walker spawn has more positional arguments than fields.',
-                node_override=param
-            );
+            self.emit(W5014, node_override=param);
         }
         positional_index += 1;
         key_expr = self.sync_loc(es.Literal(value=key_name), jac_node=param);
@@ -3583,7 +3566,7 @@ impl EsastGenPass._expr_from_node(
     if isinstance(generated, es.Expression) {
         return generated;
     }
-    self.log_error('Expected expression in spawn argument.', node_override=nd);
+    self.emit(E5011, node_override=nd);
     return self.sync_loc(es.Literal(value=`default), jac_node=(nd or self.cur_node));
 }
 
@@ -3592,7 +3575,7 @@ impl EsastGenPass.get_main_mod -> uni.Module {
     main_mod_path = self.ir_in.annexable_by or self.ir_in.loc.mod_path;
     mod = self.prog.mod.hub.get(main_mod_path);
     if not isinstance(mod, uni.Module) {
-        self.log_error('Expected main module to be a Module node.');
+        self.emit(E5012);
     }
     return mod;
 }

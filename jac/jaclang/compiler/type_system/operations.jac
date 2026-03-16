@@ -7,6 +7,15 @@ import from typing { TYPE_CHECKING }
 import jaclang.jac0core.unitree as uni;
 import from jaclang.jac0core.constant { Tokens as Tok }
 import from . { types as jtypes }
+import from jaclang.jac0core.diagnostics {
+    E1010,
+    E1033,
+    E1035,
+    E1055,
+    E1096,
+    E1097,
+    E1098
+}
 
 with entry {
     if TYPE_CHECKING {
@@ -48,7 +57,37 @@ glob BINARY_OPERATOR_MAP: dict[str, tuple[str, str]] = {
          "i64": 64,
          "u64": 64
      },
-     FLOAT_LIKE_NAMES: set[str] = {"f32","f64"};
+     FLOAT_LIKE_NAMES: set[str] = {"f32","f64"},
+     AUG_OPERATOR_MAP: dict[str, str] = {
+         Tok.ADD_EQ: '__iadd__',
+         Tok.SUB_EQ: '__isub__',
+         Tok.MUL_EQ: '__imul__',
+         Tok.DIV_EQ: '__itruediv__',
+         Tok.FLOOR_DIV_EQ: '__ifloordiv__',
+         Tok.MOD_EQ: '__imod__',
+         Tok.STAR_POW_EQ: '__ipow__',
+         Tok.LSHIFT_EQ: '__ilshift__',
+         Tok.RSHIFT_EQ: '__irshift__',
+         Tok.BW_AND_EQ: '__iand__',
+         Tok.BW_OR_EQ: '__ior__',
+         Tok.BW_XOR_EQ: '__ixor__',
+         Tok.MATMUL_EQ: '__imatmul__'
+     },
+     AUG_TO_BINARY_MAP: dict[str, str] = {
+         Tok.ADD_EQ: Tok.PLUS,
+         Tok.SUB_EQ: Tok.MINUS,
+         Tok.MUL_EQ: Tok.STAR_MUL,
+         Tok.DIV_EQ: Tok.DIV,
+         Tok.FLOOR_DIV_EQ: Tok.FLOOR_DIV,
+         Tok.MOD_EQ: Tok.MOD,
+         Tok.STAR_POW_EQ: Tok.STAR_POW,
+         Tok.LSHIFT_EQ: Tok.LSHIFT,
+         Tok.RSHIFT_EQ: Tok.RSHIFT,
+         Tok.BW_AND_EQ: Tok.BW_AND,
+         Tok.BW_OR_EQ: Tok.BW_OR,
+         Tok.BW_XOR_EQ: Tok.BW_XOR,
+         Tok.MATMUL_EQ: Tok.DECOR_OP
+     };
 
 """
 Apply numeric type promotion for arithmetic operations.
@@ -130,6 +169,83 @@ def get_type_of_binary_operation(
 ) -> jtypes.TypeBase {
     left_type = evaluator.get_type_of_expression(expr.left);
     right_type = evaluator.get_type_of_expression(expr.right);
+
+    # TypeVar binary operation handling
+    # Check BEFORE is_any_type since TypeVar.is_any_type() returns True
+    # EXCEPT for | operator which is used for union types (T | int)
+    if isinstance(expr.op, uni.Token)
+    and expr.op.name in BINARY_OPERATOR_MAP
+    and expr.op.name != Tok.BW_OR {
+        if isinstance(left_type, jtypes.TypeVarType) {
+            (magic, rmagic) = BINARY_OPERATOR_MAP[expr.op.name];
+            # Constrained TypeVar - check all constraint types
+            if left_type.constraints {
+                for constraint_type in left_type.constraints {
+                    if isinstance(constraint_type, jtypes.ClassType) {
+                        result = evaluator.get_type_of_magic_method_call(
+                            constraint_type, magic, [expr.right], None
+                        );
+                        if not result {
+                            evaluator.emit_diag(
+                                E1010, expr, op=magic, type=str(constraint_type)
+                            );
+                        }
+                    }
+                }
+                return jtypes.UnknownType();
+            }
+            if left_type.bound and isinstance(left_type.bound, jtypes.ClassType) {
+                # Bounded TypeVar - use bound type for magic method lookup
+                result = evaluator.get_type_of_magic_method_call(
+                    left_type.bound, magic, [expr.right], None
+                );
+                if result {
+                    return result;
+                }
+                # Bound type doesn't support this operator
+                evaluator.emit_diag(E1010, expr, op=magic, type=str(left_type.bound));
+                return jtypes.UnknownType();
+            }
+            # Unbounded TypeVar
+            evaluator.emit_diag(E1010, expr, op=magic, type=left_type.name);
+            return jtypes.UnknownType();
+        }
+        if isinstance(right_type, jtypes.TypeVarType) {
+            (magic, rmagic) = BINARY_OPERATOR_MAP[expr.op.name];
+            # Constrained TypeVar - check all constraint types
+            if right_type.constraints {
+                for constraint_type in right_type.constraints {
+                    if isinstance(constraint_type, jtypes.ClassType) {
+                        result = evaluator.get_type_of_magic_method_call(
+                            constraint_type, rmagic, [expr.left], None
+                        );
+                        if not result {
+                            evaluator.emit_diag(
+                                E1010, expr, op=rmagic, type=str(constraint_type)
+                            );
+                        }
+                    }
+                }
+                return jtypes.UnknownType();
+            }
+            if right_type.bound and isinstance(right_type.bound, jtypes.ClassType) {
+                # Bounded TypeVar - use bound type for magic method lookup
+                result = evaluator.get_type_of_magic_method_call(
+                    right_type.bound, rmagic, [expr.left], None
+                );
+                if result {
+                    return result;
+                }
+                # Bound type doesn't support this operator
+                evaluator.emit_diag(E1010, expr, op=rmagic, type=str(right_type.bound));
+                return jtypes.UnknownType();
+            }
+            # Unbounded TypeVar
+            evaluator.emit_diag(E1010, expr, op=rmagic, type=right_type.name);
+            return jtypes.UnknownType();
+        }
+    }
+
     if left_type.is_any_type() or right_type.is_any_type() {
         return jtypes.UnknownType();
     }
@@ -191,10 +307,7 @@ def get_type_of_binary_operation(
             if expr.op.name == Tok.BW_OR {
                 return jtypes.UnionType(types=[left_type, right_type]);
             }
-            evaluator.add_diagnostic(
-                expr,
-                f'No matching overload found for method "{magic}" with the given arguments'
-            );
+            evaluator.emit_diag(E1055, expr, method=magic);
             return jtypes.UnknownType();
         }
         return result;
@@ -226,9 +339,7 @@ def get_type_of_binary_operation(
         }
         # TODO: In strict mode, UnknownType, AnyType, TypeVarType, and object should be errors
         if not is_valid_node_operand(left_type) {
-            evaluator.add_diagnostic(
-                expr.left, 'Connection left operand must be a node instance'
-            );
+            evaluator.emit_diag(E1096, expr.left);
         }
         # Check if right operand is a valid node operand or a collection of node instances
         def is_valid_right_operand(t: jtypes.TypeBase) -> bool {
@@ -259,9 +370,7 @@ def get_type_of_binary_operation(
             return False;
         }
         if not is_valid_right_operand(right_type) {
-            evaluator.add_diagnostic(
-                expr.right, 'Connection right operand must be a node instance'
-            );
+            evaluator.emit_diag(E1097, expr.right);
         }
         if isinstance(expr.op, uni.ConnectOp) {
             if expr.op.conn_type {
@@ -274,9 +383,7 @@ def get_type_of_binary_operation(
                         or not conn_type.is_edge_type()
                     )
                 ) {
-                    evaluator.add_diagnostic(
-                        expr.op.conn_type, 'Connection type must be an edge instance'
-                    );
+                    evaluator.emit_diag(E1098, expr.op.conn_type);
                 } elif (assign_compr := expr.op.conn_assign) {
                     for assign in assign_compr.assigns {
                         if (assign.key is not None) {
@@ -293,16 +400,20 @@ def get_type_of_binary_operation(
                                     assign.value
                                 );
                                 if not evaluator.assign_type(src_type, dest_type) {
-                                    msg = 'Type "{}" is not assignable to type "{}"'.format(
-                                        src_type, dest_type
+                                    evaluator.emit_diag(
+                                        E1035,
+                                        assign.value,
+                                        src=str(src_type),
+                                        dest=str(dest_type)
                                     );
-                                    evaluator.add_diagnostic(assign.value, msg);
                                 }
                             } else {
-                                msg = 'Edge type "{}" has no member named "{}"'.format(
-                                    conn_type, assign.key.sym_name
+                                evaluator.emit_diag(
+                                    E1033,
+                                    assign.key,
+                                    member=assign.key.sym_name,
+                                    type=str(conn_type)
                                 );
-                                evaluator.add_diagnostic(assign.key, msg);
                             }
                         }
                     }
@@ -325,3 +436,7 @@ def get_type_of_binary_operation(
 # Arithmetic operators that support numeric type promotion (int -> float)
 
 # Fixed-width integer type names and their bit widths for promotion
+
+# Maps augmented assignment operator tokens to in-place magic methods
+
+# Maps augmented op tokens to their base binary op tokens
