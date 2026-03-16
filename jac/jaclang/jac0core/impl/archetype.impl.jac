@@ -303,12 +303,22 @@ impl Archetype.__setattr__(self: Archetype, name: str, value: object) -> None {
     }
     # Set the value
     object.__setattr__(self, name, value);
-    # Track this field as dirty for partial update
-    # Store dirty fields in __dict__ to avoid recursion
-    if '__jac_dirty_fields__' not in self.__dict__ {
-        object.__setattr__(self, '__jac_dirty_fields__', `set());
+
+    # Only track dirty fields if this is a persistent archetype
+    # Check if __jac__ anchor exists and is persistent
+    try {
+        if self?.__jac__ and self.__jac__.persistent {
+            # Track this field as dirty for partial update
+            # Store dirty fields in __dict__ to avoid recursion
+            if '__jac_dirty_fields__' not in self.__dict__ {
+                object.__setattr__(self, '__jac_dirty_fields__', `set());
+            }
+            self.__dict__['__jac_dirty_fields__'].add(name);
+        }
+    } except Exception {
+        # If we can't access __jac__ (e.g., during initialization), skip tracking
+        0;
     }
-    self.__dict__['__jac_dirty_fields__'].add(name);
 }
 
 """Get the set of dirty (modified) fields for partial update."""
