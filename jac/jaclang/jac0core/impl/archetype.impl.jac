@@ -313,7 +313,7 @@ impl Archetype.__setattr__(self: Archetype, name: str, value: object) -> None {
             # Thread-safe implementation using lock
             if '__jac_dirty_fields__' not in self.__dict__ {
                 import threading;
-                object.__setattr__(self, '__jac_dirty_fields__', `set());
+                object.__setattr__(self, '__jac_dirty_fields__', set());
                 object.__setattr__(self, '__jac_dirty_lock__', threading.Lock());
             }
             # Use lock to ensure thread-safe modifications
