@@ -294,6 +294,35 @@ impl Archetype.__jac_access__(self: Archetype) -> (AccessLevel | str | int | Non
     return None;
 }
 
+"""Override setattr to track field changes for automatic partial updates."""
+impl Archetype.__setattr__(self: Archetype, name: str, value: object) -> None {
+    # Skip tracking for internal/private fields and __jac__ anchor
+    if name.startswith('_') or name == 'reports' {
+        object.__setattr__(self, name, value);
+        return;
+    }
+    # Set the value
+    object.__setattr__(self, name, value);
+    # Track this field as dirty for partial update
+    # Store dirty fields in __dict__ to avoid recursion
+    if '__jac_dirty_fields__' not in self.__dict__ {
+        object.__setattr__(self, '__jac_dirty_fields__', `set());
+    }
+    self.__dict__['__jac_dirty_fields__'].add(name);
+}
+
+"""Get the set of dirty (modified) fields for partial update."""
+impl Archetype.__jac_dirty_fields__(self: Archetype) -> (set[str] | None) {
+    return self.__dict__.get('__jac_dirty_fields__');
+}
+
+"""Clear dirty fields tracking after persistence."""
+impl Archetype.__jac_clear_dirty__(self: Archetype) -> None {
+    if '__jac_dirty_fields__' in self.__dict__ {
+        self.__dict__['__jac_dirty_fields__'].clear();
+    }
+}
+
 """Override repr for archetype."""
 impl GenericEdge.__repr__(self: GenericEdge) -> str {
     return f"{self.__class__.__name__}()";

@@ -210,6 +210,9 @@ obj Archetype {
     def __init_subclass__(cls: Any, **kwargs: object) -> None;
     def __repr__(self: Archetype) -> str;
     def __jac_access__(self: Archetype) -> (AccessLevel | str | int | None);
+    def __setattr__(self: Archetype, name: str, value: object) -> None;
+    def __jac_dirty_fields__(self: Archetype) -> (set[str] | None);
+    def __jac_clear_dirty__(self: Archetype) -> None;
 }
 
 """Node Archetype Protocol."""

@@ -72,18 +72,10 @@ walker:pub UpdateTaskTitle {
         title: str;
 
     can update with Root entry {
-        import from jaclang.jac0core.runtime { JacPersistence }
-        import from jaclang.jac0core.constructs { Archetype }
-        import from typing { cast }
-
         for task in [-->Task] {
             if (self.id == task.id) {
-                # Update the field in memory
+                # Update the field - automatic partial update will happen on commit
                 task.title = self.title;
-                # Persist only this field to storage
-                JacPersistence.partial_update(
-                    cast(Archetype, task), {"title": self.title}
-                );
                 report {"updated": True, "id": self.id, "title": self.title};
                 disengage;
             }
@@ -97,18 +89,10 @@ walker:pub UpdateTaskCompleted {
         completed: bool;
 
     can update with Root entry {
-        import from jaclang.jac0core.runtime { JacPersistence }
-        import from jaclang.jac0core.constructs { Archetype }
-        import from typing { cast }
-
         for task in [-->Task] {
             if (self.id == task.id) {
-                # Update the field in memory
+                # Update the field - automatic partial update will happen on commit
                 task.completed = self.completed;
-                # Persist only this field to storage
-                JacPersistence.partial_update(
-                    cast(Archetype, task), {"completed": self.completed}
-                );
                 report {"updated": True, "id": self.id, "completed": self.completed};
                 disengage;
             }
