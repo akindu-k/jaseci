@@ -511,25 +511,31 @@ impl SqliteMemory.get_mem -> dict[UUID, Anchor] {
 """Commit - syncs pending changes to database and auto-persists dirty fields."""
 impl SqliteMemory.commit(anchor: (Anchor | None) = None) -> None {
     # Auto-persist all dirty archetypes in cache before syncing
-    for cached_anchor in self.__mem__.values() {
-        if cached_anchor.is_populated() and cached_anchor.persistent {
-            archetype = cached_anchor.archetype;
-            # Check if this archetype has dirty fields tracked
-            if dirty_fields := archetype.__jac_dirty_fields__() {
-                # Build the fields dict from dirty field names
-                fields_dict = {};
-                for field_name in dirty_fields {
-                    if hasattr(archetype, field_name) {
-                        fields_dict[field_name] = getattr(archetype, field_name);
+    for cached_anchor in `list(self.__mem__.values()) {
+        try {
+            if cached_anchor.is_populated() and cached_anchor.persistent {
+                archetype = cached_anchor.archetype;
+                # Check if this archetype has dirty fields tracked
+                if dirty_fields := archetype.__jac_dirty_fields__() {
+                    # Build the fields dict from dirty field names
+                    fields_dict = {};
+                    for field_name in dirty_fields {
+                        if hasattr(archetype, field_name) {
+                            fields_dict[field_name] = getattr(archetype, field_name);
+                        }
+                    }
+                    # Perform partial update if we have fields to update
+                    if fields_dict {
+                        self.partial_update(cached_anchor, fields_dict);
+                        # Clear dirty fields after persisting
+                        archetype.__jac_clear_dirty__();
                     }
                 }
-                # Perform partial update if we have fields to update
-                if fields_dict {
-                    self.partial_update(cached_anchor, fields_dict);
-                    # Clear dirty fields after persisting
-                    archetype.__jac_clear_dirty__();
-                }
             }
+        } except Exception as e {
+            logger.warning(f"Auto-persist failed for anchor {cached_anchor.id}: {e}");
+            # Continue with other anchors even if one fails
+            0;
         }
     }
     self.sync();
@@ -656,35 +662,41 @@ impl TieredMemory.`has(id: UUID) -> bool {
 """Commit - syncs L3 persistence if available and auto-persists dirty fields."""
 impl TieredMemory.commit(anchor: (Anchor | None) = None) -> None {
     # Auto-persist all dirty archetypes in L1 cache before syncing
-    for cached_anchor in self.__mem__.values() {
-        if cached_anchor.is_populated() and cached_anchor.persistent {
-            archetype = cached_anchor.archetype;
-            # Check if this archetype has dirty fields tracked
-            if dirty_fields := archetype.__jac_dirty_fields__() {
-                # Build the fields dict from dirty field names
-                fields_dict = {};
-                for field_name in dirty_fields {
-                    if hasattr(archetype, field_name) {
-                        fields_dict[field_name] = getattr(archetype, field_name);
-                    }
-                }
-                # Perform partial update if we have fields to update
-                if fields_dict {
-                    if self.l3 and self.l3?.partial_update {
-                        # Use partial update to avoid race conditions
-                        self.l3.partial_update(cached_anchor, fields_dict);
-                        # Invalidate L2 cache for this anchor
-                        if self.l2 and self.l2?.invalidate {
-                            self.l2.invalidate(cached_anchor.id);
+    for cached_anchor in `list(self.__mem__.values()) {
+        try {
+            if cached_anchor.is_populated() and cached_anchor.persistent {
+                archetype = cached_anchor.archetype;
+                # Check if this archetype has dirty fields tracked
+                if dirty_fields := archetype.__jac_dirty_fields__() {
+                    # Build the fields dict from dirty field names
+                    fields_dict = {};
+                    for field_name in dirty_fields {
+                        if hasattr(archetype, field_name) {
+                            fields_dict[field_name] = getattr(archetype, field_name);
                         }
-                    } else {
-                        # Fall back to full put if partial_update not available
-                        self.put(cached_anchor);
                     }
-                    # Clear dirty fields after persisting
-                    archetype.__jac_clear_dirty__();
+                    # Perform partial update if we have fields to update
+                    if fields_dict {
+                        if self.l3 and self.l3?.partial_update {
+                            # Use partial update to avoid race conditions
+                            self.l3.partial_update(cached_anchor, fields_dict);
+                            # Invalidate L2 cache for this anchor
+                            if self.l2 and self.l2?.invalidate {
+                                self.l2.invalidate(cached_anchor.id);
+                            }
+                        } else {
+                            # Fall back to full put if partial_update not available
+                            self.put(cached_anchor);
+                        }
+                        # Clear dirty fields after persisting
+                        archetype.__jac_clear_dirty__();
+                    }
                 }
             }
+        } except Exception as e {
+            logger.warning(f"Auto-persist failed for anchor {cached_anchor.id}: {e}");
+            # Continue with other anchors even if one fails
+            0;
         }
     }
     # Now sync L3
