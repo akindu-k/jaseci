@@ -4,6 +4,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.2.7 (Unreleased)
 
+- **Automatic Partial Updates for Race-Condition-Free Concurrent Modifications**: When you update a node/edge field with simple assignment (e.g., `task.title = "new title"`), Jac now automatically tracks and persists only the changed fields instead of replacing the entire object. This prevents race conditions when multiple requests update different fields of the same node/edge simultaneously - changes are preserved instead of overwriting each other. The implementation uses MongoDB's atomic `$set` operations for truly concurrent-safe updates and automatically invalidates L1/L2 caches to prevent stale reads. Example: Two concurrent walkers running `task.status = "done"` and `task.priority = 5` on the same task both succeed without data loss.
 - **Client-Side Error Reporting Endpoint**: Added `POST /cl/__error__` endpoint to `JacAPIServerCore` for receiving client-side JavaScript errors. Errors are logged via the `jaclang.client_errors` logger and printed to the dev console with stack traces for visibility.
 - **Source-Mapped Error Stack Traces**: Client error stack traces received at `/cl/__error__` are now resolved from bundled JS locations to original `.jac` file paths and exact line numbers via the centralized `SourceMapper` with two-layer resolution.
 - **Client Error Rate Limiting**: The `/cl/__error__` endpoint now deduplicates identical error messages (10s window) and caps at 20 errors per minute to prevent log flooding from render loops or repeated failures.
@@ -27,7 +28,6 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.2.4
 
-- **Automatic Partial Updates for Race-Condition-Free Concurrent Modifications**: When you update a node/edge field with simple assignment (e.g., `task.title = "new title"`), Jac now automatically tracks and persists only the changed fields instead of replacing the entire object. This prevents race conditions when multiple requests update different fields of the same node/edge simultaneously - changes are preserved instead of overwriting each other. The implementation uses MongoDB's atomic `$set` operations for truly concurrent-safe updates and automatically invalidates L1/L2 caches to prevent stale reads. Example: Two concurrent walkers running `task.status = "done"` and `task.priority = 5` on the same task both succeed without data loss. No manual `JacPersistence.partial_update()` calls needed - just assign fields naturally and Jac handles the rest.
 - **Automatic Port Fallback**: When starting the server with `jac start`, if the specified port is already in use, the server now automatically finds and uses the next available port instead of crashing with "Address already in use". A warning message displays when using an alternative port. Supports up to 10 port retries with cross-platform compatibility (Linux and Windows).
 - [fix]Fix for internet facing aws load balancer
 - 1 Minor refactor/change.
