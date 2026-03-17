@@ -294,20 +294,19 @@ impl MongoBackend.partial_update(
 
                     if was_insert or result.get('version', 0) == current_version + 1 {
                         # Success! Update completed
-                        # Update L1 cache with the actual merged result from MongoDB
-                        updated_anchor = self._load_anchor(result);
-                        if updated_anchor {
-                            # Update anchor version to match database
-                            anchor.version = result.get('version', current_version + 1);
+                        # Update anchor version to match database
+                        anchor.version = result.get('version', current_version + 1);
 
-                            logger.debug(
-                                f"MongoDB partial_update succeeded: updated {len(
-                                    update_ops
-                                )} "
-                                f"fields for anchor {_id} (v{current_version} -> v{anchor.version})"
-                            );
-                            return;
-                        }
+                        # Note: L1 cache invalidation is handled by TieredMemory.commit()
+                        # MongoDB doesn't have direct L1 cache access - it's always accessed
+                        # through TieredMemory which invalidates L1 after partial_update
+                        logger.debug(
+                            f"MongoDB partial_update succeeded: updated {len(
+                                update_ops
+                            )} "
+                            f"fields for anchor {_id} (v{current_version} -> v{anchor.version})"
+                        );
+                        return;
                     } else {
                         # Version mismatch - concurrent modification detected
                         actual_version = result.get('version', -1);

@@ -661,20 +661,14 @@ impl SqliteMemory.partial_update(
                 self.__conn__.commit();
                 # Update anchor version in memory to match database
                 anchor.version = current_version + 1;
-                # Refetch to update L1 cache with merged result from database
-                # This ensures read-your-writes consistency
-                cursor = self.__conn__.execute(
-                    "SELECT data, version FROM anchors WHERE id = ?", (key, )
-                );
-                row = cursor.fetchone();
-                if row {
-                    json_data = json.loads(row[0]);
-                    merged_anchor = Serializer.deserialize(json_data);
-                    if merged_anchor and isinstance(merged_anchor, Anchor) {
-                        merged_anchor.version = row[1];
-                        # Update L1 cache with actual merged result
-                        self.__mem__[anchor.id] = merged_anchor;
-                    }
+                # OPTION A: Invalidate L1 cache to prevent stale reads
+                # Remove from L1 cache - next access will refetch fresh data from database
+                # This is the safest approach: guarantees no stale reads within same request
+                if anchor.id in self.__mem__ {
+                    del self.__mem__[anchor.id];
+                    logger.debug(
+                        f"L1 cache invalidated for anchor {key} after partial update"
+                    );
                 }
                 logger.debug(
                     f"Partial update succeeded for anchor {key}: "
@@ -941,6 +935,13 @@ impl TieredMemory.commit(anchor: (Anchor | None) = None) -> None {
                             if self.l3 and self.l3?.partial_update {
                                 # Use partial update to avoid race conditions
                                 self.l3.partial_update(cached_anchor, fields_dict);
+
+                                # Invalidate L1 cache (safest - prevents stale reads)
+                                # Next access will refetch fresh data from L3
+                                if cached_anchor.id in self.__mem__ {
+                                    del self.__mem__[cached_anchor.id];
+                                }
+
                                 # Invalidate L2 cache for this anchor
                                 if self.l2 and self.l2?.invalidate {
                                     self.l2.invalidate(cached_anchor.id);
