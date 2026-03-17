@@ -775,7 +775,9 @@ impl SqliteMemory.commit(anchor: (Anchor | None) = None) -> None {
                             if '__jac_dirty_fields__' not in archetype.__dict__ {
                                 archetype.__dict__['__jac_dirty_fields__'] = set();
                             }
-                            archetype.__dict__['__jac_dirty_fields__'].update(dirty_copy);
+                            archetype.__dict__['__jac_dirty_fields__'].update(
+                                dirty_copy
+                            );
                             # Re-raise to trigger transaction rollback
                             raise update_error;
                         }
