@@ -283,6 +283,15 @@ obj TypeEvaluator {
         base_type: types.ClassType, member: str
     ) -> type_utils.ClassMember | None;
 
+    # Get bound member from a class type, handling type[T] subscripts.
+    def get_type_of_bound_member(
+        object_type: types.ClassType, member_name: str
+    ) -> type_utils.ClassMember | None;
+
+    # Check if ClassType is type[T] (builtin type with type args).
+    def _is_type_subscript(class_type: types.ClassType) -> bool;
+    # Get lookup type for member access (extracts T from type[T]).
+    def _get_type_for_member_lookup(object_type: types.ClassType) -> types.ClassType;
     def _get_getattr_return_type(base_type: types.ClassType) -> TypeBase | None;
     def match_args_to_params(
         arg_nodes: list[uni.Expr | uni.KWPair],
@@ -391,6 +400,7 @@ obj TypeEvaluator {
     def add_scope_narrowing(key: str, narrowed_type: types.TypeBase) -> None;
     def get_scope_narrowing(key: str) -> types.TypeBase | None;
     def get_narrowing_key(expr: uni.Expr) -> str | None;
+    def _find_symbol_by_key(key: str, condition: uni.Expr) -> uni.Symbol | None;
     def process_condition(condition: uni.Expr) -> None;
     # --- CFG-based narrowing (backward traversal) ---
     def get_narrowed_type(symbol: uni.Symbol, at_node: uni.UniNode) -> TypeBase | None;
