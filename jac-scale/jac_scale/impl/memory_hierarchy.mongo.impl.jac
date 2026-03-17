@@ -245,10 +245,21 @@ impl MongoBackend.partial_update(
         return;
     }
 
-    # Retry loop for optimistic lock conflicts
+    # Retry loop for optimistic lock conflicts with exponential backoff
     max_retries = 3;
     for attempt in range(max_retries) {
         try {
+            # Exponential backoff: wait before retry (except first attempt)
+            if attempt > 0 {
+                import time;
+                # Exponential backoff: 0.1s, 0.2s, 0.4s
+                backoff_delay = 0.1 * (2 ** (attempt - 1));
+                logger.debug(
+                    f"MongoDB retry attempt {attempt + 1}/{max_retries} after {backoff_delay}s backoff"
+                );
+                time.sleep(backoff_delay);
+            }
+
             # Get current version from anchor
             current_version = anchor.version;
 
