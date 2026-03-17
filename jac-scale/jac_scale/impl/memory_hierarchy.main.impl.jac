@@ -60,6 +60,7 @@ impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
         if not Jac.check_write_access(anchor) {
             return;
         }
+        anchor.is_updated = True;
         try {
             self.l3.put(anchor);
             if self.l2 {
@@ -72,7 +73,7 @@ impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
     }
     # Batch commit: delegate to L3's sync()
     # - SQLite: sync() does hash-based change detection (only writes changed anchors)
-    # - MongoDB: sync() needs to flush L1 cache to ensure loaded data persists
+    # - MongoDB: sync() checks is_updated flag (only writes modified anchors)
     if self.l3 {
         try {
             self.l3.sync();

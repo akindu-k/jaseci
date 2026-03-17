@@ -362,6 +362,16 @@ test "no unnecessary saves on read-only operations" {
             f"After user creation should be 5, got {after_user_count}"
         );
 
+        # Capture document snapshots before read-only ops (to verify no updates)
+        import hashlib;
+        def get_docs_hash -> str {
+            docs = list(collection.find({}, sort=[("_id", 1)]));
+            doc_str = str([(d.get("_id"), d.get("data")) for d in docs]);
+            return hashlib.sha256(doc_str.encode()).hexdigest();
+        }
+
+        docs_hash_before = get_docs_hash();
+
         # Make multiple read-only requests
         for _ in range(3) {
             res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=2);
@@ -373,6 +383,12 @@ test "no unnecessary saves on read-only operations" {
         assert after_readonly_count == after_user_count , (
             f"Read-only operations should not create new docs. "
             f"Expected {after_user_count}, got {after_readonly_count}"
+        );
+
+        # Verify documents weren't modified (content hash should match)
+        docs_hash_after = get_docs_hash();
+        assert docs_hash_before == docs_hash_after , (
+            "Read-only operations should not modify existing documents in MongoDB"
         );
 
         # Now create a task (this should write)
