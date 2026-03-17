@@ -313,7 +313,20 @@ impl Archetype.__setattr__(self: Archetype, name: str, value: object) -> None {
             if '__jac_dirty_fields__' not in self.__dict__ {
                 object.__setattr__(self, '__jac_dirty_fields__', set());
             }
-            self.__dict__['__jac_dirty_fields__'].add(name);
+            dirty_fields = self.__dict__['__jac_dirty_fields__'];
+            # Prevent memory leak: if too many dirty fields, clear and mark for full sync
+            # Max 100 dirty fields - beyond that, we'll do a full save instead
+            if len(dirty_fields) >= 100 {
+                import from jaclang { logger }
+                logger.warning(
+                    f"Dirty fields limit exceeded for {self.__class__.__name__} "
+                    f"[{anchor.id}]. Clearing dirty fields - next save will be full sync."
+                );
+                dirty_fields.clear();
+                # Mark that we need a full sync by setting a special flag
+                object.__setattr__(self, '__jac_force_full_sync__', True);
+            }
+            dirty_fields.add(name);
         }
     }
 }
@@ -327,6 +340,10 @@ impl Archetype.__jac_dirty_fields__(self: Archetype) -> (set[str] | None) {
 impl Archetype.__jac_clear_dirty__(self: Archetype) -> None {
     if '__jac_dirty_fields__' in self.__dict__ {
         self.__dict__['__jac_dirty_fields__'].clear();
+    }
+    # Also clear force full sync flag if present
+    if '__jac_force_full_sync__' in self.__dict__ {
+        del self.__dict__['__jac_force_full_sync__'];
     }
 }
 

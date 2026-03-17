@@ -532,8 +532,18 @@ impl SqliteMemory.commit(anchor: (Anchor | None) = None) -> None {
         try {
             if cached_anchor.is_populated() and cached_anchor.persistent {
                 archetype = cached_anchor.archetype;
-                # Check if this archetype has dirty fields tracked
-                if dirty_fields := archetype.__jac_dirty_fields__() {
+                # Check if force full sync flag is set (due to dirty field overflow)
+                if archetype.__dict__.get('__jac_force_full_sync__', False) {
+                    # Do a full put instead of partial update
+                    self.put(cached_anchor);
+                    # Clear the force full sync flag
+                    if '__jac_force_full_sync__' in archetype.__dict__ {
+                        del archetype.__dict__['__jac_force_full_sync__'];
+                    }
+                    # Clear dirty fields after persisting
+                    archetype.__jac_clear_dirty__();
+                } elif dirty_fields := archetype.__jac_dirty_fields__() {
+                    # Check if this archetype has dirty fields tracked
                     # Build the fields dict from dirty field names
                     fields_dict = {};
                     for field_name in dirty_fields {
@@ -550,7 +560,7 @@ impl SqliteMemory.commit(anchor: (Anchor | None) = None) -> None {
                 }
             }
         } except Exception as e {
-            logger.warning(f"Auto-persist failed for anchor {cached_anchor.id}: {e}");
+            logger.error(f"Auto-persist failed for anchor {cached_anchor.id}: {e}");
             # Continue with other anchors even if one fails
             0;
         }
@@ -683,8 +693,18 @@ impl TieredMemory.commit(anchor: (Anchor | None) = None) -> None {
         try {
             if cached_anchor.is_populated() and cached_anchor.persistent {
                 archetype = cached_anchor.archetype;
-                # Check if this archetype has dirty fields tracked
-                if dirty_fields := archetype.__jac_dirty_fields__() {
+                # Check if force full sync flag is set (due to dirty field overflow)
+                if archetype.__dict__.get('__jac_force_full_sync__', False) {
+                    # Do a full put instead of partial update
+                    self.put(cached_anchor);
+                    # Clear the force full sync flag
+                    if '__jac_force_full_sync__' in archetype.__dict__ {
+                        del archetype.__dict__['__jac_force_full_sync__'];
+                    }
+                    # Clear dirty fields after persisting
+                    archetype.__jac_clear_dirty__();
+                } elif dirty_fields := archetype.__jac_dirty_fields__() {
+                    # Check if this archetype has dirty fields tracked
                     # Build the fields dict from dirty field names
                     fields_dict = {};
                     for field_name in dirty_fields {
