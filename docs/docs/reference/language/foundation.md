@@ -16,7 +16,7 @@
 
 ### 1 What is Jac?
 
-Jac is an AI-native full-stack programming language that supersets Python and JavaScript with native compilation support. It introduces Object-Spatial Programming (OSP) and novel constructs for AI-integrated programming (such as `by llm()`), providing a unified language for backend, frontend, and AI development with full access to the PyPI and npm ecosystems.
+Jac is an AI-native full-stack programming language with Python-like syntax that compiles to Python bytecode, JavaScript, and native machine code (C-ABI compatible). It introduces Object-Spatial Programming (OSP) and novel constructs for AI-integrated programming (such as `by llm()`), providing a unified language for backend, frontend, and AI development with full access to the PyPI, npm, and native ecosystems.
 
 ```jac
 with entry {
@@ -30,7 +30,7 @@ with entry {
 |-----------|-------------|
 | **AI-Native** | LLMs as first-class citizens through Meaning Typed Programming |
 | **Full-Stack** | Backend and frontend in one unified language |
-| **Superset** | Full access to PyPI and npm ecosystems |
+| **Multi-Target** | Compiles to Python bytecode, JS, and native machine code -- full PyPI, npm, and native ecosystem access |
 | **Object-Spatial** | Graph-based domain modeling with mobile walkers |
 | **Cloud-Native** | One-command deployment with automatic scaling |
 | **Human & AI Friendly** | Readable structure for both humans and AI models |
@@ -309,6 +309,28 @@ obj Example {
 }
 ```
 
+#### Automatic `TYPE_CHECKING` Optimization
+
+The Jac compiler automatically detects imports that are **only used in type annotations** (parameter types, return types, field types) and wraps them in a `typing.TYPE_CHECKING` guard in the generated Python. This prevents circular imports and unnecessary runtime dependencies without any manual effort.
+
+```jac
+import from mymodule { MyClass }
+
+obj Example {
+    has ref: MyClass;  # MyClass only used as a type annotation
+}
+```
+
+The compiler sees that `MyClass` never appears in runtime code (no instantiation, no `isinstance` checks, etc.) and automatically generates:
+
+```python
+import typing
+if typing.TYPE_CHECKING:
+    from mymodule import MyClass
+```
+
+If you later add runtime usage like `MyClass()`, the compiler automatically promotes it back to a regular import. No manual `if TYPE_CHECKING` blocks are needed in Jac.
+
 ### 3 Generic Types
 
 Jac will support generic type parameters using Python-style syntax (coming soon):
@@ -370,12 +392,12 @@ def process(data: list[int] | dict[str, int]) -> None {
 
 ### 6 Type References
 
-Type references are used in OSP operations like filtering graph traversals by node type. The `Root` keyword refers to the root node type in entry/exit clauses, and the `(?:TypeName)` syntax filters collections or traversals by type.
+Type references are used in OSP operations like filtering graph traversals by node type. The `Root` keyword refers to the root node type in entry/exit clauses, and the `[?:TypeName]` syntax filters collections or traversals by type.
 
 ```jac
 def example() {
     # In edge references
-    [-->](?:Person);  # Filter nodes by Person type
+    [-->][?:Person];  # Filter nodes by Person type
 }
 ```
 
@@ -1051,7 +1073,7 @@ obj Item {
 def example() {
     items = [Item(value=1), Item(value=-1), Item(value=2)];
     # The ? in filter comprehensions
-    valid_items = items(?value > 0);  # Filter where value > 0
+    valid_items = items[?value > 0];  # Filter where value > 0
 }
 ```
 

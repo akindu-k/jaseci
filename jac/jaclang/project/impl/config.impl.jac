@@ -543,15 +543,12 @@ impl JacConfig.save -> None {
         }
     }
     # Update plugins configuration
-    # Always update plugins section if it exists in doc or we have data to write
-    has_existing_plugins = "plugins" in doc;
-    needs_update = self.plugins or self.plugins_config.disabled is not None;
-    if has_existing_plugins or needs_update {
+    # IMPORTANT: We must preserve raw values (e.g. ${VAR}) from the original file,
+    # so we only update the disabled list, not the entire plugin configs.
+    # Plugin configs are updated via plugin-specific save methods when needed.
+    if self.plugins_config.disabled is not None {
         if "plugins" not in doc {
             doc["plugins"] = {};
-        }
-        for (plugin_name, plugin_config) in self.plugins.items() {
-            doc["plugins"][plugin_name] = plugin_config;
         }
         # Persist disabled plugins list - handle both setting and clearing
         if self.plugins_config.disabled {
@@ -589,8 +586,9 @@ def _serialize_toml(data: dict, prefix: str = "") -> str {
     # First pass: write simple key-value pairs
     for (key, value) in data.items() {
         if isinstance(value, dict) {
-            # Collect tables for later
-            table_key = f"{prefix}{key}" if prefix else key;
+            # Collect tables for later - quote the key NOW before building path
+            quoted_key = _quote_key(key);
+            table_key = f"{prefix}{quoted_key}" if prefix else quoted_key;
             tables.append((table_key, value));
         } else {
             lines.append(f"{_quote_key(key)} = {_toml_value(value)}");
@@ -833,7 +831,10 @@ impl _parse_toml_data(data: dict[str, Any], toml_path: Path | None = None) -> Ja
             );
         }
         config.check = CheckConfig(
-            print_errs=check_data.get("print_errs", True), lint=lint_config
+            print_errs=check_data.get("print_errs", True),
+            lint=lint_config,
+            suppress=check_data.get("suppress", []),
+            suppress_categories=check_data.get("suppress_categories", [])
         );
     }
     if "dot" in data {

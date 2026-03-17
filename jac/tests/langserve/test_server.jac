@@ -548,6 +548,33 @@ test "test_go_to_definition_nested_impl_symbols" {
     }
 }
 
+test "test_go_to_definition_stub_param_compound_types" {
+    setup_test();
+    try {
+        lsp = create_server();
+        stub_file = uris.from_fs_path(fixture_path("stub_param_goto_def.jac"));
+        lsp.type_check_file(stub_file);
+
+        # (line, col, description) — 1-indexed; col points to `Module` in `uni.Module`
+        positions = [
+            (8, 47, "simple param: uni.Module"),
+            (10, 40, "list param: list[uni.Module]"),
+            (12, 38, "union param: uni.Module | None"),
+            (14, 45, "dict param: dict[str, uni.Module]"),
+            (16, 43, "Optional param: Optional[uni.Module]"),
+
+        ];
+
+        for (line, col, desc) in positions {
+            result = lsp.get_definition(stub_file, lspt.Position(line - 1, col - 1));
+            assert result is not None , f"go-to-def returned None for {desc}";
+            assert "unitree.jac" in str(result) , f"Expected unitree.jac for {desc}, got: {result}";
+        }
+    } finally {
+        teardown_test();
+    }
+}
+
 test "test_hover_narrowing_in_loop" {
     setup_test();
     try {
@@ -661,12 +688,12 @@ test "test_hover_types" {
         );
         lsp.type_check_file(overload_file);
         overload_cases = [
-            (4, 6, ["list"]),  # parts: list[str]
-            (5, 6, ["str"]),  # first: str (from list[str][0])
-            (6, 6, ["str"]),  # result: str (str + str)
-            (8, 6, ["list"]),  # parts2: list[str]
-            (9, 6, ["str"]),  # first3: str
-            (10, 6, ["str"]),  # result3: str
+            (4, 6, ["list"]),  # parts: list[str] or list[LiteralString]
+            (5, 6, ["str", "String"]),  # first: str or LiteralString
+            (6, 6, ["str", "String"]),  # result: str or LiteralString
+            (8, 6, ["list"]),  # parts2: list[str] or list[LiteralString]
+            (9, 6, ["str", "String"]),  # first3: str or LiteralString
+            (10, 6, ["str", "String"]),  # result3: str or LiteralString
 
         ];
         for (line, col, expected_list) in overload_cases {
@@ -681,6 +708,32 @@ test "test_hover_types" {
             }
             assert found , f"Overload line {line}: expected one of {expected_list}, got: {hover.contents.value}";
         }
+
+        # Stdlib overload via wildcard import: os.path.dirname (from posixpath/ntpath import *)
+        stdlib_file = uris.from_fs_path(fixture_path("stdlib_overload.jac"));
+        lsp.type_check_file(stdlib_file);
+        hover = lsp.get_hover_info(stdlib_file, lspt.Position(5, 22));
+        assert hover is not None , "Hover should return info for os.path.dirname";
+        assert "dirname" in hover.contents.value , f"os.path.dirname: expected 'dirname', got: {hover.contents.value}";
+        defn = lsp.get_definition(stdlib_file, lspt.Position(5, 22));
+        assert defn is not None , "Definition should be found for os.path.dirname";
+        assert "posixpath.pyi" in defn.uri or "ntpath.pyi" in defn.uri , f"os.path.dirname go-to-def: expected posixpath/ntpath.pyi, got: {defn.uri}";
+
+        # isinstance narrowing in ternary: true branch should show narrowed type
+        ternary_file = uris.from_fs_path(
+            passes_main_fixture_abs_path("checker/checker_isinstance_ternary.jac")
+        );
+        lsp.type_check_file(ternary_file);
+        # Line 8: result = [left] if isinstance(left, Node) else left;
+        # True branch: left should be narrowed to Node (column 15, 0-indexed: 14)
+        hover = lsp.get_hover_info(ternary_file, lspt.Position(7, 14));
+        assert hover is not None , "Ternary true branch hover should exist";
+        assert "Node" in hover.contents.value , f"Ternary true branch: expected Node, got: {hover.contents.value}";
+        assert "list[Node]" not in hover.contents.value , f"Ternary true branch: should NOT contain list[Node], got: {hover.contents.value}";
+        # Else branch: left should be narrowed to list[Node] (column 53, 0-indexed: 52)
+        hover = lsp.get_hover_info(ternary_file, lspt.Position(7, 52));
+        assert hover is not None , "Ternary else branch hover should exist";
+        assert "list[Node]" in hover.contents.value , f"Ternary else branch: expected list[Node], got: {hover.contents.value}";
     } finally {
         teardown_test();
     }
@@ -752,6 +805,40 @@ test "test_namedtuple_hover" {
             hover = lsp.get_hover_info(namedtuple_file, lspt.Position(line, col));
             assert hover is not None , f"Hover for '{name}' at line {line + 1} should exist";
             assert expected_type in hover.contents.value , f"'{name}' at line {line + 1}: expected '{expected_type}', got: {hover.contents.value}";
+        }
+    } finally {
+        teardown_test();
+    }
+}
+
+test "test_go_to_definition_import_module_path_and_item" {
+    setup_test();
+    try {
+        lsp = create_server();
+        import_file = uris.from_fs_path(fixture_path("local_imports/main.jac"));
+        lsp.type_check_file(import_file);
+
+        # Line 3: import from mypkg_deep.utils.helpers { greet, greeting }
+        # Test module path segments (each should navigate to the module/directory)
+        positions = [
+            # "mypkg_deep" in module path → namespace package dir
+            (3, 15, "local_imports/mypkg_deep"),
+            # "utils" in module path → namespace package dir
+            (3, 25, "local_imports/mypkg_deep/utils"),
+            # "helpers" in module path → module file at 0:0
+            (3, 31, "local_imports/mypkg_deep/utils/helpers.jac"),
+            # "greet" in { greet, greeting } → definition in helpers.jac
+            (3, 41, "local_imports/mypkg_deep/utils/helpers.jac"),
+            # "greeting" in { greet, greeting } → definition in helpers.jac
+            (3, 48, "local_imports/mypkg_deep/utils/helpers.jac"),
+
+        ];
+
+        for (line, char, expected) in positions {
+            def_loc = lsp.get_definition(import_file, lspt.Position(line - 1, char - 1));
+            assert def_loc is not None , f"Definition at line {line}, col {char} not found";
+            assert expected in str(def_loc) , f"Expected '{expected}' in definition for "
+            f"line {line}, char {char}, got: {def_loc}";
         }
     } finally {
         teardown_test();
