@@ -1478,6 +1478,8 @@ impl JacBasics.build_edge(
         );
         source.edges.append(eanch);
         target.edges.append(eanch);
+        source.is_updated = True;
+        target.is_updated = True;
         if conn_assign {
             for (fld, val) in zip(conn_assign[0], conn_assign[1], strict=False) {
                 if hasattr(`edge, fld) {
