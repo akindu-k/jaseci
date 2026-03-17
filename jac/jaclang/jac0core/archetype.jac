@@ -144,7 +144,7 @@ obj Anchor {
         access: Permission = field(default_factory=Permission),
         persistent: bool = False,
         hash: int = 0,
-        is_updated: bool = False;
+        is_updated: bool = True;
 
     def is_populated(self: Anchor) -> bool;
     def make_stub(self: Anchor) -> TANCH;
