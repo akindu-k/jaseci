@@ -245,24 +245,27 @@ impl MongoBackend.partial_update(
             update_ops[f"data.archetype.{field_name}"] = serialized_value;
         }
         if update_ops {
+            # Serialize the full anchor for $setOnInsert (used only if document doesn't exist)
+            # This ensures that if the document is being created, it has ALL fields, not just dirty ones
+            full_data = Serializer.serialize(anchor, include_type=True);
+
+            # Use upsert=True with $setOnInsert for production-grade behavior:
+            # - If document exists: Only update the specified fields ($set)
+            # - If document doesn't exist: Create complete document ($setOnInsert)
+            # This is atomic, efficient (1 DB call), and prevents incomplete documents
             result = self.collection.update_one(
                 {'_id': str(_id)},
-                {'$set': update_ops},
-                upsert=False  # Don't create if doesn't exist - partial update requires existing document
+                {
+                    '$set': update_ops,  # Update specified fields if document exists
+                    '$setOnInsert': {'data': full_data, 'type': type(anchor).__name__}
+                },
+                upsert=True  # Create if doesn't exist, using $setOnInsert for complete data
             );
-            if result.matched_count == 0 {
-                # Document doesn't exist yet, fall back to full put
-                logger.debug(
-                    f"MongoDB partial_update: document {_id} not found, falling back to full put"
-                );
-                self.put(anchor);
-            } else {
-                logger.debug(
-                    f"MongoDB partial_update: updated {len(
-                        update_ops
-                    )} fields for anchor {_id}"
-                );
-            }
+
+            # Log success (document was either updated or created via upsert with full data)
+            logger.debug(
+                f"MongoDB partial_update: updated {len(update_ops)} fields for anchor {_id}"
+            );
         }
     } except Exception as e {
         logger.error(f"MongoDB partial_update failed: {e}");
