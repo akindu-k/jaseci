@@ -757,25 +757,26 @@ impl SqliteMemory.commit(anchor: (Anchor | None) = None) -> None {
                     }
                     # Perform partial update if we have fields to update
                     if fields_dict {
-                        # Copy dirty fields before clearing
-                        dirty_copy = set(dirty_fields);
+                        # CRITICAL: Backup dirty fields BEFORE clearing
+                        # If update fails, we restore these so next commit can retry
+                        dirty_copy = dirty_fields.copy();
 
-                        # Clear dirty fields BEFORE update to prevent infinite retry
+                        # Clear dirty fields BEFORE update to prevent infinite retry loop
+                        # (If update fails mid-transaction, we don't want to retry same fields forever)
                         archetype.__jac_clear_dirty__();
 
                         try {
-                            # Attempt the update
+                            # Attempt the update (may fail due to network, lock, etc.)
                             self.partial_update(cached_anchor, fields_dict);
+                            # Success! Dirty fields cleared, no restore needed
                         } except Exception as update_error {
-                            # On failure, restore dirty fields for retry
+                            # CRITICAL: Restore dirty fields for next commit retry
+                            # This prevents data loss when update fails
                             if '__jac_dirty_fields__' not in archetype.__dict__ {
-                                import from typing { cast }
                                 archetype.__dict__['__jac_dirty_fields__'] = set();
                             }
-                            archetype.__dict__['__jac_dirty_fields__'].update(
-                                dirty_copy
-                            );
-                            # Re-raise to be caught by outer exception handler
+                            archetype.__dict__['__jac_dirty_fields__'].update(dirty_copy);
+                            # Re-raise to trigger transaction rollback
                             raise update_error;
                         }
                     }
