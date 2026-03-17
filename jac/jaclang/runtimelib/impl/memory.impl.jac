@@ -3,6 +3,7 @@
 Implementations for VolatileMemory, LocalCacheMemory, SqliteMemory, and TieredMemory.
 """
 
+import json;
 import logging;
 import os;
 import sqlite3;
@@ -11,6 +12,7 @@ import from pickle { dumps, loads }
 import from typing { cast }
 import from uuid { UUID }
 import from jaclang.jac0core.archetype { Anchor, NodeAnchor, Root }
+import from jaclang.runtimelib.serializer { Serializer }
 
 glob logger = logging.getLogger(__name__);
 
@@ -174,16 +176,97 @@ impl SqliteMemory._ensure_connection -> None {
     self.__conn__ = sqlite3.connect(self.path, check_same_thread=False);
     self.__conn__.execute("PRAGMA journal_mode=WAL");
     self.__conn__.execute("PRAGMA synchronous=NORMAL");
-    # Create anchors table if it doesn't exist
-    self.__conn__.execute(
-        """
-        CREATE TABLE IF NOT EXISTS anchors (
-            id TEXT PRIMARY KEY,
-            data BLOB NOT NULL
-        )
-    """
+
+    # Check if we need to migrate from old BLOB schema to JSON schema
+    cursor = self.__conn__.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='anchors'"
     );
+    table_exists = cursor.fetchone() is not None;
+
+    if table_exists {
+        # Check if it's the old BLOB schema by inspecting column types
+        cursor = self.__conn__.execute("PRAGMA table_info(anchors)");
+        columns = {row[1]: row[2] for row in cursor.fetchall()};
+
+        if 'data' in columns and columns['data'] == 'BLOB' {
+            # Old schema detected - migrate to JSON
+            logger.info(
+                "Migrating SQLite schema from BLOB to JSON with version support..."
+            );
+            self._migrate_blob_to_json();
+        }
+    } else {
+        # Create new JSON-based schema with version support
+        self.__conn__.execute(
+            """
+            CREATE TABLE anchors (
+                id TEXT PRIMARY KEY,
+                data TEXT NOT NULL,
+                version INTEGER NOT NULL DEFAULT 0
+            )
+        """
+        );
+        # Create index on version for optimistic locking queries
+        self.__conn__.execute("CREATE INDEX idx_version ON anchors(version)");
+        self.__conn__.commit();
+    }
     self.__conn__.commit();
+}
+
+"""Migrate from old BLOB schema to JSON schema with version support."""
+impl SqliteMemory._migrate_blob_to_json -> None {
+    logger.info("Starting migration from BLOB to JSON schema...");
+    try {
+        # Create new table with JSON schema
+        self.__conn__.execute(
+            """
+            CREATE TABLE anchors_new (
+                id TEXT PRIMARY KEY,
+                data TEXT NOT NULL,
+                version INTEGER NOT NULL DEFAULT 0
+            )
+        """
+        );
+
+        # Migrate data from old table to new table
+        cursor = self.__conn__.execute("SELECT id, data FROM anchors");
+        migrated = 0;
+        failed = 0;
+
+        for row in cursor.fetchall() {
+            try {
+                # Deserialize BLOB data
+                anchor = loads(row[1]);
+                # Serialize to JSON
+                json_data = json.dumps(Serializer.serialize(anchor, include_type=True));
+                # Insert into new table with version 0
+                self.__conn__.execute(
+                    "INSERT INTO anchors_new (id, data, version) VALUES (?, ?, 0)",
+                    (row[0], json_data)
+                );
+                migrated += 1;
+            } except Exception as e {
+                logger.warning(f"Failed to migrate anchor {row[0]}: {e}");
+                failed += 1;
+            }
+        }
+
+        # Drop old table and rename new table
+        self.__conn__.execute("DROP TABLE anchors");
+        self.__conn__.execute("ALTER TABLE anchors_new RENAME TO anchors");
+
+        # Create index on version
+        self.__conn__.execute("CREATE INDEX idx_version ON anchors(version)");
+
+        self.__conn__.commit();
+        logger.info(
+            f"Migration complete: {migrated} anchors migrated, {failed} failed"
+        );
+    } except Exception as e {
+        logger.error(f"Migration failed: {e}");
+        self.__conn__.rollback();
+        raise e;
+    }
 }
 
 """Check if database connection is available."""
@@ -205,20 +288,35 @@ impl SqliteMemory.get(id: UUID) -> (Anchor | None) {
     # Check database
     if self.__conn__ {
         cursor = self.__conn__.execute(
-            "SELECT data FROM anchors WHERE id = ?", (str(id), )
+            "SELECT data, version FROM anchors WHERE id = ?", (str(id), )
         );
         if (row := cursor.fetchone()) {
             try {
-                anchor = loads(row[0]);
-                # Promote to memory cache
-                self.__mem__[id] = anchor;
-                return anchor;
-            } except (UnpicklingError, ModuleNotFoundError, AttributeError) {
-                # Can't unpickle - likely stale data from previous session
-                # Delete the stale entry
-                self.__conn__.execute("DELETE FROM anchors WHERE id = ?", (str(id), ));
-                self.__conn__.commit();
-                return None;
+                # Try JSON deserialization first (new format)
+                json_data = json.loads(row[0]);
+                anchor = Serializer.deserialize(json_data);
+                if anchor and isinstance(anchor, Anchor) {
+                    # Set version from database
+                    anchor.version = row[1] if len(row) > 1 else 0;
+                    # Promote to memory cache
+                    self.__mem__[id] = anchor;
+                    return anchor;
+                }
+            } except (json.JSONDecodeError, ValueError) {
+                # Try BLOB deserialization (old format) - fallback for unmigrated data
+                try {
+                    anchor = loads(row[0]);
+                    # Promote to memory cache
+                    self.__mem__[id] = anchor;
+                    return anchor;
+                } except (UnpicklingError, ModuleNotFoundError, AttributeError) {
+                    # Can't deserialize - delete stale entry
+                    self.__conn__.execute(
+                        "DELETE FROM anchors WHERE id = ?", (str(id), )
+                    );
+                    self.__conn__.commit();
+                    return None;
+                }
             }
         }
     }
@@ -231,9 +329,13 @@ impl SqliteMemory.put(anchor: Anchor) -> None {
     if anchor.persistent {
         self._ensure_connection();
         try {
+            # Serialize to JSON
+            json_data = json.dumps(Serializer.serialize(anchor, include_type=True));
+            # Increment version on every put
+            anchor.version += 1;
             self.__conn__.execute(
-                "INSERT OR REPLACE INTO anchors (id, data) VALUES (?, ?)",
-                (str(anchor.id), dumps(anchor))
+                "INSERT OR REPLACE INTO anchors (id, data, version) VALUES (?, ?, ?)",
+                (str(anchor.id), json_data, anchor.version)
             );
             self.__conn__.commit();
         } except Exception as e {
@@ -440,7 +542,11 @@ impl SqliteMemory.bulk_put(anchors: Iterable[Anchor]) -> None {
     }
 }
 
-"""Partially update an anchor's archetype fields."""
+"""Partially update an anchor's archetype fields with optimistic locking.
+
+Uses JSON path updates for true atomic field-level modifications. Implements
+optimistic locking via version field to detect concurrent modifications.
+"""
 impl SqliteMemory.partial_update(
     anchor: Anchor, fields: (dict[str, object] | None) = None
 ) -> None {
@@ -449,65 +555,128 @@ impl SqliteMemory.partial_update(
         return;
     }
     # If no fields specified, fall back to full put
-    if fields is None {
+    if fields is None or not fields {
         self.put(anchor);
         return;
     }
     # Lazily create connection if needed
     self._ensure_connection();
     key = str(anchor.id);
-    try {
-        # Begin transaction with immediate lock to prevent lost updates
-        # IMMEDIATE lock prevents other writers from starting their transaction
-        # until this one completes, ensuring Read-Modify-Write atomicity
-        self.__conn__.execute("BEGIN IMMEDIATE");
+
+    # Retry loop for optimistic lock conflicts
+    max_retries = 3;
+    for attempt in range(max_retries) {
         try {
-            # Get existing anchor from database
-            cursor = self.__conn__.execute(
-                "SELECT data FROM anchors WHERE id = ?", (key, )
-            );
-            row = cursor.fetchone();
-            if row {
-                stored = loads(row[0]);
-                # Update only the specified fields in the archetype
-                if stored.is_populated() and anchor.is_populated() {
-                    for (field_name, field_value) in fields.items() {
-                        if stored.archetype?.__dict__
-                        and field_name in stored.archetype.__dict__ {
-                            setattr(stored.archetype, field_name, field_value);
-                        }
-                    }
-                    # Write back the modified anchor to database
-                    self.__conn__.execute(
-                        "INSERT OR REPLACE INTO anchors (id, data) VALUES (?, ?)",
-                        (key, dumps(stored))
+            # Get current version from database (or L1 cache if available)
+            current_version = anchor.version;
+
+            # Build JSON path updates for each field using json_set
+            # This creates an atomic UPDATE query that modifies only the specified fields
+            update_chain = "data";
+            params = [];
+
+            for (field_name, field_value) in fields.items() {
+                # Serialize the field value to JSON
+                serialized_value = Serializer._serialize_value(
+                    field_value, include_type=True
+                );
+                # Build nested json_set calls: json_set(data, '$.archetype.field', value)
+                json_path = f"$.archetype.{field_name}";
+                update_chain = f"json_set({update_chain}, ?, ?)";
+                params.extend([json_path, json.dumps(serialized_value)]);
+            }
+
+            # Execute atomic UPDATE with optimistic locking (version check)
+            # This will only update if the version matches (no one else modified it)
+            params.extend([current_version, key, current_version]);
+            update_sql = f"""
+                UPDATE anchors
+                SET data = {update_chain},
+                    version = version + 1
+                WHERE id = ? AND version = ?
+            """;
+
+            cursor = self.__conn__.execute(update_sql, params);
+            rows_affected = cursor.rowcount;
+
+            if rows_affected == 0 {
+                # Version mismatch - someone else updated this anchor
+                # Fetch fresh version and retry
+                cursor = self.__conn__.execute(
+                    "SELECT version FROM anchors WHERE id = ?", (key, )
+                );
+                row = cursor.fetchone();
+                if row {
+                    # Document exists but version changed - optimistic lock conflict
+                    logger.debug(
+                        f"Optimistic lock conflict for anchor {key} "
+                        f"(expected v{current_version}, found v{row[0]}). "
+                        f"Retry {attempt + 1}/{max_retries}"
                     );
-                    # Update in-memory cache with the incoming anchor
-                    self.__mem__[anchor.id] = anchor;
+                    # Refetch the anchor to get latest version
+                    fresh_anchor = self.get(anchor.id);
+                    if fresh_anchor {
+                        anchor.version = fresh_anchor.version;
+                        # Retry with fresh version
+                        continue;
+                    }
                 } else {
-                    # If not populated, rollback and fall back to full put
+                    # Document doesn't exist - create it with full put
                     self.__conn__.rollback();
                     self.put(anchor);
                     return;
                 }
             } else {
-                # If not in database yet, rollback and just do a full put
-                self.__conn__.rollback();
+                # Success! Update completed atomically
+                self.__conn__.commit();
+                # Update anchor version in memory to match database
+                anchor.version = current_version + 1;
+                # Refetch to update L1 cache with merged result from database
+                # This ensures read-your-writes consistency
+                cursor = self.__conn__.execute(
+                    "SELECT data, version FROM anchors WHERE id = ?", (key, )
+                );
+                row = cursor.fetchone();
+                if row {
+                    json_data = json.loads(row[0]);
+                    merged_anchor = Serializer.deserialize(json_data);
+                    if merged_anchor and isinstance(merged_anchor, Anchor) {
+                        merged_anchor.version = row[1];
+                        # Update L1 cache with actual merged result
+                        self.__mem__[anchor.id] = merged_anchor;
+                    }
+                }
+                logger.debug(
+                    f"Partial update succeeded for anchor {key}: "
+                    f"updated {len(fields)} fields (v{current_version} -> v{current_version + 1})"
+                );
+                return;
+            }
+        } except Exception as e {
+            logger.warning(
+                f"SqliteMemory.partial_update attempt {attempt + 1} failed: {e}"
+            );
+            self.__conn__.rollback();
+            if attempt == max_retries - 1 {
+                # Last attempt failed - fall back to full put
+                logger.error(
+                    f"All {max_retries} partial_update attempts failed for {key}, "
+                    "falling back to full put"
+                );
                 self.put(anchor);
                 return;
             }
-            # Commit the transaction
-            self.__conn__.commit();
-        } except Exception as inner_e {
-            # Rollback on any error during transaction
-            self.__conn__.rollback();
-            raise inner_e;
+            # Retry
+            continue;
         }
-    } except Exception as e {
-        logger.warning(f"SqliteMemory.partial_update failed: {e}");
-        # Fall back to full put on error
-        self.put(anchor);
     }
+
+    # If we exhausted all retries due to version conflicts
+    logger.error(
+        f"Exhausted {max_retries} retries due to optimistic lock conflicts for {key}, "
+        "falling back to full put"
+    );
+    self.put(anchor);
 }
 
 """Get garbage collection list."""
@@ -544,7 +713,7 @@ impl SqliteMemory.commit(anchor: (Anchor | None) = None) -> None {
                     archetype.__jac_clear_dirty__();
                 } elif dirty_fields := archetype.__jac_dirty_fields__() {
                     # Check if this archetype has dirty fields tracked
-                    # Build the fields dict from dirty field names
+                    # Build the fields dict from dirty field names FIRST
                     fields_dict = {};
                     for field_name in dirty_fields {
                         if hasattr(archetype, field_name) {
@@ -553,9 +722,27 @@ impl SqliteMemory.commit(anchor: (Anchor | None) = None) -> None {
                     }
                     # Perform partial update if we have fields to update
                     if fields_dict {
-                        self.partial_update(cached_anchor, fields_dict);
-                        # Clear dirty fields after persisting
+                        # Copy dirty fields before clearing
+                        dirty_copy = set(dirty_fields);
+
+                        # Clear dirty fields BEFORE update to prevent infinite retry
                         archetype.__jac_clear_dirty__();
+
+                        try {
+                            # Attempt the update
+                            self.partial_update(cached_anchor, fields_dict);
+                        } except Exception as update_error {
+                            # On failure, restore dirty fields for retry
+                            if '__jac_dirty_fields__' not in archetype.__dict__ {
+                                import from typing { cast }
+                                archetype.__dict__['__jac_dirty_fields__'] = set();
+                            }
+                            archetype.__dict__['__jac_dirty_fields__'].update(
+                                dirty_copy
+                            );
+                            # Re-raise to be caught by outer exception handler
+                            raise update_error;
+                        }
                     }
                 }
             }
@@ -705,7 +892,7 @@ impl TieredMemory.commit(anchor: (Anchor | None) = None) -> None {
                     archetype.__jac_clear_dirty__();
                 } elif dirty_fields := archetype.__jac_dirty_fields__() {
                     # Check if this archetype has dirty fields tracked
-                    # Build the fields dict from dirty field names
+                    # Build the fields dict from dirty field names FIRST
                     fields_dict = {};
                     for field_name in dirty_fields {
                         if hasattr(archetype, field_name) {
@@ -714,19 +901,35 @@ impl TieredMemory.commit(anchor: (Anchor | None) = None) -> None {
                     }
                     # Perform partial update if we have fields to update
                     if fields_dict {
-                        if self.l3 and self.l3?.partial_update {
-                            # Use partial update to avoid race conditions
-                            self.l3.partial_update(cached_anchor, fields_dict);
-                            # Invalidate L2 cache for this anchor
-                            if self.l2 and self.l2?.invalidate {
-                                self.l2.invalidate(cached_anchor.id);
-                            }
-                        } else {
-                            # Fall back to full put if partial_update not available
-                            self.put(cached_anchor);
-                        }
-                        # Clear dirty fields after persisting
+                        # Copy dirty fields before clearing
+                        dirty_copy = set(dirty_fields);
+
+                        # Clear dirty fields BEFORE update to prevent infinite retry
                         archetype.__jac_clear_dirty__();
+
+                        try {
+                            if self.l3 and self.l3?.partial_update {
+                                # Use partial update to avoid race conditions
+                                self.l3.partial_update(cached_anchor, fields_dict);
+                                # Invalidate L2 cache for this anchor
+                                if self.l2 and self.l2?.invalidate {
+                                    self.l2.invalidate(cached_anchor.id);
+                                }
+                            } else {
+                                # Fall back to full put if partial_update not available
+                                self.put(cached_anchor);
+                            }
+                        } except Exception as update_error {
+                            # On failure, restore dirty fields for retry
+                            if '__jac_dirty_fields__' not in archetype.__dict__ {
+                                archetype.__dict__['__jac_dirty_fields__'] = set();
+                            }
+                            archetype.__dict__['__jac_dirty_fields__'].update(
+                                dirty_copy
+                            );
+                            # Re-raise to be caught by outer exception handler
+                            raise update_error;
+                        }
                     }
                 }
             }

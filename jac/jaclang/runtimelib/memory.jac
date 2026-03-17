@@ -161,6 +161,8 @@ obj SqliteMemory(PersistentMemory) {
     def postinit -> None;
     # Lazy connection initialization - DB only created when data is written
     def _ensure_connection -> None;
+    # Migration helper for BLOB to JSON schema
+    def _migrate_blob_to_json -> None;
     # Memory interface
     def is_available -> bool;
     def get(id: UUID) -> (Anchor | None);

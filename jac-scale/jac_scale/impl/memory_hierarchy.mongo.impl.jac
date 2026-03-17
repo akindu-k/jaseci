@@ -69,9 +69,17 @@ impl MongoBackend.put(anchor: Anchor) -> None {
     _id = to_uuid(anchor.id);
     try {
         data = Serializer.serialize(anchor, include_type=True);
+        # Increment version on every put
+        anchor.version += 1;
         self.collection.update_one(
             {'_id': str(_id)},
-            {'$set': {'data': data, 'type': type(anchor).__name__}},
+            {
+                '$set': {
+                    'data': data,
+                    'type': type(anchor).__name__,
+                    'version': anchor.version
+                }
+            },
             upsert=True
         );
     } except Exception as e {
@@ -219,7 +227,11 @@ impl MongoBackend.bulk_put(anchors: Iterable[Anchor]) -> None {
     }
 }
 
-"""Partially update an anchor's archetype fields (MongoDB implementation)."""
+"""Partially update an anchor's archetype fields with optimistic locking.
+
+Uses MongoDB's atomic $set operations with version-based optimistic locking.
+Uses findOneAndUpdate to get the merged result for read-your-writes consistency.
+"""
 impl MongoBackend.partial_update(
     anchor: Anchor, fields: (dict[str, object] | None) = None
 ) -> None {
@@ -228,50 +240,135 @@ impl MongoBackend.partial_update(
     }
     _id = to_uuid(anchor.id);
     # If no fields specified, fall back to full put
-    if fields is None {
+    if fields is None or not fields {
         self.put(anchor);
         return;
     }
-    try {
-        # Build MongoDB $set operation for only the specified archetype fields
-        # We need to serialize each field value and update within the nested data.archetype object
-        update_ops = {};
-        for (field_name, field_value) in fields.items() {
-            # Serialize the field value
-            serialized_value = Serializer._serialize_value(
-                field_value, include_type=True
-            );
-            # Use MongoDB dot notation to update nested field in data.archetype
-            update_ops[f"data.archetype.{field_name}"] = serialized_value;
-        }
-        if update_ops {
-            # Serialize the full anchor for $setOnInsert (used only if document doesn't exist)
-            # This ensures that if the document is being created, it has ALL fields, not just dirty ones
-            full_data = Serializer.serialize(anchor, include_type=True);
 
-            # Use upsert=True with $setOnInsert for production-grade behavior:
-            # - If document exists: Only update the specified fields ($set)
-            # - If document doesn't exist: Create complete document ($setOnInsert)
-            # This is atomic, efficient (1 DB call), and prevents incomplete documents
-            result = self.collection.update_one(
-                {'_id': str(_id)},
-                {
-                    '$set': update_ops,  # Update specified fields if document exists
-                    '$setOnInsert': {'data': full_data, 'type': type(anchor).__name__}
-                },
-                upsert=True  # Create if doesn't exist, using $setOnInsert for complete data
-            );
+    # Retry loop for optimistic lock conflicts
+    max_retries = 3;
+    for attempt in range(max_retries) {
+        try {
+            # Get current version from anchor
+            current_version = anchor.version;
 
-            # Log success (document was either updated or created via upsert with full data)
-            logger.debug(
-                f"MongoDB partial_update: updated {len(update_ops)} fields for anchor {_id}"
-            );
+            # Build MongoDB $set operation for only the specified archetype fields
+            update_ops = {};
+            for (field_name, field_value) in fields.items() {
+                # Serialize the field value
+                serialized_value = Serializer._serialize_value(
+                    field_value, include_type=True
+                );
+                # Use MongoDB dot notation to update nested field in data.archetype
+                update_ops[f"data.archetype.{field_name}"] = serialized_value;
+            }
+
+            if update_ops {
+                # Serialize the full anchor for $setOnInsert (used only if document doesn't exist)
+                full_data = Serializer.serialize(anchor, include_type=True);
+
+                # Use findOneAndUpdate with optimistic locking (version check)
+                # This atomically:
+                # 1. Checks the version matches (no concurrent modification)
+                # 2. Updates only the specified fields
+                # 3. Increments the version
+                # 4. Returns the UPDATED document for read-your-writes
+                result = self.collection.find_one_and_update(
+                    {'_id': str(_id), 'version': current_version},
+                    {
+                        '$set': update_ops,  # Update specified fields
+                        '$inc': {'version': 1},  # Atomic version increment
+                        '$setOnInsert': {
+                            'data': full_data,
+                            'type': type(anchor).__name__,
+                            'version': 0  # Will be incremented to 1 by $inc
+                        }
+                    },
+                    upsert=True,
+                    return_document=True  # Return the document AFTER update
+                );
+
+                if result {
+                    # Check if this was an insert (upsert created new doc)
+                    was_insert = result.get('version', 0) == 1 and current_version == 0;
+
+                    if was_insert or result.get('version', 0) == current_version + 1 {
+                        # Success! Update completed
+                        # Update L1 cache with the actual merged result from MongoDB
+                        updated_anchor = self._load_anchor(result);
+                        if updated_anchor {
+                            # Update anchor version to match database
+                            anchor.version = result.get('version', current_version + 1);
+
+                            logger.debug(
+                                f"MongoDB partial_update succeeded: updated {len(
+                                    update_ops
+                                )} "
+                                f"fields for anchor {_id} (v{current_version} -> v{anchor.version})"
+                            );
+                            return;
+                        }
+                    } else {
+                        # Version mismatch - concurrent modification detected
+                        actual_version = result.get('version', -1);
+                        logger.debug(
+                            f"Optimistic lock conflict for anchor {_id} "
+                            f"(expected v{current_version}, found v{actual_version}). "
+                            f"Retry {attempt + 1}/{max_retries}"
+                        );
+                        # Refetch to get latest version and retry
+                        fresh_doc = self.collection.find_one({'_id': str(_id)});
+                        if fresh_doc {
+                            anchor.version = fresh_doc.get('version', 0);
+                            # Retry with fresh version
+                            continue;
+                        }
+                    }
+                } else {
+                    # findOneAndUpdate returned None - document might not exist
+                    # or version mismatch prevented update
+                    logger.debug(
+                        f"MongoDB findOneAndUpdate returned None for {_id}, "
+                        f"checking if document exists..."
+                    );
+                    # Check if document exists with different version
+                    existing = self.collection.find_one({'_id': str(_id)});
+                    if existing {
+                        # Version conflict - retry with correct version
+                        anchor.version = existing.get('version', 0);
+                        logger.debug(
+                            f"Version conflict detected, retrying with v{anchor.version}"
+                        );
+                        continue;
+                    } else {
+                        # Document doesn't exist - do full put
+                        self.put(anchor);
+                        return;
+                    }
+                }
+            }
+        } except Exception as e {
+            logger.warning(f"MongoDB partial_update attempt {attempt + 1} failed: {e}");
+            if attempt == max_retries - 1 {
+                # Last attempt failed - fall back to full put
+                logger.error(
+                    f"All {max_retries} MongoDB partial_update attempts failed for {_id}, "
+                    "falling back to full put"
+                );
+                self.put(anchor);
+                return;
+            }
+            # Retry
+            continue;
         }
-    } except Exception as e {
-        logger.error(f"MongoDB partial_update failed: {e}");
-        # On error, fall back to full put
-        self.put(anchor);
     }
+
+    # Exhausted all retries
+    logger.error(
+        f"Exhausted {max_retries} retries due to optimistic lock conflicts for {_id}, "
+        "falling back to full put"
+    );
+    self.put(anchor);
 }
 
 """Load anchor from raw MongoDB document."""
@@ -281,7 +378,12 @@ impl MongoBackend._load_anchor(raw: dict[(str, Any)]) -> (Anchor | None) {
     }
     try {
         data = raw['data'];
-        return Serializer.deserialize(data);
+        anchor = Serializer.deserialize(data);
+        # Set version from MongoDB document if available
+        if anchor and isinstance(anchor, Anchor) {
+            anchor.version = raw.get('version', 0);
+        }
+        return anchor;
     } except Exception as e {
         doc_id = raw.get('_id', '<unknown>');
         doc_type = raw.get('type', '<unknown>');
