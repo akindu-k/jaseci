@@ -961,22 +961,13 @@ class JacRuntime(JacRuntimeInterface) {
     static def set_base_path(base_path: (str | None)) -> None;
 
     """Set the context for the machine (global, for backward compatibility)."""
-    static def set_context(context: ExecutionContext) -> None {
-        JacRuntime.exec_ctx = context;
-    }
+    static def set_context(context: ExecutionContext) -> None;
 
     """Set request-scoped execution context (for web servers)."""
-    static def set_request_context(context: ExecutionContext) -> None {
-        _request_context.set(context);
-    }
+    static def set_request_context(context: ExecutionContext) -> None;
 
     """Clear request-scoped context and commit changes."""
-    static def clear_request_context -> None {
-        ctx = _request_context.get();
-        if ctx is not None {
-            ctx.close();  # Commit and clear L1
-        }
-    }
+    static def clear_request_context -> None;
 }
 
 """Context manager to temporarily disable external plugins.

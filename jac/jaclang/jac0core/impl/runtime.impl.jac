@@ -2310,3 +2310,16 @@ impl JacRuntime.set_base_path(base_path: (str | None)) -> None {
 impl JacRuntime.set_context(context: ExecutionContext) -> None {
     JacRuntime.exec_ctx = context;
 }
+
+"""Set request-scoped execution context (for web servers)."""
+impl JacRuntime.set_request_context(context: ExecutionContext) -> None {
+    _request_context.set(context);
+}
+
+"""Clear request-scoped context and commit changes."""
+impl JacRuntime.clear_request_context -> None {
+    ctx = _request_context.get();
+    if ctx is not None {
+        ctx.close();  # Commit and clear L1
+    }
+}
