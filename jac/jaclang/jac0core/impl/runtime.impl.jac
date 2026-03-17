@@ -907,12 +907,12 @@ impl JacBasics.commit(anchor: Anchor | Archetype | None = None) -> None {
 }
 
 """Purge current or target graph."""
-impl JacBasics.reset_graph(`root: (Root | None) = None) -> int {
+impl JacBasics.reset_graph(root: (Root | None) = None) -> int {
     import pickle;
     import sqlite3;
     ctx = JacRuntimeInterface.get_context();
     mem = ctx.mem;
-    ranchor = `root.__jac__ if `root else ctx.user_root;
+    ranchor = root.__jac__ if root else ctx.user_root;
     deleted_count = 0;
     deleted_ids: set[UUID] = `set();
     persistence = mem.l3;
@@ -1143,9 +1143,15 @@ impl JacBasics.jac_import(
             JacRuntimeInterface.load_module(module_name, module, force=True);
         } else {
             module = importlib.import_module(module_name);
-            if reload_module {
-                JacRuntimeInterface.load_module(module_name, module, force=True);
-            }
+            # Always register in loaded_modules. When the module is freshly
+            # imported, exec_module already calls load_module, but if the
+            # module was cached in sys.modules (e.g. from a prior import
+            # that was cleared from loaded_modules but not sys.modules),
+            # exec_module is NOT re-invoked and the module would be missing
+            # from loaded_modules. Using force=True when reloading.
+            JacRuntimeInterface.load_module(
+                module_name, module, force=bool(reload_module)
+            );
         }
         if items {
             imported_items = [];
@@ -1454,7 +1460,7 @@ impl JacBasics.safe_subscript(`obj: Any, key: Any) -> Any {
 }
 
 """Jac's root getter."""
-impl JacBasics.`root -> Root {
+impl JacBasics.root -> Root {
     return JacRuntime.get_context().get_root();
 }
 
