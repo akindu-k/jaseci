@@ -314,19 +314,41 @@ impl Archetype.__setattr__(self: Archetype, name: str, value: object) -> None {
                 object.__setattr__(self, '__jac_dirty_fields__', set());
             }
             dirty_fields = self.__dict__['__jac_dirty_fields__'];
-            # Prevent memory leak: if too many dirty fields, clear and mark for full sync
-            # Max 100 dirty fields - beyond that, we'll do a full save instead
-            if len(dirty_fields) >= 100 {
+
+            # Add the field to dirty set first
+            dirty_fields.add(name);
+
+            # Dynamic threshold: switch to full sync if >80% of fields are dirty
+            # This scales automatically: 10 fields → switch at 8, 200 fields → switch at 160
+            # Get total fields from class (excluding private/internal fields)
+            total_fields = len(
+                [
+                    f
+                    for f in self.__class__.__dict__.keys()
+                    if not f.startswith('_') and f != 'reports'
+                ]
+            );
+
+            # If we don't have field metadata, use a conservative threshold of 50 fields
+            if total_fields == 0 {
+                total_fields = 50;
+            }
+
+            # Calculate dynamic threshold (80% of total fields)
+            dirty_threshold = max(int(total_fields * 0.80), 10);  # Minimum 10 fields
+
+            if len(dirty_fields) >= dirty_threshold {
                 import from jaclang { logger }
-                logger.warning(
-                    f"Dirty fields limit exceeded for {self.__class__.__name__} "
-                    f"[{anchor.id}]. Clearing dirty fields - next save will be full sync."
+                logger.debug(
+                    f"Dirty fields threshold reached for {self.__class__.__name__} "
+                    f"[{anchor.id}]: {len(dirty_fields)}/{total_fields} fields modified "
+                    f"({len(dirty_fields) / total_fields * 100:.1f}%). "
+                    f"Switching to full sync for efficiency."
                 );
-                dirty_fields.clear();
                 # Mark that we need a full sync by setting a special flag
+                # Keep dirty_fields intact for potential debugging
                 object.__setattr__(self, '__jac_force_full_sync__', True);
             }
-            dirty_fields.add(name);
         }
     }
 }
