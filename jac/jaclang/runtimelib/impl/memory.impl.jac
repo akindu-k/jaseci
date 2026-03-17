@@ -466,10 +466,29 @@ impl SqliteMemory.sync -> None {
         key = str(id);
         try {
             cursor = self.__conn__.execute(
-                "SELECT data FROM anchors WHERE id = ?", (key, )
+                "SELECT data, version FROM anchors WHERE id = ?", (key, )
             );
             row = cursor.fetchone();
-            stored = loads(row[0]) if row else None;
+            stored = None;
+            stored_version = 0;
+
+            if row {
+                # Try to deserialize - handle both JSON (new) and BLOB (old) formats
+                try {
+                    # Try JSON first (new format)
+                    json_data = json.loads(row[0]);
+                    stored = Serializer.deserialize(json_data);
+                    stored_version = row[1] if len(row) > 1 else 0;
+                } except (json.JSONDecodeError, ValueError) {
+                    # Fall back to BLOB (old format)
+                    try {
+                        stored = loads(row[0]);
+                        stored_version = 0;  # Old format has no version
+                    } except Exception {
+                        stored = None;
+                    }
+                }
+            }
 
             if stored and stored.is_populated() {
                 changed = False;
@@ -508,9 +527,14 @@ impl SqliteMemory.sync -> None {
                 }
                 # Only write to database if something actually changed
                 if changed {
+                    # Use JSON format with version
+                    json_data = json.dumps(
+                        Serializer.serialize(stored, include_type=True)
+                    );
+                    stored.version = stored_version + 1;
                     self.__conn__.execute(
-                        "INSERT OR REPLACE INTO anchors (id, data) VALUES (?, ?)",
-                        (key, dumps(stored))
+                        "INSERT OR REPLACE INTO anchors (id, data, version) VALUES (?, ?, ?)",
+                        (key, json_data, stored.version)
                     );
                 }
             } else {
@@ -521,14 +545,20 @@ impl SqliteMemory.sync -> None {
                     and not anchor.edges
                 )
                 and Jac.check_write_access(anchor) {
+                    # Use JSON format with version
+                    json_data = json.dumps(
+                        Serializer.serialize(anchor, include_type=True)
+                    );
+                    anchor.version += 1;
                     self.__conn__.execute(
-                        "INSERT OR REPLACE INTO anchors (id, data) VALUES (?, ?)",
-                        (key, dumps(anchor))
+                        "INSERT OR REPLACE INTO anchors (id, data, version) VALUES (?, ?, ?)",
+                        (key, json_data, anchor.version)
                     );
                 }
             }
-        } except (PicklingError, AttributeError, ModuleNotFoundError) {
-            # Skip anchors that can't be pickled (e.g., transient test classes)
+        } except (PicklingError, AttributeError, ModuleNotFoundError) as e {
+            # Skip anchors that can't be serialized (e.g., transient test classes)
+            logger.debug(f"Skipping anchor {key} during sync: {e}");
             continue;
         }
     }
