@@ -310,19 +310,7 @@ class JacBasics {
     static def setup -> None;
 
     """Get current execution context (request-scoped if available, else global)."""
-    static def get_context -> ExecutionContext {
-        # Try request-scoped context first (for web servers)
-        ctx = _request_context.get();
-        if ctx is not None {
-            return ctx;
-        }
-
-        # Fallback to global context (CLI, tests, non-web environments)
-        if (JacRuntime.exec_ctx is None) {
-            JacRuntime.exec_ctx = JacRuntimeInterface.create_j_context(user_root=None);
-        }
-        return JacRuntime.exec_ctx;
-    }
+    static def get_context -> ExecutionContext;
 
     """Commit all data from memory to datasource."""
     static def commit(anchor: Anchor | Archetype | None = None) -> None;
