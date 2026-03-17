@@ -112,6 +112,7 @@ impl MongoBackend.close -> None {
         }
         self.client = None;
     }
+    self._mem_ref = None;
 }
 
 """Check if an anchor exists in MongoDB."""
