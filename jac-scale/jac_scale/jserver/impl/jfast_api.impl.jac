@@ -845,61 +845,31 @@ impl JFastApiServer.init(
 
     async def request_context_middleware(request: Request, call_next: Callable) {
         ctx = JacRuntimeInterface.create_j_context(user_root=None);
+        JacRuntime.set_request_context(ctx);
+
         user_id = getattr(request.state, 'user_root_id', None)
             if request?.state
             else None;
 
-        logger.debug(
-            f"Request {id(request)}: Creating isolated context "
-            f"(user_root_id={user_id})"
-        );
-
         if user_id {
             try {
                 ctx.set_user_root(user_id);
-                logger.debug(f"Request {id(request)}: Set user_root to {user_id}");
-            } except ValueError as e {
-                logger.warning(
-                    f"Request {id(request)}: Invalid user_root_id '{user_id}': {e}. "
-                    f"Using system root instead."
-                );
+            } except ValueError {
+                logger.warning(f"Invalid user_root_id: {user_id}, using system root");
+            }
+        }
+
+        try {
+            return await call_next(request);
+        } finally {
+            try {
+                JacRuntime.clear_request_context();
             } except Exception as e {
                 logger.error(
-                    f"Request {id(request)}: Failed to set user_root '{user_id}': {e}",
+                    f"CRITICAL: Failed to commit request context: {e}. Data may be lost!",
                     exc_info=True
                 );
                 raise;
-            }
-        }
-        JacRuntime.set_request_context(ctx);
-
-        try {
-            response = await call_next(request);
-
-            logger.debug(
-                f"Request {id(request)}: Completed successfully "
-                f"(L1 cache had {len(ctx.mem.get_mem())} objects)"
-            );
-
-            return response;
-        } except Exception as e {
-            logger.error(
-                f"Request {id(request)}: Failed during execution: {e}", exc_info=True
-            );
-            raise;
-        } finally {
-            try {
-                l1_size = len(ctx.mem.get_mem());
-                JacRuntime.clear_request_context();
-                logger.debug(
-                    f"Request {id(request)}: Cleared context "
-                    f"(committed and freed {l1_size} L1 objects)"
-                );
-            } except Exception as e {
-                logger.error(
-                    f"Request {id(request)}: Failed to clear context: {e}",
-                    exc_info=True
-                );
             }
         }
     }

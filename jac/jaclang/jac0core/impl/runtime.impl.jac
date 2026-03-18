@@ -2384,6 +2384,7 @@ impl JacRuntime.set_request_context(context: ExecutionContext) -> None {
 impl JacRuntime.clear_request_context -> None {
     ctx = _request_context.get();
     if ctx is not None {
-        ctx.close();  # Commit and clear L1
+        ctx.close(); 
+        _request_context.set(None);
     }
 }
