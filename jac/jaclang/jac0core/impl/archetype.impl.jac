@@ -304,12 +304,7 @@ impl Archetype.__init_subclass__(cls: Any, **kwargs: object) -> None {
 """Mark anchor as updated when properties are modified."""
 impl Archetype.__setattr__(self: Archetype, name: str, value: Any) -> None {
     object.__setattr__(self, name, value);
-    if (
-        not name.startswith('_')
-        and name != '__jac__'
-        and self?.__dict__
-        and '__jac__' in self.__dict__
-    ) {
+    if not name.startswith('_') and name != '__jac__' {
         try {
             anchor = self.__jac__;
             if hasattr(anchor, 'is_updated') {
