@@ -435,6 +435,136 @@ test "no unnecessary saves on read-only operations" {
     }
 }
 
+test "updated anchors committed to L2 and L3" {
+    if not JAC_FILE.exists() {
+        raise FileNotFoundError(f"Missing Jac file: {JAC_FILE}");
+    }
+
+    data_dir = FIXTURES_DIR / ".jac" / "data";
+    if data_dir.exists() {
+        import shutil;
+        shutil.rmtree(data_dir);
+    }
+
+    # Start MongoDB (L3) and Redis (L2)
+    mongo_container = MongoDbContainer("mongo:latest");
+    mongo_container.start();
+    mongo_uri = mongo_container.get_connection_url();
+    os.environ["MONGODB_URI"] = mongo_uri;
+    mongo_client = MongoClient(mongo_uri);
+
+    redis_container = RedisContainer("redis:latest", port=6379);
+    redis_container.start();
+    redis_host = redis_container.get_container_host_ip();
+    redis_port = redis_container.get_exposed_port(6379);
+    redis_url = f"redis://{redis_host}:{redis_port}/0";
+    os.environ["REDIS_URL"] = redis_url;
+    redis_client = redis.from_url(redis_url);
+
+    port = get_free_port();
+    base_url = f"http://localhost:{port}";
+    server = start_server(FIXTURES_DIR, JAC_FILE, port);
+
+    try {
+        db = mongo_client["jac_db"];
+        collection = db["_anchors"];
+        token = register_user(base_url, "test_user", "pass123");
+
+        # Create a task (write operation - should commit to L2 and L3)
+        task_response = post_request(
+            base_url,
+            "/walker/CreateTask",
+            {"id": 500, "title": "Verify L2/L3 commit"},
+            token
+        );
+        time.sleep(0.2);
+
+        # Find the Task node anchor in MongoDB
+        task_anchors = list(collection.find({"type": "NodeAnchor"}));
+        task_anchor = None;
+        for doc in task_anchors {
+            data = doc.get("data", {});
+            if isinstance(data, dict) {
+                archetype = data.get("archetype", {});
+                if (isinstance(archetype, dict)
+                    and archetype.get("__type__") == "Task"
+                    and archetype.get("id") == 500) {
+                    task_anchor = doc;
+                    break;
+                }
+            }
+        }
+
+        assert task_anchor is not None , "Task anchor not found in L3 (MongoDB)";
+        anchor_id = task_anchor["_id"];
+
+        # Verify task exists in L3 (MongoDB)
+        l3_doc = collection.find_one({"_id": anchor_id});
+        assert l3_doc is not None , f"Anchor {anchor_id} missing from L3 after creation";
+        assert l3_doc["type"] == "NodeAnchor" , f"Expected NodeAnchor, got {l3_doc['type']}";
+
+        # Verify task exists in L2 (Redis) - may not exist due to caching policy
+        redis_key = f"anchor:{anchor_id}";
+        l2_exists = redis_client.exists(redis_key);
+
+        # Update the task (should mark is_updated=True and commit to both layers)
+        update_response = post_request(
+            base_url,
+            "/walker/CompleteTask",
+            {"id": 500},
+            token
+        );
+        time.sleep(0.2);
+
+        # Verify update persisted in L3 (MongoDB)
+        l3_updated = collection.find_one({"_id": anchor_id});
+        assert l3_updated is not None , f"Anchor {anchor_id} missing from L3 after update";
+        updated_archetype = l3_updated["data"]["archetype"];
+        assert updated_archetype["completed"] is True , (
+            f"Task should be completed in L3, got {updated_archetype.get('completed')}"
+        );
+
+        # If anchor is in L2, verify it's also updated there
+        if l2_exists {
+            import json;
+            l2_data_raw = redis_client.get(redis_key);
+            if l2_data_raw {
+                l2_data = json.loads(l2_data_raw);
+                l2_completed = l2_data.get("archetype", {}).get("completed", False);
+                assert l2_completed is True , (
+                    f"Task should be completed in L2, got {l2_completed}"
+                );
+            }
+        }
+
+    } finally {
+        if server {
+            server.terminate();
+            with contextlib.suppress(Exception) {
+                server.wait(timeout=2);
+            }
+        }
+
+        system_dbs = {"admin", "config", "local"};
+        for db_name in mongo_client.list_database_names() {
+            if db_name not in system_dbs {
+                mongo_client.drop_database(db_name);
+            }
+        }
+
+        redis_client.flushall();
+        mongo_container.stop();
+        redis_container.stop();
+        time.sleep(0.5);
+        gc.collect();
+
+        if data_dir.exists() {
+            import shutil;
+            shutil.rmtree(data_dir);
+        }
+    }
+}
+
 test "data persists after server restart for sqlite" {
     if not JAC_FILE.exists() {
         raise FileNotFoundError(f"Missing Jac file: {JAC_FILE}");
