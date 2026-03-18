@@ -843,7 +843,7 @@ impl JFastApiServer.init(
     self._models: dict[(str, type[BaseModel])] = {};
     self.__server_created = False;
 
-    async def request_context_middleware(request: Request, call_next) {
+    async def request_context_middleware(request: Request, call_next: Callable) {
         ctx = JacRuntimeInterface.create_j_context(user_root=None);
         user_id = getattr(request.state, 'user_root_id', None)
             if request?.state
