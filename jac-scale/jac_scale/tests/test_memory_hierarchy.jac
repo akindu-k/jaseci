@@ -486,9 +486,11 @@ test "updated anchors committed to L2 and L3" {
             data = doc.get("data", {});
             if isinstance(data, dict) {
                 archetype = data.get("archetype", {});
-                if (isinstance(archetype, dict)
+                if (
+                    isinstance(archetype, dict)
                     and archetype.get("__type__") == "Task"
-                    and archetype.get("id") == 500) {
+                    and archetype.get("id") == 500
+                ) {
                     task_anchor = doc;
                     break;
                 }
@@ -501,7 +503,9 @@ test "updated anchors committed to L2 and L3" {
         # Verify task exists in L3 (MongoDB)
         l3_doc = collection.find_one({"_id": anchor_id});
         assert l3_doc is not None , f"Anchor {anchor_id} missing from L3 after creation";
-        assert l3_doc["type"] == "NodeAnchor" , f"Expected NodeAnchor, got {l3_doc['type']}";
+        assert l3_doc["type"] == "NodeAnchor" , f"Expected NodeAnchor, got {l3_doc[
+            'type'
+        ]}";
 
         # Verify task exists in L2 (Redis) - may not exist due to caching policy
         redis_key = f"anchor:{anchor_id}";
@@ -509,10 +513,7 @@ test "updated anchors committed to L2 and L3" {
 
         # Update the task (should mark is_updated=True and commit to both layers)
         update_response = post_request(
-            base_url,
-            "/walker/CompleteTask",
-            {"id": 500},
-            token
+            base_url, "/walker/CompleteTask", {"id": 500}, token
         );
         time.sleep(0.2);
 
@@ -536,7 +537,6 @@ test "updated anchors committed to L2 and L3" {
                 );
             }
         }
-
     } finally {
         if server {
             server.terminate();
@@ -545,7 +545,7 @@ test "updated anchors committed to L2 and L3" {
             }
         }
 
-        system_dbs = {"admin", "config", "local"};
+        system_dbs = {"admin","config","local"};
         for db_name in mongo_client.list_database_names() {
             if db_name not in system_dbs {
                 mongo_client.drop_database(db_name);
