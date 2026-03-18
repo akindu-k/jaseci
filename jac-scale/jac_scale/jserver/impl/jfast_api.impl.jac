@@ -860,16 +860,23 @@ impl JFastApiServer.init(
         }
 
         try {
-            return await call_next(request);
+            response = await call_next(request);
+            try {
+                ctx.mem.commit();
+            } except Exception as e {
+                logger.error(
+                    f"CRITICAL: Failed to commit request data: {e}. Request will fail.",
+                    exc_info=True
+                );
+                raise;
+            }
+
+            return response;
         } finally {
             try {
                 JacRuntime.clear_request_context();
             } except Exception as e {
-                logger.error(
-                    f"CRITICAL: Failed to commit request context: {e}. Data may be lost!",
-                    exc_info=True
-                );
-                raise;
+                logger.warning(f"Failed to clear request context: {e}", exc_info=True);
             }
         }
     }
