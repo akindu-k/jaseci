@@ -2,7 +2,21 @@
 
 This document provides a summary of new features, improvements, and bug fixes in each version of **Jac-Scale**. For details on changes that might require updates to your existing code, please refer to the [Breaking Changes](../breaking-changes.md) page.
 
-## jac-scale 0.2.5 (Unreleased)
+## jac-scale 0.2.7 (Unreleased)
+
+- **Kubernetes Security Hardening**: Added container-level security contexts (`allowPrivilegeEscalation: false`, `drop: ALL`, `readOnlyRootFilesystem`, `seccompProfile: RuntimeDefault`), dedicated `ServiceAccount` per workload, component-specific NetworkPolicies enforcing proper isolation (databases only accept traffic from main app + dashboards, monitoring components only accept ingress from trusted internal sources), and `pod-security.kubernetes.io/enforce: baseline` namespace labels.
+- **Scheduler Code Quality Cleanup**: Extracted shared `_authenticate_request()` and `_validate_trigger()` helpers to remove duplicated auth/validation logic across `/jobs` endpoints. Fixed `get_job()` to query by ID directly instead of loading all jobs. Replaced deprecated `datetime.utcnow()` with `datetime.now(timezone.utc)`. Persisted `is_walker` in job data to avoid redundant introspector lookups. Replaced silent exception swallowing with debug logging.
+- **Performance: Skip Unnecessary Database Writes**: Prevented unnecessary database writes by introducing an `is_updated` flag on anchors, ensuring only explicitly modified (committed) data is persisted while read-only executions skip all write operations.
+- **Client-Side Error Reporting Endpoint**: Added `POST /cl/__error__` endpoint to `JacAPIServerCore` for receiving client-side JavaScript errors. Errors are logged via the `jaclang.client_errors` logger and printed to the dev console with stack traces for visibility.
+- **Source-Mapped Error Stack Traces**: Client error stack traces received at `/cl/__error__` are now resolved from bundled JS locations to original `.jac` file paths and exact line numbers via the centralized `SourceMapper` with two-layer resolution.
+- **Client Error Rate Limiting**: The `/cl/__error__` endpoint now deduplicates identical error messages (10s window) and caps at 20 errors per minute to prevent log flooding from render loops or repeated failures.
+**Request-Scoped L1 Memory Cache**: Made the L1 (in-memory) cache request-scoped using `ContextVar`, ensuring each request gets an isolated cache that is automatically cleared after execution, preventing stale data, memory leaks, and cross-request interference while maintaining backward compatibility for CLI and tests.
+
+## jac-scale 0.2.6 (Latest Release)
+
+- **Domain & TLS support (`--enable-tls`)**: Added custom domain name routing and automatic HTTPS via cert-manager + Let's Encrypt. Set `domain` in `jac.toml`, deploy normally, point your CNAME to the NLB, then run `jac start app.jac --scale --enable-tls` to enable HTTPS without a full redeploy. cert-manager is installed automatically and certificates are renewed automatically. Configurable via `domain` and `cert_manager_email` in `[plugins.scale.kubernetes]`.
+
+## jac-scale 0.2.5
 
 - **Fix: Walker Route OpenAPI Parameter Naming**: Fixed inconsistency where walker routes with node parameters used `{nd}` in URL paths but declared `node` in OpenAPI schema, causing FastAPI validation errors (`"Field required"` for parameter `node`). The OpenAPI schema now correctly uses `nd` to match the actual path variable and function parameter. This fixes requests to `/walker/{walker_name}/{node_id}` endpoints. Note: `node` is a reserved Jac keyword, so `nd` is used as the parameter name throughout.
 - **Fix: K8s deployment time regression**: NGINX Ingress controller now starts in parallel with databases/monitoring, restoring test runtimes.
@@ -15,9 +29,12 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **User storage now supports both MongoDB and SQLite**: User authentication and management automatically uses SQLite when MongoDB is not configured, maintaining full backward compatibility with existing installations.
 - **Fix: Include `redis.conf.template` in package distribution**: Fixed `FileNotFoundError` during Redis deployment when jac-scale is installed via pip (non-editable install). The `redis.conf.template` file is now correctly included in the wheel distribution via `package-data` configuration in `pyproject.toml`.
 
-## jac-scale 0.2.4 (Latest Release)
+## jac-scale 0.2.4
 
 - **Automatic Port Fallback**: When starting the server with `jac start`, if the specified port is already in use, the server now automatically finds and uses the next available port instead of crashing with "Address already in use". A warning message displays when using an alternative port. Supports up to 10 port retries with cross-platform compatibility (Linux and Windows).
+- [fix]Fix for internet facing aws load balancer
+- 1 Minor refactor/change.
+- **Scheduling Support**: Added static and dynamic task scheduling for walkers and functions via `@schedule(trigger=...)`. Static schedules (INTERVAL/CRON/DATE) start automatically at server startup; dynamic schedules (DYNAMIC) are managed via a new `/jobs` REST API (create, list, get, update, delete) with MongoDB persistence. Scheduled items are excluded from standard walker/function endpoints. A `__system__` user executes all scheduled tasks; configure via `[plugins.scale.scheduler]` in `jac.toml`.
 - **Fix**: Fix for internet-facing AWS load balancer
 - [Internal] Convert username and password for redis and mongodb to secret when injecting to pod deployment
 - 3 Minor refactors/changes.
@@ -110,7 +127,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 ## jac-scale 0.1.7
 
 - **KWESC_NAME syntax changed from `<>` to backtick**: Updated keyword-escaped names from `<>` prefix to backtick prefix to match the jaclang grammar change.
-- **Update syntax for TYPE_OP removal**: Replaced backtick type operator syntax (`` `root ``) with `Root` and filter syntax (``(`?Type)``) with `(?:Type)` across all docs, tests, examples, and README.
+- **Update syntax for TYPE_OP removal**: Replaced backtick type operator syntax (`` `root ``) with `Root` and filter syntax (``(`?Type)``) with `[?:Type]` across all docs, tests, examples, and README.
 
 ## jac-scale 0.1.6
 

@@ -10,6 +10,7 @@ with entry {
         import from jaclang.compiler.passes.ecmascript.estree { Node as EsNode }
         import from jaclang.compiler.passes.tool.doc_ir { Doc }
         import from jaclang.jac0core.unitree { Source, Token }
+        import from llvmlite.binding { ModuleRef, ExecutionEngine }
     }
 }
 
@@ -42,8 +43,8 @@ obj NativeFunctionInfo {
 """Metadata for a compiled .na.jac module."""
 obj NativeModuleInfo {
     has mod_path: str,
-        llvm_module: Any = None,
-        native_engine: Any = None,
+        llvm_module: (ModuleRef | None) = None,
+        native_engine: (ExecutionEngine | None) = None,
         exported_functions: dict[(str, NativeFunctionInfo)] = field(
             default_factory=`dict
         );
@@ -169,17 +170,16 @@ obj CodeGenTarget {
         py_ast: list = field(default_factory=`list),
         py_bytecode: (bytes | None) = None,
         es_ast: EsNode | Sequence[EsNode] | SliceInfo | IndexInfo | None = None,
-        llvm_ir: Any = None,
-        native_engine: Any = None,
+        llvm_ir: (ModuleRef | None) = None,
+        native_engine: (ExecutionEngine | None) = None,
         native_bitcode: (bytes | None) = None,
         interop_manifest: InteropManifest = field(default_factory=InteropManifest),
         interop_py_funcs: dict[(str, Any)] = field(default_factory=`dict),
         _interop_callbacks: list[Any] = field(default_factory=`list),
         native_layout: (NativeModuleLayout | None) = None,
-        _auto_promoted_native: bool = False,
+        native_compat: bool = False,
         layout_registry: Any = None;
 
-    """Lazy initialization of doc_ir to allow doc_ir.jac conversion."""
     @property
     def doc_ir(self: CodeGenTarget) -> Doc {
         if (self._doc_ir is None) {
@@ -189,7 +189,6 @@ obj CodeGenTarget {
         return self._doc_ir;
     }
 
-    """Set doc_ir value."""
     @doc_ir.setter
     def doc_ir(self: CodeGenTarget, value: Doc) -> None {
         self._doc_ir = value;
@@ -201,7 +200,6 @@ obj CodeLocInfo {
     has first_tok: Token,
         last_tok: Token;
 
-    """Get file source."""
     @property
     def orig_src(self: CodeLocInfo) -> Source {
         return self.first_tok.orig_src;

@@ -1,10 +1,21 @@
 # jac-mcp Release Notes
 
-## jac-mcp 0.1.4 (Unreleased)
+## jac-mcp 0.1.6 (Unreleased)
+
+- **Fix SSE transport method issue**
+- **Fix `prompts/get` failing with Pydantic validation error**: System instructions now correctly use `role: "assistant"`
+- **Fix CompilerBridge tools returning incorrect results**: `check_syntax`, `validate_jac`, and `get_ast` now use the compiler's structured diagnostics and parse API to correctly detect errors and return real AST output
+- **Fix error reporting and example loading**: Syntax errors now report accurate line/column numbers, and `list_examples`/`get_example` work correctly in PyPI installs
+- **Lazy GitHub-based example fetching**: Examples are now fetched on-demand from GitHub instead of being bundled in the PyPI package, reducing package size and ensuring examples are always up-to-date. Local repo examples are used when available, with GitHub as a fallback
+
+## jac-mcp 0.1.5 (Latest Release)
+
+## jac-mcp 0.1.4
 
 - **Fix streamable HTTP transport method issue**: Refactors the server initialization logic for the `streamable-http` transport method.
+- 1 small change/refactor.
 
-## jac-mcp 0.1.3 (Latest Release)
+## jac-mcp 0.1.3
 
 - **Updated token definitions path**: Grammar resource now references `tokens.na.jac` (renamed from `tokens.jac`)
 - **Added backtick escaping pitfall**: New section documenting when keywords need backtick escaping and clarifying that special variable references (`self`, `super`, `root`, `here`, `visitor`, `init`, `postinit`) are used directly without backticks

@@ -67,7 +67,10 @@ obj JacLangServer(JacProgram, LanguageServer) {
     def _clear_alerts_for_file(file_path: str) -> None;
     def get_ir(file_path: str) -> Optional[uni.Module];
     def update_modules(file_path: str, build: uni.Module, need: bool = True) -> None;
-    def type_check_file(file_uri: str, cancel_token: Event | None = None) -> bool;
+    def type_check_file(
+        file_uri: str, cancel_token: threading.Event | None = None
+    ) -> bool;
+
     def type_check(file_uri: str) -> None;
     def _do_type_check(file_uri: str) -> None;
     def get_token_at_position(
@@ -91,7 +94,7 @@ obj JacLangServer(JacProgram, LanguageServer) {
     def rename_module(old_path: str, new_path: str) -> None;
     def close_module(uri: str) -> None;
     def delete_module(uri: str) -> None;
-    def formatted_jac(file_path: str) -> list[lspt.TextEdit];
+    def format_document(file_path: str, auto_lint: bool = False) -> list[lspt.TextEdit];
     def get_hover_info(file_path: str, position: lspt.Position) -> Optional[lspt.Hover];
     def get_node_info(sym_node: uni.AstSymbolNode) -> Optional[str];
     def get_outline(file_path: str) -> list[lspt.DocumentSymbol];

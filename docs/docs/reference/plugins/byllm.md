@@ -213,6 +213,7 @@ max_tokens = 0                    # Max response tokens (0 = no limit)
 [plugins.byllm.litellm]
 local_cost_map = true             # Use local cost map
 drop_params = true                # Drop unsupported params per provider
+debug = false                     # Enable verbose LiteLLM logging
 ```
 
 **`[plugins.byllm.model]` options:**
@@ -238,6 +239,7 @@ drop_params = true                # Drop unsupported params per provider
 |-----|------|---------|-------------|
 | `local_cost_map` | bool | `true` | Use local cost map instead of fetching from remote |
 | `drop_params` | bool | `true` | Silently drop parameters unsupported by the chosen provider |
+| `debug` | bool | `false` | Enable verbose LiteLLM logging (HTTP requests, retries, headers). When `false`, LiteLLM's internal loggers are silenced. Exceptions are always logged via byLLM's own logger regardless of this setting |
 
 **Minimal setup** -- just set your API key and go:
 
@@ -890,7 +892,6 @@ with entry {
 Multimodal works in both Python integration modes:
 
 ```python
-import jaclang
 from byllm.lib import Model, Image, by
 
 llm = Model(model_name="gpt-4o")
@@ -1394,7 +1395,6 @@ byLLM provides two modes for Python integration:
 Import byLLM directly in Python using the `@by` decorator:
 
 ```python
-import jaclang
 from dataclasses import dataclass
 from byllm.lib import Model, Image, by
 
@@ -1437,7 +1437,6 @@ Implement AI features in Jac and import seamlessly into Python:
 
 === "main.py"
     ```python
-    import jaclang
     from ai import Image, Person, get_person_info
 
     img = Image("photo.jpg")
@@ -1587,7 +1586,7 @@ walker DocumentAgent {
     has query: str;
 
     can process with Root entry {
-        all_docs = [-->](?:Document);
+        all_docs = [-->][?:Document];
 
         for doc in all_docs {
             if self.query.lower() in doc.content.lower() {

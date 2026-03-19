@@ -24,7 +24,6 @@ class AccessLevel(IntEnum) {
         WRITE = 2;
     }
 
-    """Cast access level."""
     static def cast(val: int | str | AccessLevel) -> AccessLevel {
         if isinstance(val, int) {
             return AccessLevel(val);
@@ -112,13 +111,11 @@ obj ObjectSpatialPath {
     ) -> ObjectSpatialPath;
 
     def set_edge_only(self: ObjectSpatialPath) -> ObjectSpatialPath;
-    """Set edge only mode (alias for set_edge_only)."""
     def `edge(self: ObjectSpatialPath) -> ObjectSpatialPath {
         self.edge_only = True;
         return self;
     }
 
-    """Set from visit mode."""
     def `visit(self: ObjectSpatialPath) -> ObjectSpatialPath {
         self.from_visit = True;
         return self;
@@ -143,10 +140,11 @@ obj ObjectSpatialPath {
 obj Anchor {
     has archetype: Archetype,
         id: UUID = field(default_factory=uuid4),
-        `root: (UUID | None) = None,
+        root: (UUID | None) = None,
         access: Permission = field(default_factory=Permission),
         persistent: bool = False,
-        hash: int = 0;
+        hash: int = 0,
+        is_updated: bool = True;
 
     def is_populated(self: Anchor) -> bool;
     def make_stub(self: Anchor) -> TANCH;
@@ -164,10 +162,13 @@ obj Anchor {
 @dataclass(eq=False, repr=False, kw_only=True)
 obj NodeAnchor(Anchor) {
     has archetype: NodeArchetype,
-        edges: list[EdgeAnchor];
+        edges: list[EdgeAnchor],
+        topology_index_data: (bytes | None) = None;
 
     def __getstate__(self: NodeAnchor) -> dict[(str, object)];
     def is_populated(self: NodeAnchor) -> bool;
+    def get_topology_index(self: NodeAnchor) -> Any;
+    def set_topology_index(self: NodeAnchor, index: Any) -> None;
 }
 
 """Edge Anchor."""
@@ -211,6 +212,7 @@ obj Archetype {
     def __jac__(self: Archetype) -> Anchor;
 
     def __init_subclass__(cls: Any, **kwargs: object) -> None;
+    def __setattr__(self: Archetype, name: str, value: Any) -> None;
     def __repr__(self: Archetype) -> str;
     def __jac_access__(self: Archetype) -> (AccessLevel | str | int | None);
 }
@@ -221,7 +223,6 @@ class NodeArchetype(Archetype) {
         __jac_base__: ClassVar = True;
     }
 
-    """Create default anchor."""
     @cached_property
     def __jac__(self: NodeArchetype) -> NodeAnchor {
         return NodeAnchor(archetype=self, edges=[]);
@@ -244,7 +245,6 @@ class WalkerArchetype(Archetype) {
         reports: list[Any] = field(default_factory=`list);
     }
 
-    """Create default anchor."""
     @cached_property
     def __jac__(self: WalkerArchetype) -> WalkerAnchor {
         return WalkerAnchor(archetype=self);
@@ -257,7 +257,6 @@ class ObjectArchetype(Archetype) {
         __jac_base__: ClassVar = True;
     }
 
-    """Create default anchor."""
     @cached_property
     def __jac__(self: ObjectArchetype) -> ObjectAnchor {
         return ObjectAnchor(archetype=self);

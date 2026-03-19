@@ -25,6 +25,7 @@ glob TEXT_DOCUMENT_DID_OPEN = "textDocument/didOpen",
      WORKSPACE_DID_CREATE_FILES = "workspace/didCreateFiles",
      WORKSPACE_DID_RENAME_FILES = "workspace/didRenameFiles",
      WORKSPACE_DID_DELETE_FILES = "workspace/didDeleteFiles",
+     TEXT_DOCUMENT_LINTFIX_FORMATTING = "jac/lintfixFormat",
      WORKSPACE_SEMANTIC_TOKENS_REFRESH = "workspace/semanticTokens/refresh",
      INITIALIZE = "initialize",
      INITIALIZED = "initialized",
@@ -160,7 +161,9 @@ obj MarkupContent {
 obj Diagnostic {
     has range: Range = Range(),
         message: str = "",
-        severity: Optional[DiagnosticSeverity] = None;
+        severity: Optional[DiagnosticSeverity] = None,
+        code: Optional[str] = None,
+        source: Optional[str] = None;
 }
 
 # ---------------------------------------------------------------------------
@@ -389,5 +392,6 @@ glob METHOD_TO_PARAMS: dict[str, type] = {
          TEXT_DOCUMENT_SEMANTIC_TOKENS_FULL: SemanticTokensParams,
          WORKSPACE_DID_CREATE_FILES: CreateFilesParams,
          WORKSPACE_DID_RENAME_FILES: RenameFilesParams,
-         WORKSPACE_DID_DELETE_FILES: DeleteFilesParams
+         WORKSPACE_DID_DELETE_FILES: DeleteFilesParams,
+         TEXT_DOCUMENT_LINTFIX_FORMATTING: DocumentFormattingParams
      };
