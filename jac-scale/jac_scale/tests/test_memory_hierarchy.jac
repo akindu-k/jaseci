@@ -563,15 +563,61 @@ test "L2 and L3 commit with server restart" {
     server = start_server(FIXTURES_DIR, JAC_FILE, port);
 
     try {
-        # Create and verify task
+        db = mongo_client["jac_db"];
+        collection = db["_anchors"];
+
+        # Verify initial state in MongoDB
+        initial_mongo_count = collection.count_documents({});
+        assert initial_mongo_count == 4 , (
+            f"Initial MongoDB should have 4 docs (super root, guest_user, admin, __system__), got {initial_mongo_count}"
+        );
+
+        # Verify initial Redis state (4 initial nodes are cached on startup)
+        initial_redis_count = redis_client.dbsize();
+        assert initial_redis_count == 4 , (
+            f"Redis should have 4 initial entries (super root, guest_user, admin, __system__) on startup, got {initial_redis_count} keys"
+        );
+
+        # Register a user to ensure proper caching behavior (authenticated requests)
+        token = register_user(base_url, "testuser", "testpass");
+
+        # Create and verify task with authenticated request
         res = requests.post(
             f"{base_url}/walker/CreateTask",
             json={"id": 500, "title": "L2/L3 Test"},
+            headers={"Authorization": f"Bearer {token}"},
             timeout=2
         );
         assert res.status_code == 200;
 
-        res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=2);
+        # DIRECT MONGODB VERIFICATION: Check task was written to L3
+        mongo_count_after_create = collection.count_documents({});
+        assert mongo_count_after_create == 7 , (
+            f"After task creation, MongoDB should have 7 docs (4 initial + 1 user + 2 for task node and edge), got {mongo_count_after_create}"
+        );
+
+        # Verify task data exists in MongoDB - search all documents
+        all_docs_in_mongo = list(collection.find({}));
+        task_node_found = False;
+        for doc in all_docs_in_mongo {
+            data_str = str(doc.get("data", ""));
+            # Check for task with id=500 in any format
+            if "500" in data_str and "L2/L3 Test" in data_str {
+                task_node_found = True;
+                break;
+            }
+        }
+        assert task_node_found , f"Task with id=500 and title='L2/L3 Test' should exist in MongoDB (L3). Checked {len(
+            all_docs_in_mongo
+        )} total docs";
+
+        # Read task via API to trigger L2 caching (use authenticated request)
+        res = requests.post(
+            f"{base_url}/walker/GetAllTasks",
+            json={},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=2
+        );
         response_data = cast(
             dict[str, Any], extract_transport_response_data(res.json())
         );
@@ -579,48 +625,85 @@ test "L2 and L3 commit with server restart" {
         assert len(tasks_before) == 1 , "Should have 1 task before restart";
         assert tasks_before[0]["id"] == 500;
 
-        # Check L2 has cached the task - verify actual task data in Redis
+        # DIRECT REDIS VERIFICATION: Check exact key count and task data
+        redis_count_after_read = redis_client.dbsize();
+        assert redis_count_after_read == 7 , (
+            f"After read, Redis (L2) should have exactly 7 entries (4 initial + user + task node + edge), got {redis_count_after_read}"
+        );
+
+        # Verify actual task data is cached in Redis
         redis_keys = redis_client.keys("*");
         task_found_in_redis = False;
         for key in redis_keys {
             val = redis_client.get(key);
-            if val and b"Task" in val and b'"id": 500' in val {
+            if val
+            and b"Task" in val
+            and b'"id": 500' in val
+            and b'"title": "L2/L3 Test"' in val {
                 task_found_in_redis = True;
                 break;
             }
         }
-        assert task_found_in_redis , "Task with id=500 should be cached in Redis (L2)";
+        assert task_found_in_redis , "Task with id=500 and full title should be cached in Redis (L2)";
 
         # Restart server to verify L3 persistence
         server.terminate();
         server.wait(timeout=2);
         redis_client.flushall();  # Clear L2 to force read from L3
 
-        # Verify Redis is actually empty
-        assert redis_client.dbsize() == 0 , "Redis should be empty after flush";
+        # Verify Redis is actually empty after flush
+        redis_count_after_flush = redis_client.dbsize();
+        assert redis_count_after_flush == 0 , f"Redis should be empty after flush, got {redis_count_after_flush} keys";
+
+        # VERIFY MONGODB STILL HAS DATA (L3 persistence)
+        mongo_count_before_restart = collection.count_documents({});
+        assert mongo_count_before_restart == 7 , (
+            f"MongoDB should still have 7 docs after Redis flush, got {mongo_count_before_restart}"
+        );
+
+        # Verify task still exists in MongoDB before restart
+        task_still_in_mongo = False;
+        for doc in collection.find({}) {
+            data_str = str(doc.get("data", ""));
+            if "500" in data_str and "L2/L3 Test" in data_str {
+                task_still_in_mongo = True;
+                break;
+            }
+        }
+        assert task_still_in_mongo , "Task should still exist in MongoDB (L3) before server restart";
 
         server = start_server(FIXTURES_DIR, JAC_FILE, port);
 
-        # Verify task persists after restart (proves L3 commit worked)
-        res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=2);
+        # Login as existing user after server restart (user persisted in MongoDB)
+        res = requests.post(
+            f"{base_url}/user/login",
+            json={"username": "testuser", "password": "testpass"},
+            timeout=2
+        );
+        assert res.status_code == 200 , f"Login failed: {res.status_code} - {res.text}";
+        login_data = cast(dict[str, Any], extract_transport_response_data(res.json()));
+        token_after_restart = login_data["token"];
+
+        # Verify task persists after restart (proves L3 commit worked) - use authenticated request
+        res = requests.post(
+            f"{base_url}/walker/GetAllTasks",
+            json={},
+            headers={"Authorization": f"Bearer {token_after_restart}"},
+            timeout=2
+        );
         response_data = cast(
             dict[str, Any], extract_transport_response_data(res.json())
         );
         tasks_after = response_data["reports"][0];
         assert len(tasks_after) == 1 , "Task should persist after restart (L3 commit)";
         assert tasks_after[0]["id"] == 500;
+        assert tasks_after[0]["title"] == "L2/L3 Test";
 
-        # Verify L2 cache is repopulated with the actual task data
-        redis_keys_after = redis_client.keys("*");
-        task_repopulated_in_redis = False;
-        for key in redis_keys_after {
-            val = redis_client.get(key);
-            if val and b"Task" in val and b'"id": 500' in val {
-                task_repopulated_in_redis = True;
-                break;
-            }
-        }
-        assert task_repopulated_in_redis , "Task should be repopulated in Redis (L2) after restart and read";
+        # VERIFY MONGODB UNCHANGED AFTER RESTART (still has same 7 docs)
+        mongo_count_after_restart = collection.count_documents({});
+        assert mongo_count_after_restart == 7 , (
+            f"MongoDB should still have 7 docs after restart (4 initial + user + 2 task), got {mongo_count_after_restart}"
+        );
     } finally {
         if server {
             server.terminate();
