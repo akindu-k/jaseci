@@ -138,7 +138,7 @@ impl run(
                     ir_mod = na_program.compile(file_path=full_path);
                     if (
                         ir_mod
-                        and ir_mod.gen._auto_promoted_native
+                        and ir_mod.gen.native_compat
                         and ir_mod.gen.native_engine
                     ) {
                         # Auto-promoted native module: execute via JIT
@@ -222,7 +222,7 @@ impl enter(
     entrypoint: str,
     args: list = [],
     main: bool = True,
-    `root: str = '',
+    root: str = '',
     nd: str = ''
 ) -> int {
     _ensure_jac_runtime();
@@ -232,8 +232,8 @@ impl enter(
     _discover_config_from_file(filename);
     (base, mod, mach) = _proc_file(filename);
     # Set user root if provided (for permission boundary)
-    if `root {
-        mach.set_user_root(`root);
+    if root {
+        mach.set_user_root(root);
     }
     if filename.endswith('.jac') {
         ret_module = Jac.jac_import(

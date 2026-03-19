@@ -608,7 +608,7 @@ impl UniScopeNode.update_py_ctx_for_def(nd: AstSymbolNode) -> None {
 
 """Pretty print."""
 impl UniScopeNode.sym_pp(depth: (int | None) = None) -> str {
-    return print_symtab_tree(`root=self, depth=depth);
+    return print_symtab_tree(root=self, depth=depth);
 }
 
 """Generate dot graph for sym table."""
@@ -769,6 +769,7 @@ impl Expr.postinit -> None {
     self._type_sym_tab = None;
     self.type = None;
     self.attached_tokens = None;
+    self.backend_type_tag = None;
 }
 
 
@@ -860,6 +861,13 @@ impl NameAtom.sem_token -> (tuple[(SemTokType, SemTokMod)] | None) {
         return (SemTokType.FUNCTION, SemTokMod.DEFINITION);
     }
     if self.sym {
+        # Before falling through to PROPERTY, check if the node's resolved type
+        # is a function/overloaded type. This handles imported functions where
+        # sym.decl.name_of is a plain Name (import alias) rather than Ability.
+        if self.type is not None
+        and type(self.type).__name__ in ('FunctionType', 'OverloadedType') {
+            return (SemTokType.FUNCTION, SemTokMod.DEFINITION);
+        }
         return (SemTokType.PROPERTY, SemTokMod.DEFINITION);
     }
     # Handle __getattr__ dynamic attributes (explicitly marked by type checker)
@@ -1964,6 +1972,11 @@ impl FuncCall.postinit -> None {
 }
 
 
+impl Slice.postinit -> None {
+    UniNode.postinit(self);
+}
+
+
 impl IndexSlice.postinit -> None {
     UniNode.postinit(self);
     Expr.postinit(self);
@@ -2250,6 +2263,7 @@ impl Name.init(
     self._sym_name = '';
     self._sym_category = SymbolType.UNKNOWN;
     self._py_ctx_func = ast3.Load;
+    self.js_decl_kind = None;
     Expr.postinit(self);
     AstSymbolNode._init_symbol(
         self, sym_name=value, name_spec=self, sym_category=SymbolType.VAR
@@ -2287,8 +2301,6 @@ impl SpecialVarRef.py_resolve_name -> str {
         return 'props';
     } elif (self.orig.name == Tok.KW_SUPER) {
         return 'super';
-    } elif (self.orig.name == Tok.KW_ROOT) {
-        return Con.ROOT.value;
     } elif (self.orig.name == Tok.KW_HERE) {
         return Con.HERE.value;
     } elif (self.orig.name == Tok.KW_VISITOR) {
