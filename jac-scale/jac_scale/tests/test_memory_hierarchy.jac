@@ -528,3 +528,183 @@ test "data persists after server restart for sqlite" {
         }
     }
 }
+
+test "L2 and L3 commit with server restart" {
+    # Verify that modifications persist across server restarts (L3)
+    # and that L2 caching works after reads
+    if not JAC_FILE.exists() {
+        raise FileNotFoundError(f"Missing Jac file: {JAC_FILE}");
+    }
+
+    data_dir = FIXTURES_DIR / ".jac" / "data";
+    if data_dir.exists() {
+        import shutil;
+        shutil.rmtree(data_dir);
+    }
+
+    mongo_container = MongoDbContainer("mongo:latest");
+    mongo_container.start();
+    mongo_uri = mongo_container.get_connection_url();
+    os.environ["MONGODB_URI"] = mongo_uri;
+    mongo_client = MongoClient(mongo_uri);
+
+    redis_container = RedisContainer("redis:latest", port=6379);
+    redis_container.start();
+    redis_host = redis_container.get_container_host_ip();
+    redis_port = redis_container.get_exposed_port(6379);
+    redis_url = f"redis://{redis_host}:{redis_port}/0";
+    os.environ["REDIS_URL"] = redis_url;
+    redis_client = redis.Redis(
+        host=redis_host, port=int(redis_port), decode_responses=False
+    );
+
+    port = get_free_port();
+    base_url = f"http://localhost:{port}";
+    server = start_server(FIXTURES_DIR, JAC_FILE, port);
+
+    try {
+        # Create and verify task
+        res = requests.post(
+            f"{base_url}/walker/CreateTask",
+            json={"id": 500, "title": "L2/L3 Test"},
+            timeout=2
+        );
+        assert res.status_code == 200;
+
+        res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=2);
+        response_data = cast(
+            dict[str, Any], extract_transport_response_data(res.json())
+        );
+        tasks_before = response_data["reports"][0];
+        assert len(tasks_before) == 1 , "Should have 1 task before restart";
+        assert tasks_before[0]["id"] == 500;
+
+        # Check L2 has cached the data
+        initial_redis_size = redis_client.dbsize();
+        assert initial_redis_size > 0 , "Redis (L2) should have cached data";
+
+        # Restart server to verify L3 persistence
+        server.terminate();
+        server.wait(timeout=2);
+        redis_client.flushall();  # Clear L2 to force read from L3
+        server = start_server(FIXTURES_DIR, JAC_FILE, port);
+
+        # Verify task persists after restart (proves L3 commit worked)
+        res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=2);
+        response_data = cast(
+            dict[str, Any], extract_transport_response_data(res.json())
+        );
+        tasks_after = response_data["reports"][0];
+        assert len(tasks_after) == 1 , "Task should persist after restart (L3 commit)";
+        assert tasks_after[0]["id"] == 500;
+
+        # Verify L2 cache is repopulated
+        after_restart_redis_size = redis_client.dbsize();
+        assert after_restart_redis_size > 0 , "Redis (L2) should be repopulated after read";
+    } finally {
+        if server {
+            server.terminate();
+            with contextlib.suppress(Exception) {
+                server.wait(timeout=2);
+            }
+        }
+        system_dbs = {"admin","config","local"};
+        for db_name in mongo_client.list_database_names() {
+            if db_name not in system_dbs {
+                mongo_client.drop_database(db_name);
+            }
+        }
+        mongo_container.stop();
+        redis_container.stop();
+        time.sleep(0.5);
+        gc.collect();
+        if data_dir.exists() {
+            import shutil;
+            shutil.rmtree(data_dir);
+        }
+    }
+}
+
+test "field modifications persist after restart" {
+    if not JAC_FILE.exists() {
+        raise FileNotFoundError(f"Missing Jac file: {JAC_FILE}");
+    }
+
+    data_dir = FIXTURES_DIR / ".jac" / "data";
+    if data_dir.exists() {
+        import shutil;
+        shutil.rmtree(data_dir);
+    }
+
+    mongo_container = MongoDbContainer("mongo:latest");
+    mongo_container.start();
+    mongo_uri = mongo_container.get_connection_url();
+    os.environ["MONGODB_URI"] = mongo_uri;
+
+    port = get_free_port();
+    base_url = f"http://localhost:{port}";
+    server = start_server(FIXTURES_DIR, JAC_FILE, port);
+
+    try {
+        # Create task
+        res = requests.post(
+            f"{base_url}/walker/CreateTask",
+            json={"id": 600, "title": "Flag Test"},
+            timeout=2
+        );
+        assert res.status_code == 200;
+
+        # Verify task was created
+        res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=2);
+        response_data = cast(
+            dict[str, Any], extract_transport_response_data(res.json())
+        );
+        tasks_before = response_data["reports"][0];
+        assert len(tasks_before) == 1 , "Should have 1 task";
+        assert not tasks_before[0]["completed"] , "Task should start incomplete";
+
+        # Modify field via walker - this should set is_updated=True internally
+        res = requests.post(
+            f"{base_url}/walker/CompleteTask", json={"id": 600}, timeout=2
+        );
+        assert res.status_code == 200;
+
+        # Verify modification is visible
+        res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=2);
+        response_data = cast(
+            dict[str, Any], extract_transport_response_data(res.json())
+        );
+        tasks_modified = response_data["reports"][0];
+        assert tasks_modified[0]["completed"] , "Task should be completed";
+
+        # Restart server to verify modification persisted (proves is_updated worked)
+        server.terminate();
+        server.wait(timeout=2);
+        server = start_server(FIXTURES_DIR, JAC_FILE, port);
+
+        # Verify modification persists after restart
+        res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=2);
+        response_data = cast(
+            dict[str, Any], extract_transport_response_data(res.json())
+        );
+        tasks_after_restart = response_data["reports"][0];
+        assert len(tasks_after_restart) == 1 , "Task should persist";
+        assert tasks_after_restart[0]["completed"] , (
+            "Field modification should persist after restart (is_updated flag worked)"
+        );
+    } finally {
+        if server {
+            server.terminate();
+            with contextlib.suppress(Exception) {
+                server.wait(timeout=2);
+            }
+        }
+        mongo_container.stop();
+        time.sleep(0.5);
+        gc.collect();
+        if data_dir.exists() {
+            import shutil;
+            shutil.rmtree(data_dir);
+        }
+    }
+}
