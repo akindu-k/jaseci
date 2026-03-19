@@ -308,7 +308,7 @@ impl SqliteMemory.get(id: UUID) -> (Anchor | None) {
                 # Try BLOB deserialization (old format) - fallback for unmigrated data
                 try {
                     self.l3_fetch_count += 1;
-                anchor = loads(row[0]);
+                    anchor = loads(row[0]);
                     # Promote to memory cache
                     self.__mem__[id] = anchor;
                     return anchor;
