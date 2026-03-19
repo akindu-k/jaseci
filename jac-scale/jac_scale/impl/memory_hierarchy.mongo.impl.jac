@@ -17,6 +17,11 @@ impl MongoBackend.postinit -> None {
     }
 }
 
+"""Set reference to parent TieredMemory's __mem__ for sync()."""
+impl MongoBackend.set_memory_ref(mem: dict[UUID, Anchor]) -> None {
+    self._mem_ref = mem;
+}
+
 """Check if MongoDB is available and connected."""
 impl MongoBackend.is_available -> bool {
     if not self.mongo_url {
@@ -53,7 +58,11 @@ impl MongoBackend.get(id: UUID) -> (Anchor | None) {
     try {
         db_obj = self.collection.find_one({'_id': str(_id)});
         if db_obj {
-            return self._load_anchor(db_obj);
+            anchor = self._load_anchor(db_obj);
+            if anchor {
+                anchor.is_updated = False;
+            }
+            return anchor;
         }
     } except Exception as e {
         logger.debug(f"MongoDB get failed: {e}");
@@ -82,6 +91,7 @@ impl MongoBackend.put(anchor: Anchor) -> None {
             },
             upsert=True
         );
+        anchor.is_updated = False;
     } except Exception as e {
         logger.error(f"MongoDB put failed: {e}");
     }
@@ -110,6 +120,7 @@ impl MongoBackend.close -> None {
         }
         self.client = None;
     }
+    self._mem_ref = None;
 }
 
 """Check if an anchor exists in MongoDB."""
@@ -135,6 +146,7 @@ impl MongoBackend.query(
     try {
         for doc in self.collection.find() {
             if (anchor := self._load_anchor(doc)) {
+                anchor.is_updated = False;
                 if filter is None or filter(anchor) {
                     yield anchor;
                 }
@@ -189,9 +201,24 @@ impl MongoBackend.commit(anchor: (Anchor | None) = None) -> None {
 }
 
 # PersistentMemory-specific methods
-"""Sync - no-op for MongoDB (writes are immediate)."""
+"""Sync - flush L1 memory to MongoDB (only updated anchors)"""
 impl MongoBackend.sync -> None {
-# No-op: MongoDB writes are immediate
+    import from jaclang { JacRuntimeInterface as Jac }
+    if not self._mem_ref or not self.client {
+        return;
+    }
+    for (_, anchor) in list(self._mem_ref.items()) {
+        if not anchor.persistent
+        or not Jac.check_write_access(anchor)
+        or not anchor.is_updated {
+            continue;
+        }
+        try {
+            self.put(anchor);
+        } except Exception as e {
+            logger.warning(f"MongoDB sync failed for anchor {anchor.id}: {e}");
+        }
+    }
 }
 
 """Bulk store multiple anchors."""
