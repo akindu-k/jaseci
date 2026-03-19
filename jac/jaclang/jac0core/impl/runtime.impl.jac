@@ -890,8 +890,15 @@ impl JacCmd.create_cmd -> None { }
 """Set Class References."""
 impl JacBasics.setup -> None { }
 
-"""Get current execution context."""
+"""Get current execution context (request-scoped if available, else global)."""
 impl JacBasics.get_context -> ExecutionContext {
+    # Try request-scoped context first (for web servers)
+    ctx = _request_context.get();
+    if ctx is not None {
+        return ctx;
+    }
+
+    # Fallback to global context (CLI, tests, non-web environments)
     if (JacRuntime.exec_ctx is None) {
         JacRuntime.exec_ctx = JacRuntimeInterface.create_j_context(user_root=None);
     }
@@ -2370,4 +2377,18 @@ impl JacRuntime.set_base_path(base_path: (str | None)) -> None {
 """Set the context for the machine."""
 impl JacRuntime.set_context(context: ExecutionContext) -> None {
     JacRuntime.exec_ctx = context;
+}
+
+"""Set request-scoped execution context (for web servers)."""
+impl JacRuntime.set_request_context(context: ExecutionContext) -> None {
+    _request_context.set(context);
+}
+
+"""Clear request-scoped context and commit changes."""
+impl JacRuntime.clear_request_context -> None {
+    ctx = _request_context.get();
+    if ctx is not None {
+        ctx.close();
+        _request_context.set(None);
+    }
 }

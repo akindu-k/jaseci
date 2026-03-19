@@ -846,6 +846,43 @@ test "is_updated flag set on field modification" {
     );
 }
 
+test "sequential requests work correctly" {
+    # Validates: Multiple sequential requests don't cause crashes or data corruption
+    mongo_container = MongoDbContainer("mongo:latest");
+    mongo_container.start();
+    os.environ["MONGODB_URI"] = mongo_container.get_connection_url();
+
+    port = get_free_port();
+    base_url = f"http://localhost:{port}";
+    server = start_server(FIXTURES_DIR, JAC_FILE, port);
+
+    try {
+        # Make 5 sequential requests - all should succeed
+        for i in range(5) {
+            res = requests.post(
+                f"{base_url}/walker/CreateTask",
+                json={"id": i, "title": f"Sequential {i}"},
+                timeout=5
+            );
+            assert res.status_code == 200 , f"Request {i} failed";
+        }
+
+        # Verify all 5 tasks were created
+        res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=5);
+        all_tasks = cast(dict[str, Any], extract_transport_response_data(res.json()))[
+            "reports"
+        ][0];
+        assert len(all_tasks) == 5 , f"Expected 5 tasks, got {len(all_tasks)}";
+    } finally {
+        server.terminate();
+        with contextlib.suppress(Exception) {
+            server.wait(timeout=2);
+        }
+        mongo_container.stop();
+        gc.collect();
+    }
+}
+
 test "concurrent partial updates to different fields" {
     if not JAC_FILE.exists() {
         raise FileNotFoundError(f"Missing Jac file: {JAC_FILE}");
