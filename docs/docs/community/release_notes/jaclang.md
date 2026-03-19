@@ -49,7 +49,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Type Checker: `ParamSpec` and `TypeVarTuple` Support**: `P = ParamSpec('P')` and `Ts = TypeVarTuple('Ts')` now produce proper `TypeVarType` entries in the symbol table (with `is_param_spec=True`) instead of `<Unknown>`. `Callable[P, T]` no longer emits a false E1071 error. `ParamSpec` and `TypeVarTuple` are tracked via the prefetch mechanism (same as `TypeVar`) so identity checks use type-system identity rather than string matching.
 - **Fix: Module-Level Dunder Variables**: `__name__`, `__file__`, `__doc__`, `__package__`, and `__spec__` are now declared in `jac_builtins.pyi` with their correct types. Previously, `getLogger(__name__)` and similar calls produced E1053 because `__name__` resolved to `<Unknown>`.
 - 3 small refactors/changes.
-- **Request-Scoped Execution Context**: `JacRuntime.get_context()` now uses Python's `ContextVar` to support request-scoped execution contexts in web servers, while maintaining backward compatibility with CLI and test environments. Web servers (via jac-scale) automatically get fresh execution contexts per request with isolated L1 memory caches, preventing stale data issues in multi-instance deployments. Added `JacRuntime.set_request_context()` and `JacRuntime.clear_request_context()` methods for request lifecycle management. Global context behavior (session-scoped L1) is preserved for non-web environments.
+- **Request-Scoped Execution Context**:Introduced request-scoped execution contexts using `ContextVar` in `JacRuntime.get_context()`, enabling isolated per-request state and L1 caches in web environments while preserving global context behavior for CLI and tests.
 
 ## jaclang 0.12.2 (Latest Release)
 
