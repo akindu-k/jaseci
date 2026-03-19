@@ -579,14 +579,26 @@ test "L2 and L3 commit with server restart" {
         assert len(tasks_before) == 1 , "Should have 1 task before restart";
         assert tasks_before[0]["id"] == 500;
 
-        # Check L2 has cached the data
-        initial_redis_size = redis_client.dbsize();
-        assert initial_redis_size > 0 , "Redis (L2) should have cached data";
+        # Check L2 has cached the task - verify actual task data in Redis
+        redis_keys = redis_client.keys("*");
+        task_found_in_redis = False;
+        for key in redis_keys {
+            val = redis_client.get(key);
+            if val and b"Task" in val and b'"id": 500' in val {
+                task_found_in_redis = True;
+                break;
+            }
+        }
+        assert task_found_in_redis , "Task with id=500 should be cached in Redis (L2)";
 
         # Restart server to verify L3 persistence
         server.terminate();
         server.wait(timeout=2);
         redis_client.flushall();  # Clear L2 to force read from L3
+
+        # Verify Redis is actually empty
+        assert redis_client.dbsize() == 0 , "Redis should be empty after flush";
+
         server = start_server(FIXTURES_DIR, JAC_FILE, port);
 
         # Verify task persists after restart (proves L3 commit worked)
@@ -598,9 +610,17 @@ test "L2 and L3 commit with server restart" {
         assert len(tasks_after) == 1 , "Task should persist after restart (L3 commit)";
         assert tasks_after[0]["id"] == 500;
 
-        # Verify L2 cache is repopulated
-        after_restart_redis_size = redis_client.dbsize();
-        assert after_restart_redis_size > 0 , "Redis (L2) should be repopulated after read";
+        # Verify L2 cache is repopulated with the actual task data
+        redis_keys_after = redis_client.keys("*");
+        task_repopulated_in_redis = False;
+        for key in redis_keys_after {
+            val = redis_client.get(key);
+            if val and b"Task" in val and b'"id": 500' in val {
+                task_repopulated_in_redis = True;
+                break;
+            }
+        }
+        assert task_repopulated_in_redis , "Task should be repopulated in Redis (L2) after restart and read";
     } finally {
         if server {
             server.terminate();
@@ -625,86 +645,39 @@ test "L2 and L3 commit with server restart" {
     }
 }
 
-test "field modifications persist after restart" {
-    if not JAC_FILE.exists() {
-        raise FileNotFoundError(f"Missing Jac file: {JAC_FILE}");
-    }
+test "is_updated flag set on field modification" {
+    # Import the Task node from the fixture
+    import sys;
+    sys.path.insert(0, str(FIXTURES_DIR));
+    import from todo_app { Task }
 
-    data_dir = FIXTURES_DIR / ".jac" / "data";
-    if data_dir.exists() {
-        import shutil;
-        shutil.rmtree(data_dir);
-    }
+    # Create a Task instance
+    task = Task(id=999, title="Test is_updated", completed=False);
+    task_anchor = task.__jac__;
 
-    mongo_container = MongoDbContainer("mongo:latest");
-    mongo_container.start();
-    mongo_uri = mongo_container.get_connection_url();
-    os.environ["MONGODB_URI"] = mongo_uri;
+    # After creation, is_updated should be True (new node)
+    assert task_anchor.is_updated , "Newly created node should have is_updated=True";
 
-    port = get_free_port();
-    base_url = f"http://localhost:{port}";
-    server = start_server(FIXTURES_DIR, JAC_FILE, port);
+    # Simulate save by setting is_updated=False (as would happen after commit)
+    task_anchor.is_updated = False;
+    assert not task_anchor.is_updated , "After save simulation, is_updated should be False";
 
-    try {
-        # Create task
-        res = requests.post(
-            f"{base_url}/walker/CreateTask",
-            json={"id": 600, "title": "Flag Test"},
-            timeout=2
-        );
-        assert res.status_code == 200;
+    # Modify a field - this should trigger __setattr__ which sets is_updated=True
+    task.completed = True;
 
-        # Verify task was created
-        res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=2);
-        response_data = cast(
-            dict[str, Any], extract_transport_response_data(res.json())
-        );
-        tasks_before = response_data["reports"][0];
-        assert len(tasks_before) == 1 , "Should have 1 task";
-        assert not tasks_before[0]["completed"] , "Task should start incomplete";
+    # Verify is_updated was set to True
+    assert task_anchor.is_updated , (
+        "Modifying 'completed' field should set is_updated=True via __setattr__"
+    );
 
-        # Modify field via walker - this should set is_updated=True internally
-        res = requests.post(
-            f"{base_url}/walker/CompleteTask", json={"id": 600}, timeout=2
-        );
-        assert res.status_code == 200;
+    # Reset flag
+    task_anchor.is_updated = False;
 
-        # Verify modification is visible
-        res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=2);
-        response_data = cast(
-            dict[str, Any], extract_transport_response_data(res.json())
-        );
-        tasks_modified = response_data["reports"][0];
-        assert tasks_modified[0]["completed"] , "Task should be completed";
+    # Modify another field
+    task.title = "Modified Title";
 
-        # Restart server to verify modification persisted (proves is_updated worked)
-        server.terminate();
-        server.wait(timeout=2);
-        server = start_server(FIXTURES_DIR, JAC_FILE, port);
-
-        # Verify modification persists after restart
-        res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=2);
-        response_data = cast(
-            dict[str, Any], extract_transport_response_data(res.json())
-        );
-        tasks_after_restart = response_data["reports"][0];
-        assert len(tasks_after_restart) == 1 , "Task should persist";
-        assert tasks_after_restart[0]["completed"] , (
-            "Field modification should persist after restart (is_updated flag worked)"
-        );
-    } finally {
-        if server {
-            server.terminate();
-            with contextlib.suppress(Exception) {
-                server.wait(timeout=2);
-            }
-        }
-        mongo_container.stop();
-        time.sleep(0.5);
-        gc.collect();
-        if data_dir.exists() {
-            import shutil;
-            shutil.rmtree(data_dir);
-        }
-    }
+    # Verify is_updated was set to True again
+    assert task_anchor.is_updated , (
+        "Modifying 'title' field should set is_updated=True"
+    );
 }
