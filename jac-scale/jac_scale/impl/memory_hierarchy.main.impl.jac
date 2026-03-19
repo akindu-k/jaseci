@@ -76,25 +76,23 @@ impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
     # - MongoDB: sync() checks is_updated flag (only writes modified anchors)
     if self.l3 {
         try {
-            self.l3.sync();
-            # Also sync updated anchors to L2 cache
+            l2_pending = [];
             if self.l2 {
-                for (_, mem_anchor) in list(self.__mem__.items()) {
-                    if not mem_anchor.persistent {
-                        continue;
-                    }
-                    if not mem_anchor.is_updated {
-                        continue;
-                    }
-                    if not Jac.check_write_access(mem_anchor) {
-                        continue;
-                    }
+                l2_pending = [
+                    mem_anchor
+                    for (_, mem_anchor) in list(self.__mem__.items())
+                    if mem_anchor.persistent
+                    and mem_anchor.is_updated
+                    and Jac.check_write_access(mem_anchor)
+                ];
+            }
+            self.l3.sync();
+            if self.l2 {
+                for mem_anchor in l2_pending {
                     try {
                         self.l2.put(mem_anchor);
                     } except Exception as l2_err {
-                        logger.warning(
-                            f"L2 cache update failed for {mem_anchor.id}: {l2_err}"
-                        );
+                        logger.warning(f"L2 cache update failed: {l2_err}");
                     }
                 }
             }
