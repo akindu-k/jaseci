@@ -247,8 +247,25 @@ impl NodeAnchor.__getstate__(self: NodeAnchor) -> dict[(str, object)] {
     state = super.__getstate__();
     if self.is_populated() {
         state['edges'] = [`edge.make_stub() for `edge in self.edges];
+        if self.topology_index_data is not None {
+            state['topology_index_data'] = self.topology_index_data;
+        }
     }
     return state;
+}
+
+"""Get decoded topology index (lazy-decoded from blob)."""
+impl NodeAnchor.get_topology_index(self: NodeAnchor) -> Any {
+    import from jaclang.runtimelib.topology_index { TopologyIndex }
+    if self.topology_index_data {
+        return TopologyIndex.decode(self.topology_index_data);
+    }
+    return TopologyIndex();
+}
+
+"""Set topology index from TopologyIndex object (encodes to blob)."""
+impl NodeAnchor.set_topology_index(self: NodeAnchor, index: Any) -> None {
+    self.topology_index_data = index.encode();
 }
 
 """Serialize Edge Anchor."""
@@ -280,6 +297,23 @@ impl Archetype.__init_subclass__(cls: Any, **kwargs: object) -> None {
         _.make_archetype(cls);
         for hook in Archetype._subclass_hooks {
             hook(cls);
+        }
+    }
+}
+
+"""Mark anchor as updated when properties are modified."""
+impl Archetype.__setattr__(self: Archetype, name: str, value: Any) -> None {
+    object.__setattr__(self, name, value);
+    if not name.startswith('_') and name != '__jac__' {
+        try {
+            anchor = self.__jac__;
+            if hasattr(anchor, 'is_updated') {
+                object.__setattr__(anchor, 'is_updated', True);
+            }
+        } except Exception as e {
+            logger.debug(
+                f"Failed to set is_updated flag for {self.__class__.__name__}.{name}: {e}"
+            );
         }
     }
 }
