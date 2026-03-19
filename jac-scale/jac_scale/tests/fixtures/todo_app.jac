@@ -37,7 +37,7 @@ walker:pub CompleteTask {
     has id: int;
 
     can complete with Root entry {
-        for task in [-->] {   
+        for task in [-->] {
             if (self.id == task.id) {
                 visit task;
             }
