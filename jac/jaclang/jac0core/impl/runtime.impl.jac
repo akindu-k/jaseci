@@ -254,6 +254,7 @@ impl JacNode.remove_edge(nd: NodeAnchor, `edge: EdgeAnchor) -> None {
     for (idx, ed) in enumerate(nd.edges) {
         if (ed.id == `edge.id) {
             nd.edges.pop(idx);
+            nd.is_updated = True;
             break;
         }
     }
@@ -943,6 +944,7 @@ impl JacBasics.reset_graph(root: (Root | None) = None) -> int {
         for e in ranchor.edges
         if (e.id not in deleted_ids)
     ];
+    ranchor.is_updated = True;
     mem.commit(ranchor);
     return deleted_count;
 }
@@ -1530,6 +1532,8 @@ impl JacBasics.build_edge(
         );
         source.edges.append(eanch);
         target.edges.append(eanch);
+        source.is_updated = True;
+        target.is_updated = True;
         if conn_assign {
             for (fld, val) in zip(conn_assign[0], conn_assign[1], strict=False) {
                 if hasattr(`edge, fld) {
