@@ -728,6 +728,87 @@ test "L2 and L3 commit with server restart" {
     }
 }
 
+test "Redis write cycle via commit" {
+    if not JAC_FILE.exists() {
+        raise FileNotFoundError(f"Missing Jac file: {JAC_FILE}");
+    }
+
+    data_dir = FIXTURES_DIR / ".jac" / "data";
+    if data_dir.exists() {
+        import shutil;
+        shutil.rmtree(data_dir);
+    }
+
+    # Setup MongoDB + Redis
+    mongo_container = MongoDbContainer("mongo:latest");
+    mongo_container.start();
+    mongo_uri = mongo_container.get_connection_url();
+    os.environ["MONGODB_URI"] = mongo_uri;
+
+    redis_container = RedisContainer("redis:latest", port=6379);
+    redis_container.start();
+    redis_host = redis_container.get_container_host_ip();
+    redis_port = redis_container.get_exposed_port(6379);
+    redis_url = f"redis://{redis_host}:{redis_port}/0";
+    os.environ["REDIS_URL"] = redis_url;
+    redis_client = redis.Redis(
+        host=redis_host, port=int(redis_port), decode_responses=False
+    );
+
+    port = get_free_port();
+    base_url = f"http://localhost:{port}";
+    server = start_server(FIXTURES_DIR, JAC_FILE, port);
+
+    try {
+        # Initial: 4 nodes in Redis (super_root, guest, admin, __system__)
+        assert redis_client.dbsize() == 4 , "Redis should start with 4 initial nodes";
+
+        # Create task (goes to L1 with is_updated=True, then commit writes to L2)
+        res = requests.post(
+            f"{base_url}/walker/CreateTask",
+            json={"id": 999, "title": "Redis Write Test"},
+            timeout=2
+        );
+        assert res.status_code == 200;
+
+        # HARSH CHECK: Task MUST be in Redis after creation+commit
+        redis_keys = redis_client.keys("*");
+        task_in_redis = False;
+        for key in redis_keys {
+            val = redis_client.get(key);
+            if val and b'"id": 999' in val and b'"title": "Redis Write Test"' in val {
+                task_in_redis = True;
+                break;
+            }
+        }
+        assert task_in_redis , (
+            "FAIL: Task with id=999 NOT in Redis after creation. "
+            "Redis write cycle via commit() is BROKEN!"
+        );
+
+        # Count must increase (4 initial + task node + edge = 6)
+        final_count = redis_client.dbsize();
+        assert final_count == 6 , (
+            f"Redis should have 6 entries after task creation, got {final_count}"
+        );
+    } finally {
+        if server {
+            server.terminate();
+            with contextlib.suppress(Exception) {
+                server.wait(timeout=2);
+            }
+        }
+        mongo_container.stop();
+        redis_container.stop();
+        time.sleep(0.5);
+        gc.collect();
+        if data_dir.exists() {
+            import shutil;
+            shutil.rmtree(data_dir);
+        }
+    }
+}
+
 test "is_updated flag set on field modification" {
     # Import the Task node from the fixture
     import sys;
