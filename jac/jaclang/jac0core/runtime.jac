@@ -88,21 +88,14 @@ class JacPersistence {
         jctx = JacRuntimeInterface.get_context();
 
         if jctx.mem?.l3 and jctx.mem.l3?.partial_update {
-            # Update L3 (persistent storage) with partial update
             jctx.mem.l3.partial_update(anchor, fields);
 
-            # Invalidate L2 cache to ensure fresh reads across instances
             if jctx.mem?.l2 and jctx.mem.l2?.invalidate {
                 jctx.mem.l2.invalidate(anchor.id);
             }
-            # Note: L1 cache is NOT invalidated to avoid orphaned references.
-            # L1 may be stale within the same request, but this is safer than
-            # breaking in-flight object references.
         } elif jctx.mem?.partial_update {
-            # Direct memory backend with partial_update support
             jctx.mem.partial_update(anchor, fields);
         } else {
-            # Fall back to full put if partial update not available
             jctx.mem.put(anchor);
         }
     }
