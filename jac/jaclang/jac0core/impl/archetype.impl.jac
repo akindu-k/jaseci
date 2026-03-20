@@ -287,18 +287,73 @@ impl Archetype.__init_subclass__(cls: Any, **kwargs: object) -> None {
     }
 }
 
-"""Mark anchor as updated when properties are modified."""
+"""Mark anchor as updated when properties are modified and track dirty fields."""
 impl Archetype.__setattr__(name: str, value: Any) -> None {
+    # Skip tracking for internal/private fields and __jac__ anchor
+    if name.startswith('_') or name == 'reports' {
+        object.__setattr__(self, name, value);
+        return;
+    }
+
+    # Set the value
     object.__setattr__(self, name, value);
+
     # Only update anchor if it ALREADY exists (avoid lazy creation).
     # This is a critical optimization: creating anchors with UUIDs for
     # every AST node during compilation causes 1M+ UUID generations.
-    if not name.startswith('_') and name != '__jac__' {
+    if name != '__jac__' {
         try {
             # Check __dict__ directly to avoid triggering cached_property
             anchor = self.__dict__.get('__jac__');
             if anchor is not None and hasattr(anchor, 'is_updated') {
+                # Mark anchor as updated
                 object.__setattr__(anchor, 'is_updated', True);
+
+                # Only track dirty fields if this is a persistent archetype
+                if anchor.persistent {
+                    # Track this field as dirty for partial update
+                    if '__jac_dirty_fields__' not in self.__dict__ {
+                        object.__setattr__(self, '__jac_dirty_fields__', set());
+                    }
+                    dirty_fields = self.__dict__['__jac_dirty_fields__'];
+
+                    # Add the field to dirty set first
+                    dirty_fields.add(name);
+
+                    # Dynamic threshold: switch to full sync if >80% of fields are dirty
+                    # This scales automatically: 10 fields → switch at 8, 200 fields → switch at 160
+                    # Get total fields from class (excluding private/internal fields)
+                    total_fields = len(
+                        [
+                            f
+                            for f in self.__class__.__dict__.keys()
+                            if not f.startswith('_') and f != 'reports'
+                        ]
+                    );
+
+                    # If we don't have field metadata, use a conservative threshold of 50 fields
+                    if total_fields == 0 {
+                        total_fields = 50;
+                    }
+
+                    # Calculate dynamic threshold (80% of total fields)
+                    dirty_threshold = max(
+                        int(total_fields * 0.80), 10
+                    );  # Minimum 10 fields
+
+                    if len(dirty_fields) >= dirty_threshold {
+                        import from jaclang { logger }
+                        logger.debug(
+                            f"Dirty fields threshold reached for {self.__class__.__name__} "
+                            f"[{anchor.id}]: {len(dirty_fields)}/{total_fields} fields modified "
+                            f"({len(dirty_fields) / total_fields * 100:.1f}%). "
+                            f"Switching to full sync for efficiency."
+                        );
+                        # Mark that we need a full sync by setting a special flag
+                        # Keep dirty_fields intact for potential debugging
+                        object.__setattr__(self, '__jac_force_full_sync__', True);
+                    }
+                }
             }
         } except Exception as e {
             logger.debug(
@@ -316,65 +371,6 @@ impl Archetype.__repr__ -> str {
 """Override access validation."""
 impl Archetype.__jac_access__ -> (AccessLevel | str | int | None) {
     return None;
-}
-
-"""Override setattr to track field changes for automatic partial updates."""
-impl Archetype.__setattr__(name: str, value: Any) -> None {
-    # Skip tracking for internal/private fields and __jac__ anchor
-    if name.startswith('_') or name == 'reports' {
-        object.__setattr__(self, name, value);
-        return;
-    }
-    # Set the value
-    object.__setattr__(self, name, value);
-
-    # Only track dirty fields if this is a persistent archetype
-    # Check __dict__ directly to avoid triggering @cached_property during initialization
-    if '__jac__' in self.__dict__ {
-        anchor = self.__dict__['__jac__'];
-        if anchor.persistent {
-            # Track this field as dirty for partial update
-            if '__jac_dirty_fields__' not in self.__dict__ {
-                object.__setattr__(self, '__jac_dirty_fields__', set());
-            }
-            dirty_fields = self.__dict__['__jac_dirty_fields__'];
-
-            # Add the field to dirty set first
-            dirty_fields.add(name);
-
-            # Dynamic threshold: switch to full sync if >80% of fields are dirty
-            # This scales automatically: 10 fields → switch at 8, 200 fields → switch at 160
-            # Get total fields from class (excluding private/internal fields)
-            total_fields = len(
-                [
-                    f
-                    for f in self.__class__.__dict__.keys()
-                    if not f.startswith('_') and f != 'reports'
-                ]
-            );
-
-            # If we don't have field metadata, use a conservative threshold of 50 fields
-            if total_fields == 0 {
-                total_fields = 50;
-            }
-
-            # Calculate dynamic threshold (80% of total fields)
-            dirty_threshold = max(int(total_fields * 0.80), 10);  # Minimum 10 fields
-
-            if len(dirty_fields) >= dirty_threshold {
-                import from jaclang { logger }
-                logger.debug(
-                    f"Dirty fields threshold reached for {self.__class__.__name__} "
-                    f"[{anchor.id}]: {len(dirty_fields)}/{total_fields} fields modified "
-                    f"({len(dirty_fields) / total_fields * 100:.1f}%). "
-                    f"Switching to full sync for efficiency."
-                );
-                # Mark that we need a full sync by setting a special flag
-                # Keep dirty_fields intact for potential debugging
-                object.__setattr__(self, '__jac_force_full_sync__', True);
-            }
-        }
-    }
 }
 
 """Get the set of dirty (modified) fields for partial update."""
