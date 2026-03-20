@@ -319,7 +319,7 @@ impl Archetype.__jac_access__ -> (AccessLevel | str | int | None) {
 }
 
 """Override setattr to track field changes for automatic partial updates."""
-impl Archetype.__setattr__(self: Archetype, name: str, value: object) -> None {
+impl Archetype.__setattr__(name: str, value: Any) -> None {
     # Skip tracking for internal/private fields and __jac__ anchor
     if name.startswith('_') or name == 'reports' {
         object.__setattr__(self, name, value);
@@ -378,12 +378,12 @@ impl Archetype.__setattr__(self: Archetype, name: str, value: object) -> None {
 }
 
 """Get the set of dirty (modified) fields for partial update."""
-impl Archetype.__jac_dirty_fields__(self: Archetype) -> (set[str] | None) {
+impl Archetype.__jac_dirty_fields__ -> (set[str] | None) {
     return self.__dict__.get('__jac_dirty_fields__');
 }
 
 """Clear dirty fields tracking after persistence."""
-impl Archetype.__jac_clear_dirty__(self: Archetype) -> None {
+impl Archetype.__jac_clear_dirty__ -> None {
     if '__jac_dirty_fields__' in self.__dict__ {
         self.__dict__['__jac_dirty_fields__'].clear();
     }
