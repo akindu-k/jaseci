@@ -4,6 +4,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.12.3 (Unreleased)
 
+- **Fix: Null Checks in Access Control and Persistence**: Added defensive null checks for `jroot`, `to`, and `jctx.user_root` in access validation and anchor persistence operations, preventing runtime crashes in scenarios with missing or unauthenticated user context.
 - **Error: Explicit `self` in `obj`/`node`/`edge`/`walker` Methods (E2015)**: The type checker now reports an error when a method in an `obj`, `node`, `edge`, or `walker` archetype explicitly declares `self` as a parameter. In these archetypes, `self` is implicitly injected by the compiler; declaring it explicitly results in a duplicate parameter. Python-style `class` definitions are unaffected.
 - **Parallel `jac format`**: `jac format` now processes multiple files in parallel using `ProcessPoolExecutor`, significantly reducing CI time for large codebases (e.g., 11 min → ~2 min).
 - **Fix: `sem` strings silently dropped for functions starting with 's', 'e', or 'm'** (#5233): `SemDefMatchPass` used `lstrip('sem.')` to strip the `sem.` prefix, which strips individual *characters* from the set `{s, e, m, .}` rather than the prefix string. This corrupted function names like `summarize_text` → `ummarize_text`, causing the symbol table lookup to fail and the sem string to be silently discarded. Fixed by replacing `lstrip('sem.')` with `removeprefix('sem.')`.
