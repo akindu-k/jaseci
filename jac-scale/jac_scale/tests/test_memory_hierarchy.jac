@@ -400,8 +400,6 @@ test "no unnecessary saves on read-only operations" {
         );
 
         # Verify no update operations were issued to MongoDB during read-only requests.
-        # This is the key assertion: even if data is unchanged, calling update_one
-        # is wasteful and indicates the is_updated flag was incorrectly set to True.
         updates_after_readonly = get_update_count();
         assert updates_after_readonly == updates_before_readonly , (
             f"Read-only operations should not issue any MongoDB update commands. "

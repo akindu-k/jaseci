@@ -240,10 +240,7 @@ impl Serializer._deserialize_anchor(data: dict[str, object]) -> (Anchor | None) 
                 anchor.target = Serializer._id_to_stub(NodeAnchor, target_id);
             }
         }
-        # Deserialized anchors represent persisted state — mark as clean
-        # to prevent unnecessary writes during sync. Without this, __new__
-        # bypasses __init__ so is_updated falls through to the class default
-        # of True, causing every loaded anchor to be re-written on commit.
+
         anchor.is_updated = False;
         anchor.hash = 0;
         return anchor;
