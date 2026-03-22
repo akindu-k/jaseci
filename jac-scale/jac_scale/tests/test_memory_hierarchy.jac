@@ -345,6 +345,11 @@ test "no unnecessary saves on read-only operations" {
     base_url = f"http://localhost:{port}";
     server = start_server(FIXTURES_DIR, JAC_FILE, port);
 
+    def get_update_count -> int {
+        server_status = mongo_client.admin.command("serverStatus");
+        return server_status["opcounters"]["update"];
+    }
+
     try {
         db = mongo_client["jac_db"];
         collection = db["_anchors"];
@@ -372,6 +377,9 @@ test "no unnecessary saves on read-only operations" {
 
         docs_hash_before = get_docs_hash();
 
+        # Capture server-side update count before read-only operations
+        updates_before_readonly = get_update_count();
+
         # Make multiple read-only requests
         for _ in range(3) {
             res = requests.post(f"{base_url}/walker/GetAllTasks", json={}, timeout=2);
@@ -389,6 +397,15 @@ test "no unnecessary saves on read-only operations" {
         docs_hash_after = get_docs_hash();
         assert docs_hash_before == docs_hash_after , (
             "Read-only operations should not modify existing documents in MongoDB"
+        );
+
+        # Verify no update operations were issued to MongoDB during read-only requests.
+        # This is the key assertion: even if data is unchanged, calling update_one
+        # is wasteful and indicates the is_updated flag was incorrectly set to True.
+        updates_after_readonly = get_update_count();
+        assert updates_after_readonly == updates_before_readonly , (
+            f"Read-only operations should not issue any MongoDB update commands. "
+            f"Got {updates_after_readonly - updates_before_readonly} unexpected updates"
         );
 
         # Now create a task (this should write)
