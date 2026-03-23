@@ -84,6 +84,7 @@ impl MongoBackend.put(anchor: Anchor) -> None {
             upsert=True
         );
         anchor.is_updated = False;
+        anchor.hash = Serializer._compute_hash(anchor);
     } except Exception as e {
         logger.error(f"MongoDB put failed: {e}");
     }
@@ -193,22 +194,33 @@ impl MongoBackend.commit(anchor: (Anchor | None) = None) -> None {
 }
 
 # PersistentMemory-specific methods
-"""Sync - flush L1 memory to MongoDB (only updated anchors)"""
+"""Sync - flush L1 memory to MongoDB (only changed anchors)."""
 impl MongoBackend.sync -> None {
     import from jaclang { JacRuntimeInterface as Jac }
     if not self._mem_ref or not self.client {
         return;
     }
     for (_, anchor) in list(self._mem_ref.items()) {
-        if not anchor.persistent
-        or not Jac.check_write_access(anchor)
-        or not anchor.is_updated {
+        if not anchor.persistent or not Jac.check_write_access(anchor) {
             continue;
         }
-        try {
-            self.put(anchor);
-        } except Exception as e {
-            logger.warning(f"MongoDB sync failed for anchor {anchor.id}: {e}");
+        # Fast path: __setattr__ already flagged this anchor as dirty.
+        if anchor.is_updated {
+            try {
+                self.put(anchor);
+            } except Exception as e {
+                logger.warning(f"MongoDB sync failed for anchor {anchor.id}: {e}");
+            }
+            continue;
+        }
+        # Slow path: detect in-place mutations (list.append, dict[k]=v, etc.)
+        # by comparing the current serialized hash against the load-time snapshot.
+        if anchor.hash and Serializer._compute_hash(anchor) != anchor.hash {
+            try {
+                self.put(anchor);
+            } except Exception as e {
+                logger.warning(f"MongoDB sync failed for anchor {anchor.id}: {e}");
+            }
         }
     }
 }

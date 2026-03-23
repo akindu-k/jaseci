@@ -897,3 +897,82 @@ test "sequential requests work correctly" {
         gc.collect();
     }
 }
+
+glob MUTATION_JAC_FILE = FIXTURES_DIR / "mutation_app.jac";
+
+"""Validates that in-place mutations (list.append, dict[k]=v) which bypass
+__setattr__ are still detected and persisted through hash comparison."""
+test "in-place mutations on list and dict are persisted via hash-based dirty check" {
+    mongo_container = MongoDbContainer("mongo:latest");
+    mongo_container.start();
+    os.environ["MONGODB_URI"] = mongo_container.get_connection_url();
+    mongo_client = MongoClient(mongo_container.get_connection_url());
+
+    redis_container = RedisContainer("redis:latest", port=6379);
+    redis_container.start();
+    redis_host = redis_container.get_container_host_ip();
+    redis_port = redis_container.get_exposed_port(6379);
+    os.environ["REDIS_URL"] = f"redis://{redis_host}:{redis_port}/0";
+
+    port = get_free_port();
+    base_url = f"http://localhost:{port}";
+    server: subprocess.Popen = start_server(FIXTURES_DIR, MUTATION_JAC_FILE, port);
+
+    data_dir = FIXTURES_DIR / ".jac" / "data";
+
+    try {
+        token = register_user(base_url, "mutation_tester");
+
+        # Create an item
+        post_request(base_url, "/walker/CreateItem", {"id": 1}, token);
+
+        # --- In-place list mutation (list.append) ---
+        result = post_request(
+            base_url, "/walker/AppendTag", {"id": 1, "tag": "urgent"}, token
+        );
+        assert "urgent" in result["reports"][0]["tags"];
+
+        # --- In-place dict mutation (dict[k]=v) ---
+        result = post_request(
+            base_url,
+            "/walker/SetMeta",
+            {"id": 1, "key": "priority", "value": "high"},
+            token
+        );
+        assert result["reports"][0]["metadata"]["priority"] == "high";
+
+        # --- Restart server to force reload from MongoDB ---
+        server.terminate();
+        with contextlib.suppress(Exception) {
+            server.wait(timeout=2);
+        }
+        server = start_server(FIXTURES_DIR, MUTATION_JAC_FILE, port);
+
+        # Read back after restart — mutations must have been persisted
+        result = post_request(base_url, "/walker/GetItems", {}, token);
+        items = result["reports"][0];
+        assert len(items) == 1 , f"Expected 1 item, got {len(items)}";
+
+        item = items[0];
+        assert "urgent" in item["tags"] , (
+            f"list.append mutation was not persisted. tags={item['tags']}"
+        );
+        assert item["metadata"].get("priority") == "high" , (
+            f"dict[k]=v mutation was not persisted. metadata={item['metadata']}"
+        );
+    } finally {
+        server.terminate();
+        with contextlib.suppress(Exception) {
+            server.wait(timeout=2);
+        }
+        mongo_client.close();
+        mongo_container.stop();
+        redis_container.stop();
+        time.sleep(0.5);
+        gc.collect();
+        if data_dir.exists() {
+            import shutil;
+            shutil.rmtree(data_dir);
+        }
+    }
+}
