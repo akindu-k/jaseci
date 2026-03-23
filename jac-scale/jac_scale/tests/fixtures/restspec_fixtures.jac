@@ -174,3 +174,79 @@ walker:pub LoadUserProfile {
         };
     }
 }
+
+# ============================================================================
+# Custom Object Tests (Pydantic model generation from Jac classes)
+# ============================================================================
+"""Custom Jac object for testing automatic Pydantic model generation."""
+obj Person {
+    has name: str,
+        age: int,
+        email: str = "no-email@example.com";
+}
+
+"""Nested custom object to test recursive model creation."""
+obj Address {
+    has street: str,
+        city: str,
+        zip_code: str = "00000";
+}
+
+"""Object with nested custom type."""
+obj Contact {
+    has person: Person,
+        address: Address;
+}
+
+"""Walker that accepts a custom object as input via POST."""
+@restspec(method=HTTPMethod.POST)
+walker:pub CreatePersonWalker {
+    has person: Person;
+
+    can process with Root entry {
+        report {
+            "message": "Person created via walker",
+            "person_name": self.person.name,
+            "person_age": self.person.age,
+            "person_email": self.person.email
+        };
+    }
+}
+
+"""Function that accepts a custom object as parameter."""
+@restspec(method=HTTPMethod.POST)
+def create_person(person: Person) -> dict {
+    return {
+        "message": "Person created via function",
+        "name": person.name,
+        "age": person.age,
+        "email": person.email
+    };
+}
+
+"""Function with nested custom objects."""
+@restspec(method=HTTPMethod.POST)
+def create_contact(contact: Contact) -> dict {
+    return {
+        "message": "Contact created",
+        "person_name": contact.person.name,
+        "address_city": contact.address.city
+    };
+}
+
+"""Walker with mixed parameters: primitive and custom object."""
+@restspec(method=HTTPMethod.POST)
+walker:pub RegisterUserWalker {
+    has username: str,
+        person: Person,
+        is_admin: bool = False;
+
+    can process with Root entry {
+        report {
+            "message": "User registered",
+            "username": self.username,
+            "person_name": self.person.name,
+            "is_admin": self.is_admin
+        };
+    }
+}

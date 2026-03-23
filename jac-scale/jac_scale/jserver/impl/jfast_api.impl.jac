@@ -147,6 +147,114 @@ impl JFastApiServer.run_server(
     );
 }
 
+"""Get or create a Pydantic model for a Jac class by inspecting its fields."""
+impl JFastApiServer._get_or_create_pydantic_model_for_jac_class(
+    self: JFastApiServer, class_name: str
+) -> (type[BaseModel] | None) {
+    import sys;
+    import from typing { get_type_hints }
+    if class_name in self._models {
+        return self._models[class_name];
+    }
+    jac_class: (type | None) = None;
+    for (module_name, module) in sys.modules.items() {
+        if module and hasattr(module, class_name) {
+            potential_class = getattr(module, class_name);
+            if isinstance(potential_class, type) {
+                jac_class = potential_class;
+                break;
+            }
+        }
+    }
+    if not jac_class {
+        return None;
+    }
+    if not hasattr(jac_class, 'init') and not hasattr(jac_class, '__init__') {
+        return None;
+    }
+    init_method = getattr(jac_class, 'init', None)
+    or getattr(jac_class, '__init__', None);
+    if not init_method or not callable(init_method) {
+        return None;
+    }
+    try {
+        sig = inspect.signature(init_method);
+        try {
+            type_hints = get_type_hints(init_method);
+        } except Exception {
+            type_hints = {};
+        }
+    } except Exception {
+        return None;
+    }
+    pydantic_fields: dict[(str, Any)] = {};
+    for (param_name, param) in sig.parameters.items() {
+        if param_name in ('self', 'args', 'kwargs') {
+            continue;
+        }
+        type_obj = type_hints.get(param_name, None);
+        if type_obj is not None {
+            type_name = getattr(type_obj, '__name__', str(type_obj));
+            if type_name not in (
+                'str', 'int', 'float', 'bool', 'list', 'dict', 'Any'
+            ) {
+                nested_model = self._get_or_create_pydantic_model_for_jac_class(
+                    type_name
+                );
+                field_type = nested_model or Any;
+            } else {
+                field_type = self._get_python_type(type_name);
+            }
+        } else {
+            field_type = Any;
+        }
+        if param.default == inspect.Parameter.empty {
+            pydantic_fields[param_name] = (field_type, Field(...));
+        } else {
+            pydantic_fields[param_name] = ((field_type | None), Field(param.default));
+        }
+    }
+    if not pydantic_fields {
+        return None;
+    }
+    model = create_model(class_name, **pydantic_fields);
+    self._models[class_name] = model;
+    return model;
+}
+
+"""Convert a Pydantic model instance to a Jac object instance."""
+impl JFastApiServer._convert_pydantic_to_jac_object(
+    self: JFastApiServer, pydantic_obj: BaseModel, jac_class_name: str
+) -> (object | None) {
+    import sys;
+    import from jaclang.runtimelib.serializer { Serializer }
+    jac_class: (type | None) = None;
+    for (module_name, module) in sys.modules.items() {
+        if module and hasattr(module, jac_class_name) {
+            potential_class = getattr(module, jac_class_name);
+            if isinstance(potential_class, type) {
+                jac_class = potential_class;
+                break;
+            }
+        }
+    }
+    if not jac_class {
+        return None;
+    }
+    data_dict = pydantic_obj.model_dump();
+    data_dict['__type__'] = jac_class_name;
+    data_dict['__module__'] = jac_class.__module__;
+    jac_obj = Serializer.deserialize(data_dict);
+    if jac_obj is None or isinstance(jac_obj, dict) {
+        try {
+            jac_obj = jac_class(**pydantic_obj.model_dump());
+        } except Exception {
+            return None;
+        }
+    }
+    return jac_obj;
+}
+
 """Get the underlying FastAPI application instance."""
 impl JFastApiServer.get_app(self: JFastApiServer) -> FastAPI {
     return self.app;
@@ -187,7 +295,7 @@ impl JFastApiServer._create_response_model(
     return model;
 }
 
-"""Convert string type to Python type."""
+"""Convert string type to Python type or create Pydantic model for custom objects."""
 impl JFastApiServer._get_python_type(
     self: JFastApiServer, type_string: str
 ) -> type[Any] {
@@ -207,7 +315,15 @@ impl JFastApiServer._get_python_type(
         'dict': `dict,
         'object': `dict
     };
-    return type_mapping.get(type_string.lower(), str);
+    basic_type = type_mapping.get(type_string.lower());
+    if basic_type {
+        return basic_type;
+    }
+    pydantic_model = self._get_or_create_pydantic_model_for_jac_class(type_string);
+    if pydantic_model {
+        return pydantic_model;
+    }
+    return str;
 }
 
 """Implementation of PATH parameter handler."""
@@ -545,13 +661,44 @@ impl JFastApiServer._create_endpoint_function(
     }
     params = ', '.join(param_strs);
     callback_args_lines: list[str] = [];
+    param_type_info: dict[(str, str)] = {
+        p.name: p.data_type
+        for p in parameters
+        if p.name
+    };
     if body_model {
         for param in body_params {
             param_name = param.name;
             if param_name {
-                callback_args_lines.append(
-                    f"        callback_args['{param_name}'] = body_data.{param_name}"
+                param_type = param_type_info.get(param_name, '');
+                is_custom = (
+                    param_type
+                    and param_type.lower() not in (
+                        'str', 'int', 'float', 'bool', 'list', 'dict',
+                        'string', 'integer', 'number', 'boolean', 'object'
+                    )
                 );
+                if is_custom {
+                    callback_args_lines.append(
+                        f"        _pydantic_val_{param_name} = body_data.{param_name}"
+                    );
+                    callback_args_lines.append(
+                        f"        if isinstance(_pydantic_val_{param_name}, BaseModel):"
+                    );
+                    callback_args_lines.append(
+                        f"            callback_args[{repr(
+                            param_name
+                        )}] = _convert_pydantic_to_jac({repr(param_type)}, _pydantic_val_{param_name})"
+                    );
+                    callback_args_lines.append(f"        else:");
+                    callback_args_lines.append(
+                        f"            callback_args[{repr(param_name)}] = _pydantic_val_{param_name}"
+                    );
+                } else {
+                    callback_args_lines.append(
+                        f"        callback_args['{param_name}'] = body_data.{param_name}"
+                    );
+                }
             }
         }
         for name in param_mapping {
@@ -614,6 +761,11 @@ def endpoint_wrapper({params}):
         raise HTTPException(status_code=500, detail=str(e))
 """;
     }
+    def _convert_pydantic_to_jac(
+        jac_class_name: str, pydantic_obj: BaseModel
+    ) -> object {
+        return self._convert_pydantic_to_jac_object(pydantic_obj, jac_class_name);
+    }
     exec_globals: dict[(str, Any)] = {
         'callback': callback,
         'HTTPException': HTTPException,
@@ -637,8 +789,10 @@ def endpoint_wrapper({params}):
         'bool': bool,
         'list': `list,
         'dict': `dict,
+        'BaseModel': BaseModel,
         'TransportResponse': TransportResponse,
         '_convert_transport_response_to_json_response': _convert_transport_response_to_json_response,
+        '_convert_pydantic_to_jac': _convert_pydantic_to_jac,
         'isinstance': isinstance
     };
     if body_model {
@@ -841,6 +995,7 @@ impl JFastApiServer.init(
     super.init((endpoints or []));
     self.app = app or FastAPI();
     self._models: dict[(str, type[BaseModel])] = {};
+    self._param_type_map: dict[(str, str)] = {};
     self.__server_created = False;
 
     async def request_context_middleware(request: Request, call_next: Callable) {
