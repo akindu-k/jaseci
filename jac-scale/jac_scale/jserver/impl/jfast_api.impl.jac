@@ -228,37 +228,56 @@ impl JFastApiServer._get_or_create_pydantic_model_for_jac_class(
     return model;
 }
 
-"""Convert a Pydantic model instance to a Jac object instance."""
+"""Convert a Pydantic model instance to a Jac object via Serializer.
+
+Recursively annotates nested Pydantic sub-models with __type__/__module__
+metadata and registers each Jac class with the Serializer so that
+Serializer.deserialize can reconstruct the full object graph.
+"""
 impl JFastApiServer._convert_pydantic_to_jac_object(
     self: JFastApiServer, pydantic_obj: BaseModel, jac_class_name: str
 ) -> (object | None) {
     import sys;
     import from jaclang.runtimelib.serializer { Serializer }
-    jac_class: (type | None) = None;
-    for (module_name, module) in sys.modules.items() {
-        if module and hasattr(module, jac_class_name) {
-            potential_class = getattr(module, jac_class_name);
-            if isinstance(potential_class, type) {
-                jac_class = potential_class;
-                break;
+
+    def _find_and_register(name: str) -> (type | None) {
+        for (_, mod) in sys.modules.items() {
+            if mod and hasattr(mod, name) {
+                cls = getattr(mod, name);
+                if isinstance(cls, type) {
+                    Serializer.register(cls);
+                    return cls;
+                }
             }
         }
-    }
-    if not jac_class {
         return None;
     }
-    data_dict = pydantic_obj.model_dump();
-    data_dict['__type__'] = jac_class_name;
-    data_dict['__module__'] = jac_class.__module__;
-    jac_obj = Serializer.deserialize(data_dict);
-    if jac_obj is None or isinstance(jac_obj, dict) {
-        try {
-            jac_obj = jac_class(**pydantic_obj.model_dump());
-        } except Exception {
+
+    def _annotate(model: BaseModel, cls_name: str) -> (dict[(str, Any)] | None) {
+        jac_cls = _find_and_register(cls_name);
+        if not jac_cls {
             return None;
         }
+        result: dict[(str, Any)] = {
+            '__type__': cls_name,
+            '__module__': jac_cls.__module__
+        };
+        for (field_name, value) in model {
+            if isinstance(value, BaseModel) {
+                nested = _annotate(value, type(value).__name__);
+                result[field_name] = nested or value.model_dump();
+            } else {
+                result[field_name] = value;
+            }
+        }
+        return result;
     }
-    return jac_obj;
+
+    data = _annotate(pydantic_obj, jac_class_name);
+    if not data {
+        return None;
+    }
+    return Serializer.deserialize(data);
 }
 
 """Get the underlying FastAPI application instance."""
