@@ -107,13 +107,8 @@ impl JacAccessValidation.check_access_level(
     }
     jctx = JacRuntimeInterface.get_context();
     jroot = jctx.user_root;
-    if jroot {
-        if ((jroot == jctx.system_root) or (jroot == `to)) {
-            return AccessLevel.WRITE;
-        }
-        if (`to and (jroot.id == `to.root)) {
-            return AccessLevel.WRITE;
-        }
+    if ((jroot == jctx.system_root) or (jroot.id == `to.root) or (jroot == `to)) {
+        return AccessLevel.WRITE;
     }
     if (
         not no_custom
@@ -129,18 +124,12 @@ impl JacAccessValidation.check_access_level(
         if (to_root.access.all > access_level) {
             access_level = to_root.access.all;
         }
-        if jroot {
-            level = to_root.access.roots.check(str(jroot.id));
-            if (level is not None) {
-                access_level = level;
-            }
-        }
-    }
-    if jroot {
-        level = to_access.roots.check(str(jroot.id));
-        if (level is not None) {
+        if ((level := to_root.access.roots.check(str(jroot.id))) is not None) {
             access_level = level;
         }
+    }
+    if ((level := to_access.roots.check(str(jroot.id))) is not None) {
+        access_level = level;
     }
     return access_level;
 }
@@ -1580,9 +1569,7 @@ impl JacBasics.save(`obj: (Archetype | Anchor)) -> None {
     jctx = JacRuntimeInterface.get_context();
     if (not anchor.persistent and not anchor.root) {
         anchor.persistent = True;
-        if jctx.user_root {
-            anchor.root = jctx.user_root.id;
-        }
+        anchor.root = jctx.user_root.id;
     }
     jctx.mem.put(anchor);
     match anchor {
