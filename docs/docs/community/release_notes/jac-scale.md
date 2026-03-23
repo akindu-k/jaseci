@@ -4,6 +4,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.2.8 (Unreleased)
 
+- **Custom Object Support in REST APIs**: Jac `obj` types (e.g., `obj Person { has name: str, age: int; }`) used as walker or function parameters are now automatically converted to Pydantic models. This enables proper request validation, OpenAPI schema generation, and Swagger UI support for custom types, including nested objects and mixed primitive/custom parameters.
+
 ## jac-scale 0.2.7 (Latest Release)
 
 - **Kubernetes Security Hardening**: Added container-level security contexts (`allowPrivilegeEscalation: false`, `drop: ALL`, `readOnlyRootFilesystem`, `seccompProfile: RuntimeDefault`), dedicated `ServiceAccount` per workload, component-specific NetworkPolicies enforcing proper isolation (databases only accept traffic from main app + dashboards, monitoring components only accept ingress from trusted internal sources), and `pod-security.kubernetes.io/enforce: baseline` namespace labels.
