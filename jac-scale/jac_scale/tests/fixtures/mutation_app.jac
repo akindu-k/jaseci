@@ -23,7 +23,6 @@ walker:pub GetItems {
     }
 }
 
-# In-place list mutation: list.append bypasses __setattr__
 walker:pub AppendTag {
     has id: int,
         tag: str;
@@ -42,7 +41,6 @@ walker:pub AppendTag {
     }
 }
 
-# In-place dict mutation: dict[k]=v bypasses __setattr__
 walker:pub SetMeta {
     has id: int,
         key: str,
@@ -62,7 +60,6 @@ walker:pub SetMeta {
     }
 }
 
-# Direct field assignment: __setattr__ catches this (baseline)
 walker:pub SetCompleted {
     has id: int;
 
