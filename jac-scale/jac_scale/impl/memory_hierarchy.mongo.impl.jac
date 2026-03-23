@@ -59,9 +59,6 @@ impl MongoBackend.get(id: UUID) -> (Anchor | None) {
         db_obj = self.collection.find_one({'_id': str(_id)});
         if db_obj {
             anchor = self._load_anchor(db_obj);
-            if anchor {
-                anchor.is_updated = False;
-            }
             return anchor;
         }
     } except Exception as e {
@@ -83,7 +80,6 @@ impl MongoBackend.put(anchor: Anchor) -> None {
             {'$set': {'data': data, 'type': type(anchor).__name__}},
             upsert=True
         );
-        anchor.is_updated = False;
         anchor.hash = Serializer._compute_hash(anchor);
     } except Exception as e {
         logger.error(f"MongoDB put failed: {e}");
@@ -139,7 +135,6 @@ impl MongoBackend.query(
     try {
         for doc in self.collection.find() {
             if (anchor := self._load_anchor(doc)) {
-                anchor.is_updated = False;
                 if filter is None or filter(anchor) {
                     yield anchor;
                 }
@@ -194,7 +189,12 @@ impl MongoBackend.commit(anchor: (Anchor | None) = None) -> None {
 }
 
 # PersistentMemory-specific methods
-"""Sync - flush L1 memory to MongoDB (only changed anchors)."""
+"""Sync - flush L1 memory to MongoDB (only changed anchors).
+
+Uses hash-based dirty checking: compares the current serialized state
+against the load-time snapshot. Catches all mutation types including
+in-place mutations (list.append, dict[k]=v, set.add, nested objects).
+hash=0 means new/never-persisted anchor — always written."""
 impl MongoBackend.sync -> None {
     import from jaclang { JacRuntimeInterface as Jac }
     if not self._mem_ref or not self.client {
@@ -204,18 +204,8 @@ impl MongoBackend.sync -> None {
         if not anchor.persistent or not Jac.check_write_access(anchor) {
             continue;
         }
-        # Fast path: __setattr__ already flagged this anchor as dirty.
-        if anchor.is_updated {
-            try {
-                self.put(anchor);
-            } except Exception as e {
-                logger.warning(f"MongoDB sync failed for anchor {anchor.id}: {e}");
-            }
-            continue;
-        }
-        # Slow path: detect in-place mutations (list.append, dict[k]=v, etc.)
-        # by comparing the current serialized hash against the load-time snapshot.
-        if anchor.hash and Serializer._compute_hash(anchor) != anchor.hash {
+        current_hash = Serializer._compute_hash(anchor);
+        if current_hash != anchor.hash {
             try {
                 self.put(anchor);
             } except Exception as e {

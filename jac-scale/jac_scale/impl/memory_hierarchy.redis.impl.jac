@@ -52,11 +52,7 @@ impl RedisBackend.get(id: UUID) -> (Anchor | None) {
             return None;
         }
         data = json.loads(raw);
-        anchor: (Anchor | None) = Serializer.deserialize(data);
-        if anchor {
-            anchor.is_updated = False;
-        }
-        return anchor;
+        return Serializer.deserialize(data);
     } except Exception as e {
         logger.debug(f"Redis get failed: {e}");
         return None;

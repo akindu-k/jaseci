@@ -824,41 +824,46 @@ test "Redis write cycle via commit" {
     }
 }
 
-test "is_updated flag set on field modification" {
-    # Import the Task node from the fixture
+test "hash-based dirty check detects all mutation types" {
+    import from jaclang.runtimelib.serializer { Serializer }
     import sys;
     sys.path.insert(0, str(FIXTURES_DIR));
-    import from todo_app { Task }
+    import from mutation_app { Item }
 
-    # Create a Task instance
-    task = Task(id=999, title="Test is_updated", completed=False);
-    task_anchor = task.__jac__;
+    # Create an Item with mutable fields
+    item = Item(id=1);
+    anchor = item.__jac__;
 
-    # After creation, is_updated should be True (new node)
-    assert task_anchor.is_updated , "Newly created node should have is_updated=True";
+    # New anchor has hash=0 (never persisted)
+    assert anchor.hash == 0 , "New anchor should have hash=0";
 
-    # Simulate save by setting is_updated=False (as would happen after commit)
-    task_anchor.is_updated = False;
-    assert not task_anchor.is_updated , "After save simulation, is_updated should be False";
+    # Simulate persist: compute and store baseline hash
+    anchor.hash = Serializer._compute_hash(anchor);
+    baseline = anchor.hash;
+    assert baseline != 0 , "Computed hash should be non-zero";
 
-    # Modify a field - this should trigger __setattr__ which sets is_updated=True
-    task.completed = True;
+    # No mutation → hash unchanged
+    assert Serializer._compute_hash(anchor) == baseline , "No mutation should yield same hash";
 
-    # Verify is_updated was set to True
-    assert task_anchor.is_updated , (
-        "Modifying 'completed' field should set is_updated=True via __setattr__"
-    );
+    # Direct field assignment
+    item.completed = True;
+    assert Serializer._compute_hash(anchor) != baseline , "Direct assignment should change hash";
 
-    # Reset flag
-    task_anchor.is_updated = False;
+    # Reset baseline
+    anchor.hash = Serializer._compute_hash(anchor);
+    baseline = anchor.hash;
 
-    # Modify another field
-    task.title = "Modified Title";
+    # In-place list mutation
+    item.tags.append("urgent");
+    assert Serializer._compute_hash(anchor) != baseline , "list.append should change hash";
 
-    # Verify is_updated was set to True again
-    assert task_anchor.is_updated , (
-        "Modifying 'title' field should set is_updated=True"
-    );
+    # Reset baseline
+    anchor.hash = Serializer._compute_hash(anchor);
+    baseline = anchor.hash;
+
+    # In-place dict mutation
+    item.metadata["priority"] = "high";
+    assert Serializer._compute_hash(anchor) != baseline , "dict[k]=v should change hash";
 }
 
 test "sequential requests work correctly" {

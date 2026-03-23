@@ -241,7 +241,6 @@ impl Serializer._deserialize_anchor(data: dict[str, object]) -> (Anchor | None) 
             }
         }
 
-        anchor.is_updated = False;
         anchor.hash = Serializer._compute_hash(anchor);
         return anchor;
     } except Exception as e {
