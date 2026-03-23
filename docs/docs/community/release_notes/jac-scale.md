@@ -4,6 +4,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.2.8 (Unreleased)
 
+- 1 small changes.
+
 ## jac-scale 0.2.7 (Latest Release)
 
 - **Automatic Partial Updates for Race-Condition-Free Concurrent Modifications**: When you update a node/edge field with simple assignment (e.g., `task.title = "new title"`), Jac now automatically tracks and persists only the changed fields instead of replacing the entire object. This prevents race conditions when multiple requests update different fields of the same node/edge simultaneously - changes are preserved instead of overwriting each other. The implementation uses MongoDB's atomic `$set` operations for truly concurrent-safe updates and automatically invalidates L1/L2 caches to prevent stale reads. Example: Two concurrent walkers running `task.status = "done"` and `task.priority = 5` on the same task both succeed without data loss.
