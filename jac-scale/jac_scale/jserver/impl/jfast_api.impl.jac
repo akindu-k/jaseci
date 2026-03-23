@@ -196,7 +196,13 @@ impl JFastApiServer._get_or_create_pydantic_model_for_jac_class(
         if type_obj is not None {
             type_name = getattr(type_obj, '__name__', str(type_obj));
             if type_name not in (
-                'str', 'int', 'float', 'bool', 'list', 'dict', 'Any'
+                'str',
+                'int',
+                'float',
+                'bool',
+                'list',
+                'dict',
+                'Any'
             ) {
                 nested_model = self._get_or_create_pydantic_model_for_jac_class(
                     type_name
@@ -674,8 +680,17 @@ impl JFastApiServer._create_endpoint_function(
                 is_custom = (
                     param_type
                     and param_type.lower() not in (
-                        'str', 'int', 'float', 'bool', 'list', 'dict',
-                        'string', 'integer', 'number', 'boolean', 'object'
+                        'str',
+                        'int',
+                        'float',
+                        'bool',
+                        'list',
+                        'dict',
+                        'string',
+                        'integer',
+                        'number',
+                        'boolean',
+                        'object'
                     )
                 );
                 if is_custom {
