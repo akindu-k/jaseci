@@ -4,7 +4,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.13.1 (Unreleased)
 
-- **Fix: Null Checks in Access Control and Persistence**: Added defensive null checks for `jroot`, `to`, and `jctx.user_root` in access validation and anchor persistence operations, preventing runtime crashes in scenarios with missing or unauthenticated user context.
+- **Fix: `ExecutionContext` Field Types Corrected to Non-Optional**: Changed `system_root`, `user_root`, and `entry_node` fields on `ExecutionContext` from `NodeAnchor | None` to `NodeAnchor`. These fields are always initialized in `postinit` (defaulting to `system_root`), so the `| None` was incorrect and forced unnecessary null-guard workarounds throughout access validation and anchor persistence code.
 
 ## jaclang 0.13.0 (Latest Release)
 
