@@ -778,7 +778,7 @@ test "Redis write cycle via commit" {
         # Initial: 4 nodes in Redis (super_root, guest, admin, __system__)
         assert redis_client.dbsize() == 4 , "Redis should start with 4 initial nodes";
 
-        # Create task (goes to L1 with is_updated=True, then commit writes to L2)
+        # Create task
         res = requests.post(
             f"{base_url}/walker/CreateTask",
             json={"id": 999, "title": "Redis Write Test"},

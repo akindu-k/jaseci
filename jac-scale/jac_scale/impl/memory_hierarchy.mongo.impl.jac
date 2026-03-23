@@ -189,12 +189,7 @@ impl MongoBackend.commit(anchor: (Anchor | None) = None) -> None {
 }
 
 # PersistentMemory-specific methods
-"""Sync - flush L1 memory to MongoDB (only changed anchors).
-
-Uses hash-based dirty checking: compares the current serialized state
-against the load-time snapshot. Catches all mutation types including
-in-place mutations (list.append, dict[k]=v, set.add, nested objects).
-hash=0 means new/never-persisted anchor — always written."""
+"""Sync - flush L1 memory to MongoDB (only changed anchors)."""
 impl MongoBackend.sync -> None {
     import from jaclang { JacRuntimeInterface as Jac }
     if not self._mem_ref or not self.client {
