@@ -55,6 +55,13 @@ impl TypeEvaluator.get_type_of_module_item(node_: uni.ModuleItem) -> types.TypeB
                         ) {
                             return self._set_module_item_symbol_and_type(node_, sym);
                         }
+                        # Fallback: follow star imports (from .submod import *)
+                        # to find re-exported symbols (e.g., asyncio.Queue from asyncio.queues).
+                        if sym := self._resolve_star_import_symbol(
+                            mod, node_.name.value
+                        ) {
+                            return self._set_module_item_symbol_and_type(node_, sym);
+                        }
                         continue;
                     }
 
@@ -87,9 +94,74 @@ impl TypeEvaluator.get_type_of_module_item(node_: uni.ModuleItem) -> types.TypeB
             ) {
                 return self._set_module_item_symbol_and_type(node_, sym);
             }
+            # Fallback: follow star imports for re-exported symbols.
+            if isinstance(mod_type.symbol_table, uni.Module) {
+                if sym := self._resolve_star_import_symbol(
+                    mod_type.symbol_table, node_.name.value
+                ) {
+                    return self._set_module_item_symbol_and_type(node_, sym);
+                }
+            }
         }
     }
     return types.UnknownType();
+}
+
+"""Resolve a symbol through star imports (from .X import *) in a module.
+
+Python packages like asyncio re-export symbols from submodules via star imports
+in __init__.pyi. When a direct lookup in the module's symbol table fails, this
+method follows star imports to find the symbol in submodules. Uses a visited set
+to prevent infinite recursion from circular star imports.
+"""
+impl TypeEvaluator._resolve_star_import_symbol(
+    mod: uni.Module, name: str, visited: set[int] | None = None
+) -> uni.Symbol | None {
+    mod_id = id(mod);
+    if visited is None {
+        visited = set();
+    }
+    if mod_id in visited {
+        return None;
+    }
+    visited.add(mod_id);
+    for imp in mod.get_all_sub_nodes(uni.Import) {
+        if not imp.is_absorb or not imp.items {
+            continue;
+        }
+        # Star imports store the source module path in items[0] (a ModulePath).
+        star_mod_path = imp.items[0];
+        if not isinstance(star_mod_path, uni.ModulePath) {
+            continue;
+        }
+        # Resolve the submodule path (e.g., .queues -> asyncio/queues.pyi).
+        resolved = star_mod_path.resolve_relative_path_list();
+        if not resolved or len(resolved) < 2 {
+            continue;
+        }
+        submod_base = resolved[-1];  # e.g., ".../asyncio/queues"
+        # Try common extensions to find the actual file.
+        submod: uni.Module | None = None;
+        for ext in (".pyi", ".py", ".jac") {
+            candidate = submod_base + ext;
+            if Path(candidate).exists() {
+                submod = self._import_module_from_path(candidate);
+                break;
+            }
+        }
+        if submod is None {
+            continue;
+        }
+        # Look up the symbol in the submodule.
+        if sym := type_utils.lookup_symtab(submod, name, self.builtins_module) {
+            return sym;
+        }
+        # Recursively follow star imports in the submodule.
+        if sym := self._resolve_star_import_symbol(submod, name, visited) {
+            return sym;
+        }
+    }
+    return None;
 }
 
 """Return the effective type of the module."""
@@ -99,8 +171,23 @@ impl TypeEvaluator.get_type_of_module(node_: uni.ModulePath) -> types.TypeBase {
             return node_.path[-1].type;
         }
         path_list = node_.resolve_relative_path_list();
+        # Calculate offset for relative imports from Python packages:
+        # leading dots produce extra segments in resolve_relative_path_list()
+        # that don't have corresponding entries in node_.path.
+        # E.g., "from .base import X" has path=[base] but path_list=[__init__.py, base.jac]
+        # Only apply offset when importing from Python __init__.py (not jaclang internals)
+        # to avoid circular import issues during compiler bootstrap.
+        offset = 0;
+        if node_.path and len(path_list) > len(node_.path) and node_.level > 0 {
+            first_path = path_list[0] if path_list else "";
+            # Only for Python __init__ files, not Jac __init__.jac
+            is_python_init = first_path.endswith(("__init__.py", "__init__.pyi"));
+            if is_python_init {
+                offset = len(path_list) - len(node_.path);
+            }
+        }
         for (idx, npath) in enumerate(node_.path) {
-            mod_path = path_list[idx];
+            mod_path = path_list[idx + offset];
 
             if mod_path in self._module_type_cache {
                 npath.type = self._module_type_cache[mod_path];
