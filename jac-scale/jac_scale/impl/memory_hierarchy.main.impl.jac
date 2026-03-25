@@ -72,7 +72,50 @@ impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
     }
     # Batch commit: delegate to L3's sync() which uses hash-based change detection.
     # Capture L2-pending anchors BEFORE L3 sync (which updates hashes).
-    if self.l3 {
+    l3 = self.l3;
+    if l3 {
+        # Auto-persist dirty archetypes via partial_update before hash-based sync.
+        # Dirty fields track direct assignments; hash comparison catches in-place mutations.
+        for cached_anchor in `list(self.__mem__.values()) {
+            try {
+                if cached_anchor.is_populated() and cached_anchor.persistent {
+                    archetype = cached_anchor.archetype;
+                    if archetype.__dict__.get('__jac_force_full_sync__', False) {
+                        l3.put(cached_anchor);
+                        if '__jac_force_full_sync__' in archetype.__dict__ {
+                            del archetype.__dict__['__jac_force_full_sync__'];
+                        }
+                        archetype.__jac_clear_dirty__();
+                    } elif dirty_fields := archetype.__jac_dirty_fields__() {
+                        fields_dict: dict[str, object] = {};
+                        for field_name in dirty_fields {
+                            if hasattr(archetype, field_name) {
+                                fields_dict[str(field_name)] = getattr(archetype, field_name);
+                            }
+                        }
+                        if fields_dict {
+                            dirty_copy = set(dirty_fields);
+                            archetype.__jac_clear_dirty__();
+                            try {
+                                if l3?.partial_update {
+                                    l3.partial_update(cached_anchor, fields_dict);
+                                } else {
+                                    l3.put(cached_anchor);
+                                }
+                            } except Exception as update_error {
+                                if '__jac_dirty_fields__' not in archetype.__dict__ {
+                                    archetype.__dict__['__jac_dirty_fields__'] = set();
+                                }
+                                archetype.__dict__['__jac_dirty_fields__'].update(dirty_copy);
+                                raise update_error;
+                            }
+                        }
+                    }
+                }
+            } except Exception as e {
+                logger.warning(f"Auto-persist failed for anchor {cached_anchor.id}: {e}");
+            }
+        }
         try {
             l2_pending = [];
             if self.l2 {
@@ -84,7 +127,7 @@ impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
                     and Serializer._compute_hash(mem_anchor) != mem_anchor.hash
                 ];
             }
-            self.l3.sync();
+            l3.sync();
             if self.l2 {
                 for mem_anchor in l2_pending {
                     try {
