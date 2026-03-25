@@ -291,12 +291,13 @@ test "gap 44 context manager exit not checked" {
 test "gap 45 enum iteration false positive" {
     program = compile_and_check("checker_gap_enum_iter.jac");
 
-    # Expected: 0 errors (iterating over enum is valid Python/Jac)
-    # Actual: 1 error (enum class not recognized as iterable — Unknown not treated as Any)
-    assert len(program.errors_had) == 1 , f"Gap #45: Enum iteration raises false positive. "
-    f"Expected 1 type error but got {len(program.errors_had)}: "
-    f"{[str(e) for e in program.errors_had]}. "
-    f"Iterating over an enum class should be valid (EnumMeta provides __iter__).";
+    # PARTIALLY FIXED: Structural protocol matching for Iterable (__iter__) now
+    # recognizes enum classes as iterable via EnumMeta.
+    # Remaining 1: c.name in list comprehension — iteration var type resolves
+    # to Unknown in comprehension scope, causing false E1032 on .name access.
+    assert len(program.errors_had) == 1 , f"Gap #45: Enum iteration should produce 1 error, "
+    f"but got {len(program.errors_had)}: "
+    f"{[str(e) for e in program.errors_had]}.";
 }
 
 # =========================================================================
