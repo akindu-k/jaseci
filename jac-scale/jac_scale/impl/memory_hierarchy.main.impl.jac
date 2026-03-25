@@ -90,7 +90,9 @@ impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
                         fields_dict: dict[str, object] = {};
                         for field_name in dirty_fields {
                             if hasattr(archetype, field_name) {
-                                fields_dict[str(field_name)] = getattr(archetype, field_name);
+                                fields_dict[str(field_name)] = getattr(
+                                    archetype, field_name
+                                );
                             }
                         }
                         if fields_dict {
@@ -106,14 +108,18 @@ impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
                                 if '__jac_dirty_fields__' not in archetype.__dict__ {
                                     archetype.__dict__['__jac_dirty_fields__'] = set();
                                 }
-                                archetype.__dict__['__jac_dirty_fields__'].update(dirty_copy);
+                                archetype.__dict__['__jac_dirty_fields__'].update(
+                                    dirty_copy
+                                );
                                 raise update_error;
                             }
                         }
                     }
                 }
             } except Exception as e {
-                logger.warning(f"Auto-persist failed for anchor {cached_anchor.id}: {e}");
+                logger.warning(
+                    f"Auto-persist failed for anchor {cached_anchor.id}: {e}"
+                );
             }
         }
         try {
