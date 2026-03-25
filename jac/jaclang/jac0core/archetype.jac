@@ -122,7 +122,6 @@ obj Anchor {
         access: Permission = field(default_factory=Permission),
         persistent: bool = False,
         hash: int = 0,
-        is_updated: bool = True,
         version: int = 0;
 
     def is_populated -> bool;

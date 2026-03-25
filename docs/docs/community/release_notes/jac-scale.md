@@ -2,17 +2,19 @@
 
 This document provides a summary of new features, improvements, and bug fixes in each version of **Jac-Scale**. For details on changes that might require updates to your existing code, please refer to the [Breaking Changes](../breaking-changes.md) page.
 
-## jac-scale 0.2.8 (Unreleased)
+## jac-scale 0.2.9 (Unreleased)
+
+## jac-scale 0.2.8 (Latest Release)
 
 - 1 small changes.
 
-## jac-scale 0.2.7 (Latest Release)
+## jac-scale 0.2.7
 
 - **Automatic Partial Updates for Race-Condition-Free Concurrent Modifications**: When you update a node/edge field with simple assignment (e.g., `task.title = "new title"`), Jac now automatically tracks and persists only the changed fields instead of replacing the entire object. This prevents race conditions when multiple requests update different fields of the same node/edge simultaneously - changes are preserved instead of overwriting each other. The implementation uses MongoDB's atomic `$set` operations for truly concurrent-safe updates and automatically invalidates L1/L2 caches to prevent stale reads. Example: Two concurrent walkers running `task.status = "done"` and `task.priority = 5` on the same task both succeed without data loss.
 - **Kubernetes Security Hardening**: Added container-level security contexts (`allowPrivilegeEscalation: false`, `drop: ALL`, `readOnlyRootFilesystem`, `seccompProfile: RuntimeDefault`), dedicated `ServiceAccount` per workload, component-specific NetworkPolicies enforcing proper isolation (databases only accept traffic from main app + dashboards, monitoring components only accept ingress from trusted internal sources), and `pod-security.kubernetes.io/enforce: baseline` namespace labels.
 - **Scheduler Code Quality Cleanup**: Extracted shared `_authenticate_request()` and `_validate_trigger()` helpers to remove duplicated auth/validation logic across `/jobs` endpoints. Fixed `get_job()` to query by ID directly instead of loading all jobs. Replaced deprecated `datetime.utcnow()` with `datetime.now(timezone.utc)`. Persisted `is_walker` in job data to avoid redundant introspector lookups. Replaced silent exception swallowing with debug logging.
 - **Metrics Endpoint Fix & Prometheus Auth**: Fixed `/metrics` 500 error (`TransportResponse` is a dataclass, not Pydantic - replaced `.model_dump()` with `dataclasses.asdict()`). Added HTTP Basic Auth support so Prometheus can scrape `/metrics` via `basic_auth` in `prometheus.yml`.
-- **Performance: Skip Unnecessary Database Writes**: Prevented unnecessary database writes by introducing an `is_updated` flag on anchors, ensuring only explicitly modified (committed) data is persisted while read-only executions skip all write operations.
+- **Hash-based dirty checking for MongoDB/Redis persistence**: Replaced `is_updated` flag with hash-based change detection at sync time. Read-only requests no longer trigger any database writes. All mutation types, including in-place mutations (`list.append()`, `dict[k]=v`, `set.add()`, nested objects), are automatically detected and persisted.
 - **Client-Side Error Reporting Endpoint**: Added `POST /cl/__error__` endpoint to `JacAPIServerCore` for receiving client-side JavaScript errors. Errors are logged via the `jaclang.client_errors` logger and printed to the dev console with stack traces for visibility.
 - **Source-Mapped Error Stack Traces**: Client error stack traces received at `/cl/__error__` are now resolved from bundled JS locations to original `.jac` file paths and exact line numbers via the centralized `SourceMapper` with two-layer resolution.
 - **Client Error Rate Limiting**: The `/cl/__error__` endpoint now deduplicates identical error messages (10s window) and caps at 20 errors per minute to prevent log flooding from render loops or repeated failures.
