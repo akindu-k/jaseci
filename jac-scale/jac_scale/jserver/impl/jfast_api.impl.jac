@@ -151,8 +151,6 @@ impl JFastApiServer.run_server(
 impl JFastApiServer._get_or_create_pydantic_model_for_jac_class(
     self: JFastApiServer, class_name: str
 ) -> (type[BaseModel] | None) {
-    import sys;
-    import from typing { get_type_hints }
     if class_name in self._models {
         return self._models[class_name];
     }
@@ -228,16 +226,10 @@ impl JFastApiServer._get_or_create_pydantic_model_for_jac_class(
     return model;
 }
 
-"""Convert a Pydantic model instance to a Jac object via Serializer.
-
-Recursively annotates nested Pydantic sub-models with __type__/__module__
-metadata and registers each Jac class with the Serializer so that
-Serializer.deserialize can reconstruct the full object graph.
-"""
+"""Convert a Pydantic model instance to a Jac object via Serializer."""
 impl JFastApiServer._convert_pydantic_to_jac_object(
     self: JFastApiServer, pydantic_obj: BaseModel, jac_class_name: str
 ) -> (object | None) {
-    import sys;
     import from jaclang.runtimelib.serializer { Serializer }
 
     def _find_and_register(name: str) -> (type | None) {

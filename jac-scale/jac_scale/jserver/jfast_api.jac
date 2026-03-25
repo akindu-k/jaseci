@@ -20,6 +20,7 @@ Advanced Features:
 import inspect;
 import logging;
 import uvicorn;
+import sys;
 import from collections.abc { Callable }
 import from typing { Any, Optional, TypeAlias, get_type_hints }
 import from fastapi {
