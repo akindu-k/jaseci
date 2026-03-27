@@ -155,7 +155,7 @@ impl JFastApiServer._get_or_create_pydantic_model_for_jac_class(
         return self._models[class_name];
     }
     jac_class: (type | None) = None;
-    for (module_name, module) in sys.modules.items() {
+    for (module_name, module) in list(sys.modules.items()) {
         if module and hasattr(module, class_name) {
             potential_class = getattr(module, class_name);
             if isinstance(potential_class, type) {
