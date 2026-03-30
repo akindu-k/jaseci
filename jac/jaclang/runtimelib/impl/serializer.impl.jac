@@ -23,6 +23,19 @@ impl Serializer._serialize_attrs(
 impl Serializer.serialize(
     `obj: object, include_type: bool = False, api_mode: bool = False
 ) -> object {
+    if isinstance(`obj, Archetype) {
+        result = Serializer._type_info(`obj, include_type);
+        if api_mode {
+            result |= {
+                '_jac_type': type(`obj).__name__,
+                '_jac_id': `obj.__jac__.id.hex if `obj?.__jac__ else None,
+                '_jac_archetype': 'node'
+                    if isinstance(`obj, NodeArchetype)
+                    else 'walker' if isinstance(`obj, WalkerArchetype) else 'archetype'
+            };
+        }
+        return result | Serializer._serialize_attrs(`obj, include_type, api_mode);
+    }
     return Serializer._serialize_value(`obj, include_type, api_mode);
 }
 
@@ -87,19 +100,16 @@ impl Serializer._serialize_value(
         }
         return result;
     }
-    # Archetype (standalone)
+    # Archetype (nested) → store reference ID so the object is lazily fetched
     if isinstance(val, Archetype) {
-        result = Serializer._type_info(val, include_type);
-        if api_mode {
-            result |= {
-                '_jac_type': type(val).__name__,
-                '_jac_id': val.__jac__.id.hex if val?.__jac__ else None,
-                '_jac_archetype': 'node'
-                    if isinstance(val, NodeArchetype)
-                    else 'walker' if isinstance(val, WalkerArchetype) else 'archetype'
-            };
+        jac = val?.__jac__;
+        if jac {
+            return {'$ref': jac.id.hex};
         }
-        return result | Serializer._serialize_attrs(val, include_type, api_mode);
+        # No anchor: fallback to inline
+        return Serializer._type_info(val, include_type) | Serializer._serialize_attrs(
+            val, include_type, api_mode
+        );
     }
     # Generic object with __dict__
     if val?.__dict__ {
@@ -166,6 +176,12 @@ impl Serializer._deserialize_value(val: object) -> object {
         return [Serializer._deserialize_value(v) for v in val];
     }
     if isinstance(val, dict) {
+        if '$ref' in val {
+            ref_id = val.get('$ref');
+            return Serializer._id_to_stub(NodeAnchor, ref_id)
+                if isinstance(ref_id, str)
+                else None;
+        }
         return Serializer.deserialize(val)
             if '__type__' in val
             else {k: Serializer._deserialize_value(v) for (k, v) in val.items()};

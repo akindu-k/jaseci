@@ -123,3 +123,125 @@ test "EdgeAnchor source/target restored as lazy stubs" {
     assert anchor.source.id == src_id and not anchor.source.is_populated();
     assert anchor.target.id == tgt_id and not anchor.target.is_populated();
 }
+
+# =============================================================================
+# Automatic $ref tests for nested Jac objects
+# Fixture:
+#   city  = City(name="Metropolis")          -- shared by alice and bob
+#   alice = Person(name="Alice", city=city)  -- alice.friend = bob (circular)
+#   bob   = Person(name="Bob",   city=city)  -- bob.friend = alice (circular)
+# =============================================================================
+obj City {
+    has name: str;
+}
+
+obj Person {
+    has name: str,
+        city: City,
+        friend: (Person | None) = None;
+}
+
+test "primitive-only object: no $ref emitted" {
+    city = City(name="Gotham");
+    data = Serializer.serialize(city);
+
+    assert isinstance(data, dict);
+    assert data["name"] == "Gotham";
+    assert "$ref" not in str(data);
+}
+
+test "nested Jac object becomes $ref automatically" {
+    city = City(name="Metropolis");
+    alice = Person(name="Alice", city=city);
+
+    data = Serializer.serialize(alice);
+
+    # alice is root → fully inlined
+    assert data["name"] == "Alice";
+    # alice.city is a Jac object → stored as $ref
+    assert "$ref" in data["city"];
+    assert data["city"]["$ref"] == jid(city);
+}
+
+test "shared city: both persons reference the same ID" {
+    city = City(name="Metropolis");
+    alice = Person(name="Alice", city=city);
+    bob = Person(name="Bob", city=city);
+
+    data_alice = Serializer.serialize(alice);
+    data_bob = Serializer.serialize(bob);
+
+    # Both city refs point to the same ID
+    assert "$ref" in data_alice["city"];
+    assert "$ref" in data_bob["city"];
+    assert data_alice["city"]["$ref"] == jid(city);
+    assert data_bob["city"]["$ref"] == jid(city);
+}
+
+test "circular reference terminates — friend is $ref, no recursion" {
+    city = City(name="Metropolis");
+    alice = Person(name="Alice", city=city);
+    bob = Person(name="Bob", city=city);
+    alice.friend = bob;
+    bob.friend = alice;
+
+    data = Serializer.serialize(alice);
+
+    # alice root → inline
+    assert data["name"] == "Alice";
+    # alice.city → $ref (no recursion into city)
+    assert "$ref" in data["city"];
+    # alice.friend = bob → $ref immediately (no recursion into bob's fields)
+    assert "$ref" in data["friend"];
+    assert data["friend"]["$ref"] == jid(bob);
+}
+
+test "mutation is reflected in next serialization" {
+    city = City(name="Metropolis");
+    alice = Person(name="Alice", city=city);
+
+    city.name = "Gotham";
+    # city is always referenced by ID, name change doesn't affect the $ref
+    data = Serializer.serialize(alice);
+    assert "$ref" in data["city"];
+    assert data["city"]["$ref"] == jid(city);
+}
+
+test "mutating fields does not change object identity" {
+    city = City(name="Metropolis");
+    city_id = jid(city);
+
+    city.name = "Gotham";
+    assert jid(city) == city_id;
+
+    city.name = "Star City";
+    assert jid(city) == city_id;
+}
+
+test "reassigning friend to a different object is captured" {
+    city = City(name="Metropolis");
+    other = City(name="Gotham");
+    alice = Person(name="Alice", city=city);
+    carol = Person(name="Carol", city=other);
+
+    alice.friend = carol;
+    data = Serializer.serialize(alice);
+
+    # alice.friend is now carol → $ref to carol
+    assert "$ref" in data["friend"];
+    assert data["friend"]["$ref"] == jid(carol);
+}
+
+test "_deserialize_value: $ref dict is resolved to NodeAnchor stub" {
+    ref_id = uuid4();
+    hex_id = ref_id.hex;
+
+    stub = Serializer._deserialize_value({"$ref": hex_id});
+    assert stub is not None;
+    assert stub.id == ref_id;
+    assert not stub.is_populated();
+}
+
+test "_deserialize_value: invalid $ref returns None" {
+    assert Serializer._deserialize_value({"$ref": "not-a-uuid"}) is None;
+}
