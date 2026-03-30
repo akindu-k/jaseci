@@ -10,10 +10,16 @@ impl Serializer._type_info(`obj: object, `include: bool) -> dict[str, object] {
 
 """Helper: serialize object attributes (non-private, non-callable)."""
 impl Serializer._serialize_attrs(
-    `obj: object, include_type: bool, api_mode: bool
+    `obj: object,
+    include_type: bool,
+    api_mode: bool,
+    ref_mode: bool = False,
+    _seen: (set | None) = None
 ) -> dict[str, object] {
     return {
-        a: Serializer._serialize_value(getattr(`obj, a), include_type, api_mode)
+        a: Serializer._serialize_value(
+            getattr(`obj, a), include_type, api_mode, ref_mode, _seen
+        )
         for a in dir(`obj)
         if not a.startswith('_') and not callable(getattr(`obj, a, None))
     };
@@ -21,27 +27,22 @@ impl Serializer._serialize_attrs(
 
 """Serialize any object to JSON-compatible format."""
 impl Serializer.serialize(
-    `obj: object, include_type: bool = False, api_mode: bool = False
+    `obj: object,
+    include_type: bool = False,
+    api_mode: bool = False,
+    ref_mode: bool = False
 ) -> object {
-    if isinstance(`obj, Archetype) {
-        result = Serializer._type_info(`obj, include_type);
-        if api_mode {
-            result |= {
-                '_jac_type': type(`obj).__name__,
-                '_jac_id': `obj.__jac__.id.hex if `obj?.__jac__ else None,
-                '_jac_archetype': 'node'
-                    if isinstance(`obj, NodeArchetype)
-                    else 'walker' if isinstance(`obj, WalkerArchetype) else 'archetype'
-            };
-        }
-        return result | Serializer._serialize_attrs(`obj, include_type, api_mode);
-    }
-    return Serializer._serialize_value(`obj, include_type, api_mode);
+    _seen = set() if ref_mode else None;
+    return Serializer._serialize_value(`obj, include_type, api_mode, ref_mode, _seen);
 }
 
 """Serialize a value recursively."""
 impl Serializer._serialize_value(
-    val: object, include_type: bool, api_mode: bool = False
+    val: object,
+    include_type: bool,
+    api_mode: bool = False,
+    ref_mode: bool = False,
+    _seen: (set | None) = None
 ) -> object {
     # Primitives & UUID & Enum
     if val is None or isinstance(val, (str, int, float, bool)) {
@@ -55,12 +56,16 @@ impl Serializer._serialize_value(
     }
     # Collections
     if isinstance(val, (list, tuple)) {
-        return [Serializer._serialize_value(v, include_type, api_mode) for v in val];
+        return [
+            Serializer._serialize_value(v, include_type, api_mode, ref_mode, _seen)
+            for v in val
+        ];
     }
     if isinstance(val, dict) {
         return {
-            str(k): Serializer._serialize_value(v, include_type, api_mode)
-            for (k, v) in val.items()
+            str(k): Serializer._serialize_value(
+                v, include_type, api_mode, ref_mode, _seen
+            ) for (k, v) in val.items()
         };
     }
     # Access types
@@ -70,7 +75,9 @@ impl Serializer._serialize_value(
     if isinstance(val, Permission) {
         return {
             'all': val.all.value,
-            'roots': Serializer._serialize_value(val.roots, include_type, api_mode)
+            'roots': Serializer._serialize_value(
+                val.roots, include_type, api_mode, ref_mode, _seen
+            )
         };
     }
     # Anchor (NodeAnchor, EdgeAnchor)
@@ -80,12 +87,14 @@ impl Serializer._serialize_value(
             'id': str(val.id),
             'root': str(val.root) if val.root else None,
             'persistent': val.persistent,
-            'access': Serializer._serialize_value(val.access, include_type, api_mode)
+            'access': Serializer._serialize_value(
+                val.access, include_type, api_mode, ref_mode, _seen
+            )
         };
         if val.is_populated() {
             arch = val.archetype;
             result['archetype'] = Serializer._type_info(arch, include_type) | Serializer._serialize_attrs(
-                arch, include_type, api_mode
+                arch, include_type, api_mode, ref_mode, _seen
             );
         }
         if isinstance(val, NodeAnchor) {
@@ -100,15 +109,30 @@ impl Serializer._serialize_value(
         }
         return result;
     }
-    # Archetype (nested) → store reference ID so the object is lazily fetched
+    # Archetype (standalone)
     if isinstance(val, Archetype) {
-        jac = val?.__jac__;
-        if jac {
-            return {'$ref': jac.id.hex};
+        if _seen is not None {
+            jac_anchor = val?.__jac__;
+            if jac_anchor {
+                jac_id = jac_anchor.id;
+                if jac_id in _seen {
+                    return {'$ref': jac_id.hex};
+                }
+                _seen.add(jac_id);
+            }
         }
-        # No anchor: fallback to inline
-        return Serializer._type_info(val, include_type) | Serializer._serialize_attrs(
-            val, include_type, api_mode
+        result = Serializer._type_info(val, include_type);
+        if api_mode {
+            result |= {
+                '_jac_type': type(val).__name__,
+                '_jac_id': val.__jac__.id.hex if val?.__jac__ else None,
+                '_jac_archetype': 'node'
+                    if isinstance(val, NodeArchetype)
+                    else 'walker' if isinstance(val, WalkerArchetype) else 'archetype'
+            };
+        }
+        return result | Serializer._serialize_attrs(
+            val, include_type, api_mode, ref_mode, _seen
         );
     }
     # Generic object with __dict__
@@ -120,7 +144,9 @@ impl Serializer._serialize_value(
         }
         for (k, v) in val.__dict__.items() {
             if not k.startswith('_') {
-                result[k] = Serializer._serialize_value(v, include_type, api_mode);
+                result[k] = Serializer._serialize_value(
+                    v, include_type, api_mode, ref_mode, _seen
+                );
             }
         }
         return result;
@@ -129,6 +155,20 @@ impl Serializer._serialize_value(
         f"Falling back to str() for {type(val).__module__}.{type(val).__name__}"
     );
     return str(val);
+}
+
+"""Check if a value is a $ref placeholder dict."""
+impl Serializer._is_jac_ref(val: object) -> bool {
+    return isinstance(val, dict) and '$ref' in val;
+}
+
+"""Deserialize a $ref placeholder back to an unpopulated Anchor stub."""
+impl Serializer._deserialize_jac_ref(data: dict[str, object]) -> (object | None) {
+    id_str = data.get('$ref');
+    if not isinstance(id_str, str) {
+        return None;
+    }
+    return Serializer._id_to_stub(Anchor, id_str);
 }
 
 """Deserialize data back to original object type."""
@@ -177,10 +217,7 @@ impl Serializer._deserialize_value(val: object) -> object {
     }
     if isinstance(val, dict) {
         if '$ref' in val {
-            ref_id = val.get('$ref');
-            return Serializer._id_to_stub(NodeAnchor, ref_id)
-                if isinstance(ref_id, str)
-                else None;
+            return Serializer._deserialize_jac_ref(val);
         }
         return Serializer.deserialize(val)
             if '__type__' in val
