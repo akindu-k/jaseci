@@ -350,14 +350,17 @@ test "_is_jac_ref: correctly identifies $ref dicts" {
     assert not Serializer._is_jac_ref(42);
 }
 
-test "_deserialize_jac_ref: returns Anchor stub with matching ID" {
-    # Use uuid4() directly so we have a known UUID to round-trip
+test "_deserialize_jac_ref: unknown ID falls back to NodeAnchor stub" {
+    # A UUID that is not in the active context memory → falls back to stub
     ref_id = uuid4();
     hex_id = ref_id.hex;
 
-    stub = Serializer._deserialize_jac_ref({"$ref": hex_id});
-    assert stub is not None;
-    assert stub.id == ref_id;
+    result = Serializer._deserialize_jac_ref({"$ref": hex_id});
+    assert result is not None;
+    # Must be a NodeAnchor stub (not base Anchor) with the correct ID
+    assert isinstance(result, NodeAnchor);
+    assert result.id == ref_id;
+    assert not result.is_populated();
 }
 
 test "_deserialize_jac_ref: invalid UUID or missing key returns None" {
@@ -365,11 +368,30 @@ test "_deserialize_jac_ref: invalid UUID or missing key returns None" {
     assert Serializer._deserialize_jac_ref({}) is None;
 }
 
-test "_deserialize_value: $ref dict is resolved to Anchor stub" {
+test "_deserialize_jac_ref: live object resolves to archetype, not stub" {
+    # Serialize alice (live object) with ref_mode=True so bob becomes a $ref.
+    # Deserializing that $ref should return bob's archetype directly,
+    # making bob.name accessible without any proxy.
+    city = City(name="Metropolis");
+    alice = Person(name="Alice", city=city);
+    bob = Person(name="Bob", city=city);
+    alice.friend = bob;
+
+    # Objects are live in context — resolve the $ref for bob directly
+    bob_ref = {"$ref": jid(bob)};
+    resolved = Serializer._deserialize_jac_ref(bob_ref);
+
+    # Resolved from memory → the actual Bob archetype, not a stub
+    assert resolved is not None;
+    assert resolved.name == "Bob";
+}
+
+test "_deserialize_value: unknown $ref falls back to NodeAnchor stub" {
     ref_id = uuid4();
     hex_id = ref_id.hex;
 
-    stub = Serializer._deserialize_value({"$ref": hex_id});
-    assert stub is not None;
-    assert stub.id == ref_id;
+    result = Serializer._deserialize_value({"$ref": hex_id});
+    assert result is not None;
+    assert isinstance(result, NodeAnchor);
+    assert result.id == ref_id;
 }

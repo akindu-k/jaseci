@@ -162,13 +162,38 @@ impl Serializer._is_jac_ref(val: object) -> bool {
     return isinstance(val, dict) and '$ref' in val;
 }
 
-"""Deserialize a $ref placeholder back to an unpopulated Anchor stub."""
+"""Deserialize a $ref placeholder back to the original archetype.
+
+Strategy:
+  1. Parse and validate the UUID.
+  2. Look up the anchor in the active Jac context memory. If found and
+     populated, return its archetype directly so that field access
+     (e.g. alice.city.name) works without any proxy magic.
+  3. If the context is unavailable or the anchor is not in memory,
+     fall back to a NodeAnchor stub — the runtime will lazy-load it
+     from the store the next time it is traversed as a graph node.
+"""
 impl Serializer._deserialize_jac_ref(data: dict[str, object]) -> (object | None) {
     id_str = data.get('$ref');
     if not isinstance(id_str, str) {
         return None;
     }
-    return Serializer._id_to_stub(Anchor, id_str);
+    try {
+        import from jaclang { JacRuntimeInterface as Jac }
+        anchor = Jac.get_context().mem.get(UUID(id_str));
+        if anchor {
+            if not anchor.is_populated() {
+                anchor.populate();
+            }
+            if anchor.is_populated() {
+                return anchor.archetype;
+            }
+        }
+    } except Exception as e {
+        logger.error(f"Failed to resolve $ref {id_str} from context: {e}");
+    }
+    # Fallback: NodeAnchor stub — lazy-loads from the store on next access.
+    return Serializer._id_to_stub(NodeAnchor, id_str);
 }
 
 """Deserialize data back to original object type."""
