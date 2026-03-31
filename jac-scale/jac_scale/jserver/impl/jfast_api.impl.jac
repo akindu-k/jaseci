@@ -874,8 +874,6 @@ impl JFastApiServer.init(
         return response;
     }
 
-    self.app.middleware('http')(jwt_validation_middleware);
-
     async def request_context_middleware(request: Request, call_next: Callable) {
         ctx = JacRuntimeInterface.create_j_context(user_root=None);
         JacRuntime.set_request_context(ctx);
@@ -914,6 +912,8 @@ impl JFastApiServer.init(
         }
     }
 
-    # Register context middleware BEFORE JWT (so it runs after JWT in execution)
+    # Starlette insert(0,...): last registered = index 0 = outermost = runs FIRST.
+    # Register context first so JWT ends up at index 0 and runs before context.
     self.app.middleware('http')(request_context_middleware);
+    self.app.middleware('http')(jwt_validation_middleware);
 }

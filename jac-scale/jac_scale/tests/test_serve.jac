@@ -1906,3 +1906,338 @@ theme_color = "#000000"
         }
     }
 }
+
+# =============================================================================
+# GROUP 8: JWT MIDDLEWARE TESTS (
+# =============================================================================
+"""Postinit must call server.set_user_manager(self.user_manager).
+Without it, _user_manager is None and the middleware skips all token
+validation silently — user_root_id stays None for every request."""
+test "jwt middleware: set_user_manager wires user_manager into server" {
+    client = make_client();
+    try {
+        server = client._server.server;
+        assert server._user_manager is not None , (
+            "server._user_manager is None after postinit — "
+            "set_user_manager() was never called; jwt_validation_middleware is deaf."
+        );
+        assert server._user_manager is client._server.user_manager , (
+            "server._user_manager is a different object than the server's user_manager — "
+            "set_user_manager() stored the wrong reference."
+        );
+    } finally {
+        client.close();
+    }
+}
+
+"""jwt_validation_middleware and request_context_middleware must both exist
+in app.user_middleware. Missing either breaks token validation or context setup."""
+test "jwt middleware: both middlewares are registered in the app stack" {
+    client = make_client();
+    try {
+        mw_list = client._server.server.app.user_middleware;
+        names = {
+            mw.kwargs['dispatch'].__name__
+            for mw in mw_list
+            if mw?.kwargs and 'dispatch' in mw.kwargs
+        };
+        assert 'jwt_validation_middleware' in names , (
+            f"jwt_validation_middleware not in middleware stack. Found: {names}"
+        );
+        assert 'request_context_middleware' in names , (
+            f"request_context_middleware not in middleware stack. Found: {names}"
+        );
+    } finally {
+        client.close();
+    }
+}
+
+"""In Starlette, add_middleware uses insert(0, …) — the LAST registered
+middleware is at index 0 (outermost) and runs FIRST.  jwt_validation_middleware
+MUST have a lower index than request_context_middleware so it sets
+request.state.user_root_id before the context middleware reads it.
+
+If this fails: jwt_validation_middleware was registered FIRST in code
+(pushed to a higher index by the later context insert), so context runs
+before JWT — user_root_id is always None when context initialises.
+Fix: register jwt_validation_middleware AFTER request_context_middleware."""
+test "jwt middleware: jwt runs before context (correct starlette insert order)" {
+    client = make_client();
+    try {
+        mw_list = client._server.server.app.user_middleware;
+        jwt_idx = -1;
+        ctx_idx = -1;
+        for i in range(len(mw_list)) {
+            mw = mw_list[i];
+            if mw?.kwargs and 'dispatch' in mw.kwargs {
+                name = mw.kwargs['dispatch'].__name__;
+                if name == 'jwt_validation_middleware' {
+                    jwt_idx = i;
+                }
+                if name == 'request_context_middleware' {
+                    ctx_idx = i;
+                }
+            }
+        }
+        assert jwt_idx != -1 , "jwt_validation_middleware not found in user_middleware";
+        assert ctx_idx != -1 , "request_context_middleware not found in user_middleware";
+        assert jwt_idx < ctx_idx , (
+            f"ORDERING BUG: jwt at index {jwt_idx}, context at index {ctx_idx}. "
+            f"Index 0 = outermost = runs first. "
+            f"Context (idx {ctx_idx}) is closer to outermost than JWT (idx {jwt_idx}) — "
+            f"context reads user_root_id BEFORE JWT sets it, so it is always None."
+        );
+    } finally {
+        client.close();
+    }
+}
+
+test "jwt middleware: user A and user B data is fully isolated" {
+    client = make_client();
+    try {
+        # Register two users
+        reg_a = client.post(
+            "/user/register",
+            json={
+                "username": f"alice_mw_{uuid.uuid4().hex[:8]}",
+                "password": "AlicePass!1"
+            }
+        );
+        reg_b = client.post(
+            "/user/register",
+            json={
+                "username": f"bob_mw_{uuid.uuid4().hex[:8]}",
+                "password": "BobPass!2"
+            }
+        );
+        assert reg_a.status_code == 201 and reg_b.status_code == 201;
+        da = extract_data(reg_a.json());
+        db = extract_data(reg_b.json());
+        tok_a = da["token"];
+        tok_b = db["token"];
+
+        assert da["root_id"] != db["root_id"] , (
+            "Both users share the same root_id — isolation is structurally impossible."
+        );
+
+        # Each user creates their own private task
+        title_a = f"alice_private_{uuid.uuid4().hex[:8]}";
+        title_b = f"bob_private_{uuid.uuid4().hex[:8]}";
+
+        r = client.post(
+            "/walker/CreateTask",
+            json={"title": title_a, "priority": 1},
+            headers={"Authorization": f"Bearer {tok_a}"}
+        );
+        assert r.status_code == 200 , f"Alice CreateTask failed: {r.text}";
+
+        r = client.post(
+            "/walker/CreateTask",
+            json={"title": title_b, "priority": 1},
+            headers={"Authorization": f"Bearer {tok_b}"}
+        );
+        assert r.status_code == 200 , f"Bob CreateTask failed: {r.text}";
+
+        # List tasks for each user and collect titles
+        def titles_for(token: str) -> set[str] {
+            resp = client.post(
+                "/walker/ListTasks",
+                json={},
+                headers={"Authorization": f"Bearer {token}"}
+            );
+            assert resp.status_code == 200;
+            raw = extract_data(resp.json())["reports"][0];
+            tasks = raw if isinstance(raw, list) else [raw];
+            return {
+                t.get("title") or t.get("context", {}).get("title")
+                for t in tasks
+                if isinstance(t, dict)
+            };
+        }
+
+        seen_a = titles_for(tok_a);
+        seen_b = titles_for(tok_b);
+
+        assert title_a in seen_a , f"Alice cannot see her own task. Visible: {seen_a}";
+        assert title_b in seen_b , f"Bob cannot see his own task. Visible: {seen_b}";
+
+        assert title_b not in seen_a , (
+            f"ISOLATION FAILURE: Alice sees Bob's task '{title_b}'. "
+            f"Alice's graph: {seen_a}. Both users are sharing system root."
+        );
+        assert title_a not in seen_b , (
+            f"ISOLATION FAILURE: Bob sees Alice's task '{title_a}'. "
+            f"Bob's graph: {seen_b}. Both users are sharing system root."
+        );
+
+        assert len(seen_a) == 1 , f"Alice sees {len(seen_a)} tasks, expected 1. {seen_a}";
+        assert len(seen_b) == 1 , f"Bob sees {len(seen_b)} tasks, expected 1. {seen_b}";
+    } finally {
+        client.close();
+    }
+}
+
+"""Paranoia check: three users each own exactly one task.
+Any cross-visibility means the shared system root is in use."""
+test "jwt middleware: three users are fully isolated" {
+    client = make_client();
+    try {
+        users: list[tuple[str, str]] = [];  # (token, private_title)
+        for i in range(3) {
+            reg = client.post(
+                "/user/register",
+                json={
+                    "username": f"usr{i}_mw_{uuid.uuid4().hex[:6]}",
+                    "password": "Pass!99"
+                }
+            );
+            assert reg.status_code == 201;
+            tok = extract_data(reg.json())["token"];
+            title = f"task_user{i}_{uuid.uuid4().hex[:8]}";
+            r = client.post(
+                "/walker/CreateTask",
+                json={"title": title, "priority": 1},
+                headers={"Authorization": f"Bearer {tok}"}
+            );
+            assert r.status_code == 200;
+            users.append((tok, title));
+        }
+
+        for (tok, own_title) in users {
+            resp = client.post(
+                "/walker/ListTasks",
+                json={},
+                headers={"Authorization": f"Bearer {tok}"}
+            );
+            assert resp.status_code == 200;
+            raw = extract_data(resp.json())["reports"][0];
+            tasks = raw if isinstance(raw, list) else [raw];
+            seen = {
+                t.get("title") or t.get("context", {}).get("title")
+                for t in tasks
+                if isinstance(t, dict)
+            };
+
+            assert own_title in seen , f"User cannot see own task '{own_title}'. Got: {seen}";
+            assert len(seen) == 1 , (
+                f"User sees {len(seen)} tasks (expected 1). "
+                f"Data leakage: {seen - {own_title}}"
+            );
+            for (_, other_title) in users {
+                if other_title != own_title {
+                    assert other_title not in seen , (
+                        f"ISOLATION FAILURE: user with task '{own_title}' "
+                        f"can see '{other_title}'. Shared root in use."
+                    );
+                }
+            }
+        }
+    } finally {
+        client.close();
+    }
+}
+
+"""validate_jwt_token() must reject a JWT signed with the wrong secret.
+Returning 200 would mean an attacker can craft arbitrary tokens."""
+test "jwt middleware: token with wrong secret is rejected with 401" {
+    client = make_client();
+    try {
+        # Register a real user so the username exists in the DB
+        reg = client.post(
+            "/user/register",
+            json={
+                "username": f"victim_{uuid.uuid4().hex[:8]}",
+                "password": "Victim!99"
+            }
+        );
+        assert reg.status_code == 201;
+
+        now = datetime.now(UTC);
+        bad_payload = {
+            "username": extract_data(reg.json())["username"],
+            "exp": now + timedelta(hours=1),
+            "iat": now.timestamp()
+        };
+        bad_tok = pyjwt.encode(bad_payload, "wrong_secret_key_xyz", algorithm="HS256");
+
+        resp = client.post(
+            "/walker/CreateTask",
+            json={"title": "attacker_task"},
+            headers={"Authorization": f"Bearer {bad_tok}"}
+        );
+        assert resp.status_code == 401 , (
+            f"Token signed with wrong secret returned {resp.status_code} instead of 401. "
+            "validate_jwt_token() accepted an invalid signature."
+        );
+    } finally {
+        client.close();
+    }
+}
+
+"""Expired JWTs must be rejected. Critically, the middleware must not crash —
+subsequent requests must still work normally after an expired token is seen."""
+test "jwt middleware: expired token is rejected and middleware stays functional" {
+    client = make_client();
+    try {
+        reg = client.post(
+            "/user/register",
+            json={
+                "username": f"expiry_{uuid.uuid4().hex[:8]}",
+                "password": "Expiry!99"
+            }
+        );
+        assert reg.status_code == 201;
+
+        uname = extract_data(reg.json())["username"];
+        expired_tok = _create_expired_token(uname, days_ago=2);
+
+        resp = client.post(
+            "/walker/CreateTask",
+            json={"title": "expired_task"},
+            headers={"Authorization": f"Bearer {expired_tok}"}
+        );
+        assert resp.status_code == 401 , (
+            f"Expired token returned {resp.status_code} instead of 401."
+        );
+
+        # Middleware must not have left the server in a broken state
+        resp_pub = client.post("/walker/PublicInfo", json={});
+        assert resp_pub.status_code == 200 , (
+            f"Public walker returned {resp_pub.status_code} after an expired-token request — "
+            "middleware is in a broken state."
+        );
+    } finally {
+        client.close();
+    }
+}
+
+"""The middleware must never raise an exception on bad Authorization values.
+Public endpoints must return 200; private endpoints must return 401 (not 500)."""
+test "jwt middleware: malformed and missing Authorization headers handled without crash" {
+    client = make_client();
+    try {
+        bad_cases: list[tuple[dict, str]] = [
+            ({}, "no header"),
+            ({"Authorization": "NotBearer token"}, "wrong scheme"),
+            ({"Authorization": "Bearer"}, "Bearer with no token"),
+            ({"Authorization": "Bearer not.a.jwt.atall"}, "malformed jwt"),
+
+        ];
+
+        for (hdrs, label) in bad_cases {
+            pub = client.post("/walker/PublicInfo", json={}, headers=hdrs);
+            assert pub.status_code == 200 , (
+                f"PublicInfo returned {pub.status_code} for '{label}'. Middleware crashed."
+            );
+            priv = client.post(
+                "/walker/CreateTask", json={"title": "noauth"}, headers=hdrs
+            );
+            assert priv.status_code == 401 , (
+                f"CreateTask returned {priv.status_code} for '{label}'. "
+                "Expected 401; if 500 the middleware crashed."
+            );
+        }
+    } finally {
+        client.close();
+    }
+}
