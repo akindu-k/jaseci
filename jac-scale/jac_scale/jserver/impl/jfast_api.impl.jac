@@ -833,6 +833,10 @@ impl JFastApiServer._get(
     return self;
 }
 
+impl JFastApiServer.set_user_manager(self: JFastApiServer, user_manager: Any) -> None {
+    self._user_manager = user_manager;
+}
+
 impl JFastApiServer.init(
     self: JFastApiServer,
     endpoints: (list[JEndPoint] | None) = None,
@@ -842,6 +846,35 @@ impl JFastApiServer.init(
     self.app = app or FastAPI(docs_url=None, redoc_url=None, openapi_url=None);
     self._models: dict[(str, type[BaseModel])] = {};
     self.__server_created = False;
+
+    async def jwt_validation_middleware(request: Request, call_next: Callable) {
+        authorization = request.headers.get('Authorization');
+        token: (str | None) = None;
+        username: (str | None) = None;
+        user_root_id: (str | None) = None;
+
+        if authorization
+        and isinstance(authorization, str)
+        and authorization.startswith('Bearer ') {
+            token = authorization[7:];
+
+            if self._user_manager {
+                username = self._user_manager.validate_jwt_token(token);
+
+                if username {
+                    user_root_id = self._user_manager.get_root_id(username);
+                }
+            }
+        }
+
+        setattr(request.state, 'user_root_id', user_root_id);
+        setattr(request.state, 'username', username);
+
+        response = await call_next(request);
+        return response;
+    }
+
+    self.app.middleware('http')(jwt_validation_middleware);
 
     async def request_context_middleware(request: Request, call_next: Callable) {
         ctx = JacRuntimeInterface.create_j_context(user_root=None);
@@ -880,5 +913,7 @@ impl JFastApiServer.init(
             }
         }
     }
+
+    # Register context middleware BEFORE JWT (so it runs after JWT in execution)
     self.app.middleware('http')(request_context_middleware);
 }
