@@ -970,7 +970,13 @@ impl JacBasics.get_object(id: str) -> (Archetype | None) {
 
 """Get object reference id."""
 impl JacBasics.object_ref(`obj: Archetype) -> str {
-    return `obj.__jac__.id.hex;
+    anchor = `obj.__jac__;
+    if not isinstance(anchor, (NodeAnchor, EdgeAnchor, WalkerAnchor)) {
+        try {
+            JacRuntimeInterface.get_context().mem.put(anchor);
+        } except Exception { }
+    }
+    return anchor.id.hex;
 }
 
 """Create a obj archetype."""
