@@ -2024,18 +2024,29 @@ test "jwt middleware: per-user isolation and token rejection" {
             "wrong_key",
             algorithm="HS256"
         );
-        for (hdrs, label) in [
+        bad_token_cases = [
             ({"Authorization": f"Bearer {forged}"}, "forged secret"),
             ({"Authorization": f"Bearer {_create_expired_token('x')}"}, "expired"),
-            ({}, "no token"),
             ({"Authorization": "Bearer not.a.jwt"}, "malformed"),
 
-        ] {
+        ];
+
+        # Bad tokens must be rejected on auth-required endpoints.
+        for (hdrs, label) in bad_token_cases {
             r = client.post("/walker/CreateTask", json={"title": "x"}, headers=hdrs);
-            assert r.status_code == 401 , f"{label}: expected 401, got {r.status_code}";
+            assert r.status_code == 401 , f"{label} on auth endpoint: expected 401, got {r.status_code}";
         }
 
-        assert client.post("/walker/PublicInfo", json={}).status_code == 200 , "public endpoint broken after bad tokens";
+        # No token on auth-required endpoint must also be rejected.
+        r = client.post("/walker/CreateTask", json={"title": "x"});
+        assert r.status_code == 401 , f"no token on auth endpoint: expected 401, got {r.status_code}";
+
+        for (hdrs, label) in bad_token_cases {
+            r = client.post("/walker/PublicInfo", json={}, headers=hdrs);
+            assert r.status_code == 401 , f"{label} on public endpoint: expected 401, got {r.status_code}";
+        }
+        # No token on a public endpoint must still work (anonymous access).
+        assert client.post("/walker/PublicInfo", json={}).status_code == 200 , "public endpoint broken for anonymous requests";
     } finally {
         client.close();
     }
