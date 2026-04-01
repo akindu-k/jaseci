@@ -18,7 +18,7 @@ def:pub get_todos -> list[Todo] {
 }
 
 cl def:pub app -> JsxElement {
-    has todos: list = [],
+    has todos: list[Todo] = [],
         text: str = "";
 
     async can with entry {
@@ -37,8 +37,8 @@ cl def:pub app -> JsxElement {
         <div>
             <input
                 value={text}
-                onChange={lambda e: any  -> None { text = e.target.value;}}
-                onKeyPress={lambda e: any  -> None { if e.key == "Enter" {
+                onChange={lambda e: ChangeEvent  -> None { text = e.target.value;}}
+                onKeyPress={lambda e: KeyboardEvent  -> None { if e.key == "Enter" {
                     add();
                 }}}
                 placeholder="Add a todo..."
