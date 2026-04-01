@@ -1,3 +1,12 @@
+import from contextvars { ContextVar }
+
+# Per-request cache: maps username -> root_id within a single asyncio task.
+# ContextVar isolation means each request starts with None and changes are
+# invisible to other concurrent requests.
+glob _root_id_request_cache: ContextVar[dict[str, str] | None] = ContextVar(
+         '_jac_scale_root_id_cache', default=None
+     );
+
 impl JacScaleUserManager.postinit -> None {
     sso_config = get_scale_config().get_sso_config();
     for platform in Platforms {
@@ -99,9 +108,19 @@ impl JacScaleUserManager.authenticate(
 }
 
 impl JacScaleUserManager.get_root_id(username: str) -> (str | None) {
-    return self._storage.get_root_id(username)
+    cache = _root_id_request_cache.get();
+    if cache is not None and username in cache {
+        return cache[username];
+    }
+    root_id = self._storage.get_root_id(username)
         if self._storage
         else super.get_root_id(username);
+    if root_id is not None {
+        new_cache = dict(cache) if cache is not None else {};
+        new_cache[username] = root_id;
+        _root_id_request_cache.set(new_cache);
+    }
+    return root_id;
 }
 
 impl JacScaleUserManager.get_user(username: str) -> (dict[(str, str)] | None) {

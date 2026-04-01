@@ -56,9 +56,7 @@ impl JacAPIServerCore.postinit -> None {
         import from jac_scale.jserver.jfast_api { JFastApiServer }
         self.server = JFastApiServer();
     }
-    if hasattr(self.server, 'set_user_manager') and self?.user_manager {
-        self.server.set_user_manager(self.user_manager);
-    }
+    self.server.set_user_manager(self.user_manager);
     self._api_key_manager = ApiKeyManager();
     self.server.app.add_middleware(
         CORSMiddleware,
