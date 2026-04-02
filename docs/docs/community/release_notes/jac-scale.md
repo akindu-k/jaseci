@@ -4,7 +4,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.2.12 (Unreleased)
 
-- **Fix: JWT middleware now correctly isolates each user's graph**: Authenticated requests are now always routed to the requesting user's own graph root, previously the user manager was never wired into the server, so every request silently ran against the system root regardless of the token provided.
+- **Fix: Authenticated requests now always run as the correct user**: Previously, there was a brief window during request startup where a request could execute as the system root instead of the authenticated user, even with a valid JWT. This has been resolved by moving JWT validation into a dedicated middleware that runs before the request context is created. Your user's root node is set correctly from the very first operation in every request. Invalid, expired, or forged tokens are now rejected with `401 Unauthorized` immediately at the middleware layer rather than silently falling through.
 - **Dev Mode: Named endpoints in Swagger docs**: Dev mode (`jac start --dev`) now registers individual named endpoints (e.g. `/walker/read_todos`) instead of generic catch-all routes (`/walker/{walker_name}`), so Swagger UI shows all walker/function names. HMR still works - routes are refreshed automatically on file changes.
 
 ## jac-scale 0.2.11 (Latest Release)
