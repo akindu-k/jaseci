@@ -1,8 +1,3 @@
-import from contextvars { ContextVar }
-
-# Per-request cache: maps username -> root_id within a single asyncio task.
-# ContextVar isolation means each request starts with None and changes are
-# invisible to other concurrent requests.
 glob _root_id_request_cache: ContextVar[dict[str, str] | None] = ContextVar(
          '_jac_scale_root_id_cache', default=None
      );
