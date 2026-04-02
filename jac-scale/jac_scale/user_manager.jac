@@ -20,7 +20,10 @@ glob _jwt_config = get_scale_config().get_jwt_config(),
      JWT_ALGORITHM = _jwt_config['algorithm'],
      JWT_EXP_DELTA_DAYS = _jwt_config['exp_delta_days'],
      SSO_HOST = _sso_config['host'],
-     logger = logging.getLogger(__name__);
+     logger = logging.getLogger(__name__),
+     _root_id_request_cache: ContextVar[dict[str, str] | None] = ContextVar(
+         '_jac_scale_root_id_cache', default=None
+     );
 
 """User roles enum."""
 enum UserRole {

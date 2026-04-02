@@ -1,7 +1,3 @@
-glob _root_id_request_cache: ContextVar[dict[str, str] | None] = ContextVar(
-         '_jac_scale_root_id_cache', default=None
-     );
-
 impl JacScaleUserManager.postinit -> None {
     sso_config = get_scale_config().get_sso_config();
     for platform in Platforms {
