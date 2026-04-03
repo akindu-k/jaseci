@@ -4,6 +4,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.13.5 (Unreleased)
 
+- **Native: Lambda Expressions and Capturing Closures**: Added lambda expression support in the `na` (native LLVM) codespace. Simple lambdas compile to anonymous LLVM IR functions returned as function pointers. Capturing closures -- lambdas that reference variables from the enclosing scope -- pass captured values as hidden extra parameters, with automatic injection at call sites. No heap allocation required for captures. Leverages the existing indirect function pointer call infrastructure.
+
 ## jaclang 0.13.4 (Latest Release)
 
 - **Native: Lambda Expressions**: Added lambda expression support in the `na` (native LLVM) codespace. Lambdas compile to anonymous LLVM IR functions returned as function pointers. Leverages the existing indirect function pointer call infrastructure for invocation.
