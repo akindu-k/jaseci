@@ -138,16 +138,19 @@ obj Person {
 test "ref_mode: shared refs deduplicated, circular graphs terminate, $ref round-trips to live objects" {
     city = City(name="Metropolis");
     alice = Person(name="Alice", city=city);
-    bob = Person(name="Bob", city=city, friend=alice);
-    alice.friend = bob;
-    city_id = jid(city);
-    alice_id = jid(alice);
+    bob = Person(name="Bob", city=city);
 
-    # ref_mode=False: no dedup, both cities fully inlined
+    # ref_mode=False on non-circular shared refs: both cities fully inlined, no $ref
     off = Serializer.serialize([alice, bob], ref_mode=False);
     assert off[0]["city"]["name"] == "Metropolis"
     and off[1]["city"]["name"] == "Metropolis"
     and "$ref" not in str(off);
+
+    # Now create the cycle
+    bob.friend = alice;
+    alice.friend = bob;
+    city_id = jid(city);
+    alice_id = jid(alice);
 
     # ref_mode=True: shared city → first inline, second $ref; circular friends → $ref breaks cycle
     data = Serializer.serialize(alice, ref_mode=True);
