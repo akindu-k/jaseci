@@ -185,17 +185,7 @@ impl Serializer._is_jac_ref(val: object) -> bool {
     return isinstance(val, dict) and '$ref' in val;
 }
 
-"""Deserialize a $ref placeholder back to the original archetype.
-
-Strategy:
-  1. Parse and validate the UUID.
-  2. Look up the anchor in the active Jac context memory. If found and
-     populated, return its archetype directly so that field access
-     (e.g. alice.city.name) works without any proxy magic.
-  3. If the context is unavailable or the anchor is not in memory,
-     fall back to an anchor stub of the correct type using the optional
-     '$type' field ('node', 'edge', 'walker', 'object'; defaults to 'object').
-"""
+"""Deserialize a $ref placeholder back to the original archetype."""
 impl Serializer._deserialize_jac_ref(data: dict[str, object]) -> (object | None) {
     id_str = data.get('$ref');
     if not isinstance(id_str, str) {
