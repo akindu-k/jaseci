@@ -126,9 +126,22 @@ impl Serializer._serialize_value(
             if jac_anchor {
                 jac_id = jac_anchor.id;
                 if jac_id in _seen {
-                    return {'$ref': jac_id.hex};
+                    ref_type = (
+                        'node'
+                            if isinstance(jac_anchor, NodeAnchor)
+                            else 'edge'
+                                if isinstance(jac_anchor, EdgeAnchor)
+                                else 'walker'
+                                    if isinstance(jac_anchor, WalkerAnchor)
+                                    else 'object'
+                    );
+                    return {'$ref': jac_id.hex, '$type': ref_type};
                 }
                 _seen.add(jac_id);
+                try {
+                    import from jaclang { JacRuntimeInterface as Jac }
+                    Jac.get_context().mem.put(jac_anchor);
+                } except Exception { }
             }
         }
         result = Serializer._type_info(val, include_type);
@@ -180,8 +193,8 @@ Strategy:
      populated, return its archetype directly so that field access
      (e.g. alice.city.name) works without any proxy magic.
   3. If the context is unavailable or the anchor is not in memory,
-     fall back to a NodeAnchor stub — the runtime will lazy-load it
-     from the store the next time it is traversed as a graph node.
+     fall back to an anchor stub of the correct type using the optional
+     '$type' field ('node', 'edge', 'walker', 'object'; defaults to 'object').
 """
 impl Serializer._deserialize_jac_ref(data: dict[str, object]) -> (object | None) {
     id_str = data.get('$ref');
@@ -202,8 +215,19 @@ impl Serializer._deserialize_jac_ref(data: dict[str, object]) -> (object | None)
     } except Exception as e {
         logger.error(f"Failed to resolve $ref {id_str} from context: {e}");
     }
-    # Fallback: NodeAnchor stub — lazy-loads from the store on next access.
-    return Serializer._id_to_stub(NodeAnchor, id_str);
+    # Fallback: create a typed stub using $type so the anchor class is correct.
+    ref_type = data.get('$type');
+    stub_cls = cast(
+        type,
+        (
+            NodeAnchor
+                if ref_type == 'node'
+                else EdgeAnchor
+                    if ref_type == 'edge'
+                    else WalkerAnchor if ref_type == 'walker' else ObjectAnchor
+        )
+    );
+    return Serializer._id_to_stub(stub_cls, id_str);
 }
 
 """Deserialize data back to original object type."""

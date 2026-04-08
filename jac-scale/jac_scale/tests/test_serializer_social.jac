@@ -8,7 +8,7 @@ import from jac_scale.db { close_all_db_connections }
 import from jac_scale.config_loader { reset_scale_config }
 import from testcontainers.mongodb { MongoDbContainer }
 import from uuid { uuid4 }
-import from jaclang.jac0core.archetype { NodeAnchor, EdgeAnchor }
+import from jaclang.jac0core.archetype { NodeAnchor, EdgeAnchor, ObjectAnchor }
 
 def cleanup_connections {
     with contextlib.suppress(Exception) {
@@ -286,11 +286,33 @@ test "_is_jac_ref: correctly identifies $ref dicts" {
     assert not Serializer._is_jac_ref(42);
 }
 
-test "_deserialize_jac_ref: unknown ID falls back to NodeAnchor stub" {
+test "_deserialize_jac_ref: unknown ID falls back to ObjectAnchor stub by default" {
     ref_id = uuid4();
     result = Serializer._deserialize_jac_ref({"$ref": ref_id.hex});
-    assert result is not None and isinstance(result, NodeAnchor);
+    assert result is not None and isinstance(result, ObjectAnchor);
     assert result.id == ref_id and not result.is_populated();
+}
+
+test "_deserialize_jac_ref: $type field selects the correct stub class" {
+    ref_id = uuid4();
+    assert isinstance(
+        Serializer._deserialize_jac_ref(
+            {"$ref": ref_id.hex, "$type": "node"}
+        ),
+        NodeAnchor
+    );
+    assert isinstance(
+        Serializer._deserialize_jac_ref(
+            {"$ref": ref_id.hex, "$type": "edge"}
+        ),
+        EdgeAnchor
+    );
+    assert isinstance(
+        Serializer._deserialize_jac_ref(
+            {"$ref": ref_id.hex, "$type": "object"}
+        ),
+        ObjectAnchor
+    );
 }
 
 test "_deserialize_jac_ref: invalid UUID or missing key returns None" {
@@ -303,14 +325,16 @@ test "_deserialize_jac_ref: live object resolves to archetype, not stub" {
     alice = Person(name="Alice", city=city);
     bob = Person(name="Bob", city=city);
     alice.friend = bob;
-    resolved = Serializer._deserialize_jac_ref({"$ref": jid(bob)});
+    # serialize registers all seen anchors in context memory
+    Serializer.serialize(alice, ref_mode=True);
+    resolved = Serializer._deserialize_jac_ref({"$ref": jid(bob), "$type": "object"});
     assert resolved is not None and resolved.name == "Bob";
 }
 
-test "_deserialize_value: unknown $ref falls back to NodeAnchor stub" {
+test "_deserialize_value: unknown $ref falls back to ObjectAnchor stub by default" {
     ref_id = uuid4();
     result = Serializer._deserialize_value({"$ref": ref_id.hex});
     assert result is not None
-    and isinstance(result, NodeAnchor)
+    and isinstance(result, ObjectAnchor)
     and result.id == ref_id;
 }

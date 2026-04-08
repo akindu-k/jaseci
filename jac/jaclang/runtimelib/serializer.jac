@@ -8,6 +8,8 @@ import from jaclang.jac0core.archetype {
     Anchor,
     NodeAnchor,
     EdgeAnchor,
+    WalkerAnchor,
+    ObjectAnchor,
     Permission,
     Access,
     AccessLevel
