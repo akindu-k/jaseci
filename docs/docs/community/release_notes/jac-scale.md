@@ -5,7 +5,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 ## jac-scale 0.2.14 (Unreleased)
 
 - **Fix: ScaleTieredMemory Initialization**: Changed `ScaleTieredMemory.init(use_cache)` to `postinit` lifecycle method with `use_cache` as a class field, fixing initialization order issues.
-
+- **Fix: Authenticated requests now always run as the correct user**: Previously, there was a brief window during request startup where a request could execute as the system root instead of the authenticated user, even with a valid JWT. This has been resolved by moving JWT validation into a dedicated middleware that runs before the request context is created. Your user's root node is set correctly from the very first operation in every request. Invalid, expired, or forged tokens are now rejected with `401 Unauthorized` immediately at the middleware layer rather than silently falling through.
 - **Fix: Windows Compatibility for Local Sandbox**: Added platform guards for Unix-only APIs, cross-platform temp paths, Windows-compatible shell commands, --jac-cli sidecar support, and increased readiness timeout to 300s.
 
 ## jac-scale 0.2.13 (Latest Release)
