@@ -213,4 +213,11 @@ test "ref_mode: unknown $ref falls back to typed anchor stub" {
     );
     # Invalid $ref → None
     assert Serializer._deserialize_value({"$ref": "not-a-uuid"}) is None;
+    # User dict with $ref key + extra keys is NOT treated as a Jac ref
+    user_dict = {"$ref": "some-value", "name": "Alice", "count": 42};
+    result = Serializer._deserialize_value(user_dict);
+    assert isinstance(result, dict)
+    and result["$ref"] == "some-value"
+    and result["name"] == "Alice"
+    and result["count"] == 42;
 }
