@@ -1970,6 +1970,137 @@ test "assignment_narrowing" {
     )}:\n" + "\n---\n".join(err.pretty_print() for err in program.errors_had);
 }
 
+"""Parenthesized BoolExpr conditions wire the short-circuit CFG."""
+test "parenthesized_bool_cond" {
+    program = JacProgram();
+    mod = program.compile(
+        os.path.join(CHECKER_FIXTURES, "checker_parenthesized_bool_cond.jac"),
+        options=NO_TC
+    );
+    TypeCheckPass(ir_in=mod, prog=program);
+    assert len(program.errors_had) == 0 , f"Expected 0 type errors, but got " + f"{len(
+        program.errors_had
+    )}:\n" + "\n---\n".join(err.pretty_print() for err in program.errors_had);
+}
+
+"""Assignment barrier: strict narrowing, widening reset, in-branch re-narrow."""
+test "assignment_barrier" {
+    program = JacProgram();
+    mod = program.compile(
+        os.path.join(CHECKER_FIXTURES, "checker_assignment_barrier.jac"), options=NO_TC
+    );
+    TypeCheckPass(ir_in=mod, prog=program);
+    # The widening reassignment in `widen_via_reassign` resets `x` to
+    # `int | None`, so `return x` against the `int` return type is the
+    # only expected error.
+    assert len(program.errors_had) == 1 , f"Expected 1 type error, but got " + f"{len(
+        program.errors_had
+    )}:\n" + "\n---\n".join(err.pretty_print() for err in program.errors_had);
+    msg = program.errors_had[0].pretty_print();
+    assert 'Cannot return int | NoneType' in msg , f"Expected widening-reset error, got: {msg}";
+}
+
+"""Pre-statement narrowing reaches inside expression sub-CFGs."""
+test "pre_expr_narrowing" {
+    program = JacProgram();
+    mod = program.compile(
+        os.path.join(CHECKER_FIXTURES, "checker_pre_expr_narrowing.jac"), options=NO_TC
+    );
+    TypeCheckPass(ir_in=mod, prog=program);
+    # All three shapes (early-return guard, OR-inverse guard, if-wrap)
+    # must carry the enclosing statement's narrowing into ternary
+    # branches so member access on the narrowed type succeeds.
+    assert len(program.errors_had) == 0 , f"Expected 0 type errors, but got " + f"{len(
+        program.errors_had
+    )}:\n" + "\n---\n".join(err.pretty_print() for err in program.errors_had);
+}
+
+"""Ternary conditions with BoolExpr narrow their branches per-operand."""
+test "ternary_bool_cond_narrowing" {
+    program = JacProgram();
+    mod = program.compile(
+        os.path.join(CHECKER_FIXTURES, "checker_ternary_bool_cond_narrowing.jac"),
+        options=NO_TC
+    );
+    TypeCheckPass(ir_in=mod, prog=program);
+    # All four shapes must narrow cleanly: AND-in-true, OR-inverse-in-else
+    # (bare and parenthesized), and the plain if/else control.
+    assert len(program.errors_had) == 0 , f"Expected 0 type errors, but got " + f"{len(
+        program.errors_had
+    )}:\n" + "\n---\n".join(err.pretty_print() for err in program.errors_had);
+}
+
+"""Starred-unpack assignment acts as a narrowing barrier."""
+test "starred_unpack_barrier" {
+    program = JacProgram();
+    mod = program.compile(
+        os.path.join(CHECKER_FIXTURES, "checker_starred_unpack_barrier.jac"),
+        options=NO_TC
+    );
+    TypeCheckPass(ir_in=mod, prog=program);
+    # After `(head, *rest) = ...` inside `if rest is not None`, rest
+    # must reset to list[int] | None. The typed-local assignment then
+    # fails because list[int] | None is not assignable to list[int].
+    assert len(program.errors_had) == 1 , f"Expected 1 type error, but got " + f"{len(
+        program.errors_had
+    )}:\n" + "\n---\n".join(err.pretty_print() for err in program.errors_had);
+    msg = program.errors_had[0].pretty_print();
+    assert 'Cannot assign list[int] | NoneType to list[int]' in msg , f"Expected starred-unpack reset error, got: {msg}";
+}
+
+"""Tuple-unpacking assignment acts as a narrowing barrier."""
+test "tuple_unpack_barrier" {
+    program = JacProgram();
+    mod = program.compile(
+        os.path.join(CHECKER_FIXTURES, "checker_tuple_unpack_barrier.jac"),
+        options=NO_TC
+    );
+    TypeCheckPass(ir_in=mod, prog=program);
+    # After `(x, _) = reset_pair()` inside `if x is not None`, x must
+    # reset to int | None. `return x` then fails against int.
+    assert len(program.errors_had) == 1 , f"Expected 1 type error, but got " + f"{len(
+        program.errors_had
+    )}:\n" + "\n---\n".join(err.pretty_print() for err in program.errors_had);
+    msg = program.errors_had[0].pretty_print();
+    assert 'Cannot return int | NoneType' in msg , f"Expected widening-reset error, got: {msg}";
+}
+
+"""Destructuring assignment narrows by RHS element type when available."""
+test "destructure_element_narrowing" {
+    program = JacProgram();
+    mod = program.compile(
+        os.path.join(CHECKER_FIXTURES, "checker_destructure_element_narrowing.jac"),
+        options=NO_TC
+    );
+    TypeCheckPass(ir_in=mod, prog=program);
+    # Four narrowing cases must succeed; only `no_narrow_non_strict`
+    # should error because its RHS element type matches the declared
+    # type and therefore fails the strict-narrowing check.
+    assert len(program.errors_had) == 1 , f"Expected 1 type error, but got " + f"{len(
+        program.errors_had
+    )}:\n" + "\n---\n".join(err.pretty_print() for err in program.errors_had);
+    msg = program.errors_had[0].pretty_print();
+    assert 'Cannot return int | str' in msg , f"Expected non-strict-narrow error, got: {msg}";
+}
+
+"""Match-case narrowing is killed by a later assignment to the subject."""
+test "match_case_reassign_reset" {
+    program = JacProgram();
+    mod = program.compile(
+        os.path.join(CHECKER_FIXTURES, "checker_match_case_reassign_reset.jac"),
+        options=NO_TC
+    );
+    TypeCheckPass(ir_in=mod, prog=program);
+    assert len(program.errors_had) == 4 , f"Expected 4 type errors, but got " + f"{len(
+        program.errors_had
+    )}:\n" + "\n---\n".join(err.pretty_print() for err in program.errors_had);
+    assert 'Cannot assign int to Shape' in program.errors_had[0].pretty_print();
+    for i in [1, 2, 3] {
+        msg = program.errors_had[i].pretty_print();
+        assert 'has no attribute "sides"' in msg , f"Expected attribute error at index {i}, got: {msg}";
+    }
+}
+
 """Test truthiness guard narrowing for member access."""
 test "guard_narrowing" {
     program = JacProgram();

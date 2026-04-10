@@ -222,9 +222,9 @@ obj TypeEvaluator {
         _pass: object | None = None,
         builtins_module: uni.Module | None = None,
         # Type narrowing (CFG-based only — no scope stack)
-        _narrowing_cache: dict[tuple, types.TypeBase | None] = {},
-        _narrowing_in_progress: set[int] by postinit,
-        _narrowing_in_progress_keys: set[str] by postinit,
+        _flow_node_type_cache: dict[tuple, types.TypeBase | None] = {},
+        _flow_pending_symbols: set[int] by postinit,
+        _flow_pending_keys: set[str] by postinit,
         _module_type_cache: dict[str, types.ModuleType] = {},
         # Stub modules - initialized in postinit
         typing_module: uni.Module by postinit,
@@ -355,6 +355,12 @@ obj TypeEvaluator {
     def _get_enclosing_class(nd: uni.UniNode) -> uni.Archetype | None;
     def _get_type_of_self(node_: uni.SpecialVarRef) -> TypeBase;
     def _get_type_of_super(node_: uni.SpecialVarRef) -> TypeBase;
+    def _get_type_of_lhs_assignment(expr: uni.Name) -> TypeBase | None;
+    def _extract_tuple_element_type(tuple_type: TypeBase, idx: int) -> TypeBase | None;
+    def _extract_tuple_element_type_path(
+        tuple_type: TypeBase, path: list[int]
+    ) -> TypeBase | None;
+
     def _convert_to_instance(jtype: TypeBase) -> TypeBase;
     def _type_in_list(ty: TypeBase, type_list: list[TypeBase]) -> bool;
     def _collect_unique_types(ty: TypeBase, result: list[TypeBase]) -> None;
@@ -501,7 +507,7 @@ obj TypeEvaluator {
     # -------------------------------------------------------------------------
 
     # --- CFG-based narrowing (backward traversal) ---
-    def get_narrowing_key(expr: uni.Expr) -> str | None;
+    def create_key_for_reference(expr: uni.Expr) -> str | None;
     def _find_symbol_by_key(key: str, condition: uni.Expr) -> uni.Symbol | None;
     def classify_condition(condition: uni.Expr) -> ConditionInfo | None;
     def get_narrowed_type(symbol: uni.Symbol, at_node: uni.UniNode) -> TypeBase | None;
@@ -509,8 +515,8 @@ obj TypeEvaluator {
         expr: uni.Expr, declared_type: TypeBase, at_node: uni.UniNode
     ) -> TypeBase | None;
 
-    def _compute_narrowed_at(
-        target: NarrowingTarget, stmt: uni.UniCFGNode, visited: set
+    def _get_type_from_flow_node(
+        target: NarrowingTarget, flow_node: uni.UniCFGNode, visited: set
     ) -> TypeBase | None;
 
     def _classify_edge(pred: uni.IfStmt, succ: uni.UniCFGNode) -> str;
