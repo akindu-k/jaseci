@@ -14,7 +14,7 @@ impl Serializer._serialize_attrs(
     include_type: bool,
     api_mode: bool,
     ref_mode: bool = False,
-    _seen: (set | None) = None
+    _seen: (tuple[set, set] | None) = None
 ) -> dict[str, object] {
     return {
         a: Serializer._serialize_value(
@@ -32,7 +32,7 @@ impl Serializer.serialize(
     api_mode: bool = False,
     ref_mode: bool = False
 ) -> object {
-    _seen = set() if ref_mode else None;
+    _seen = (set(), set()) if ref_mode else None;
     return Serializer._serialize_value(`obj, include_type, api_mode, ref_mode, _seen);
 }
 
@@ -42,7 +42,7 @@ impl Serializer._serialize_value(
     include_type: bool,
     api_mode: bool = False,
     ref_mode: bool = False,
-    _seen: (set | None) = None
+    _seen: (tuple[set, set] | None) = None
 ) -> object {
     # Primitives & UUID & Enum
     if val is None or isinstance(val, (str, int, float, bool)) {
@@ -125,7 +125,8 @@ impl Serializer._serialize_value(
             jac_anchor = val?.__jac__;
             if jac_anchor {
                 jac_id = jac_anchor.id;
-                if jac_id in _seen {
+                (jac_uuids, _) = _seen;
+                if jac_id in jac_uuids {
                     ref_type = (
                         'node'
                             if isinstance(jac_anchor, NodeAnchor)
@@ -137,11 +138,17 @@ impl Serializer._serialize_value(
                     );
                     return {'$ref': jac_id.hex, '$type': ref_type};
                 }
-                _seen.add(jac_id);
+                jac_uuids.add(jac_id);
+                # Register in memory so _deserialize_jac_ref can resolve
+                # $ref placeholders back to the live archetype.
                 try {
                     import from jaclang { JacRuntimeInterface as Jac }
                     Jac.get_context().mem.put(jac_anchor);
-                } except Exception { }
+                } except Exception as e {
+                    logger.warning(
+                        f"ref_mode: failed to register {jac_id.hex} in memory: {e}"
+                    );
+                }
             }
         }
         result = Serializer._type_info(val, include_type);
@@ -160,6 +167,15 @@ impl Serializer._serialize_value(
     }
     # Generic object with __dict__
     if val?.__dict__ {
+        # Cycle guard for non-Jac objects (tracked by identity, not UUID).
+        if _seen is not None {
+            (_, obj_ids) = _seen;
+            obj_identity = id(val);
+            if obj_identity in obj_ids {
+                return str(val);
+            }
+            obj_ids.add(obj_identity);
+        }
         result = Serializer._type_info(val, include_type);
         if api_mode {
             result['__type__'] = type(val).__name__;
@@ -180,20 +196,21 @@ impl Serializer._serialize_value(
     return str(val);
 }
 
-"""Check if a value is a $ref placeholder dict."""
-impl Serializer._is_jac_ref(val: object) -> bool {
-    return isinstance(val, dict) and '$ref' in val;
-}
-
-"""Deserialize a $ref placeholder back to the original archetype."""
+"""Deserialize a $ref placeholder back to the live archetype, typed stub, or None."""
 impl Serializer._deserialize_jac_ref(data: dict[str, object]) -> (object | None) {
     id_str = data.get('$ref');
     if not isinstance(id_str, str) {
         return None;
     }
     try {
+        ref_uuid = UUID(id_str);
+    } except (ValueError, AttributeError) {
+        logger.error(f"Invalid UUID in $ref: {id_str}");
+        return None;
+    }
+    try {
         import from jaclang { JacRuntimeInterface as Jac }
-        anchor = Jac.get_context().mem.get(UUID(id_str));
+        anchor = Jac.get_context().mem.get(ref_uuid);
         if anchor {
             if not anchor.is_populated() {
                 anchor.populate();
@@ -203,9 +220,8 @@ impl Serializer._deserialize_jac_ref(data: dict[str, object]) -> (object | None)
             }
         }
     } except Exception as e {
-        logger.error(f"Failed to resolve $ref {id_str} from context: {e}");
+        logger.warning(f"Failed to resolve $ref {id_str} from context: {e}");
     }
-    # Fallback: create a typed stub using $type so the anchor class is correct.
     ref_type = data.get('$type');
     stub_cls = cast(
         type,
@@ -265,7 +281,7 @@ impl Serializer._deserialize_value(val: object) -> object {
         return [Serializer._deserialize_value(v) for v in val];
     }
     if isinstance(val, dict) {
-        if '$ref' in val {
+        if '$ref' in val and val.keys() <= {'$ref','$type'} {
             return Serializer._deserialize_jac_ref(val);
         }
         return Serializer.deserialize(val)

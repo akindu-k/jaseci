@@ -159,7 +159,7 @@ test "ref_mode: shared refs deduplicated, circular graphs terminate, $ref round-
     assert data["friend"]["city"] == {"$ref": city_id, "$type": "object"};
     assert data["friend"]["friend"] == {"$ref": alice_id, "$type": "object"};
 
-    # $ref deserializes back to live archetype (not a stub) via context memory
+    # $ref round-trips to live archetype via context memory
     resolved_city = Serializer._deserialize_value(data["friend"]["city"]);
     resolved_alice = Serializer._deserialize_value(data["friend"]["friend"]);
     assert resolved_city.name == "Metropolis" and resolved_alice.name == "Alice";
