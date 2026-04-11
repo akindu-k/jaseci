@@ -802,33 +802,31 @@ To create a private broadcasting walker, remove `: pub` from the walker definiti
 
 ## Microservice Interop (sv-to-sv)
 
-Jac Scale lets you split a server-side codebase into multiple independently-deployed microservices without changing call sites. When two `sv` (server) modules each run as their own `JacAPIServer`, an `sv import` from one to the other generates HTTP client stubs at compile time, so calls become RPCs over the wire instead of in-process imports.
+Jac Scale lets you split a server-side codebase into multiple independently-deployed microservices without changing call sites. When two `sv` (server) modules each run as their own server process, an `sv import` from one to the other generates HTTP client stubs at compile time, so calls become RPCs over the wire instead of in-process imports.
 
 ### Overview
 
-The `sv import` keyword wires up two flavors of cross-process interop, depending on what context the importer and importee are in:
+The `sv import` keyword has two flavors depending on where the importer and the importee live:
 
-- **cl-to-sv**: client browser code calls server functions over HTTP. Stubs are generated in JavaScript by the ES code generator.
-- **sv-to-sv**: one server module calls another server module that runs as a separate microservice. Stubs are generated in Python by `PyastGenPass` and dispatched through `jaclang.runtimelib.sv_client`.
+- **cl-to-sv**: client code calls server functions. Calls go over HTTP from browser to server.
+- **sv-to-sv**: one server module calls another server module that runs as a separate microservice. Calls go over HTTP from one server process to another.
 
-In the sv-to-sv flavor, `order_service.jac` doing `sv import from inventory_service { check_stock }` does not pull `inventory_service` into the consumer's process. Calling `check_stock(sku)` issues a `POST /function/check_stock` against the inventory service's URL using the same envelope format as cl-to-sv interop.
+In the sv-to-sv flavor, `order_service.jac` doing `sv import from inventory_service { check_stock }` does not load `inventory_service` into the consumer's process. Calling `check_stock(sku)` issues a `POST /function/check_stock` against the inventory service's URL and returns the result. The same source runs unchanged whether `inventory_service` is a separate microservice, a sibling process started by the same `jac start` command, or (when `sv import` is absent) a normal in-process import.
 
-The same source can run as a monolith (single `jac start`) or as separate services with no code changes -- the only difference is whether each module is started as its own server.
-
-For a step-by-step walkthrough that covers project setup, running both services, and watching the round-trip, see the [Microservices tutorial](../../tutorials/production/microservices.md). The rest of this section is a reference for the runtime contract, resolution chain, and plugin hook.
+For a step-by-step walkthrough that covers project setup, running both services, and watching the round-trip, see the [Microservices tutorial](../../tutorials/production/microservices.md). The rest of this section is a reference for the discovery rules, wire contract, and plugin override surface.
 
 ### Requirements
 
-A few preconditions that the resolution chain assumes:
+A few preconditions for `sv import` to work:
 
-- **Public functions only.** Provider functions reachable through `sv import` must be declared `def:pub`. Non-public functions are not registered as `/function/<name>` endpoints, so the generated stub call would 404. Walkers similarly need `walker:pub`.
-- **jac-scale on the consumer.** Resolution paths 1-3 (test client, manual register, env var) live in `jaclang.runtimelib.sv_client` and work in any jaclang install. The auto-spawn fallback (path 4) hangs off `JacAPIServer.ensure_sv_service`, which is provided by jac-scale -- a bare jaclang install does not have it.
-- **Sibling source on the consumer's `base_path`.** When the auto-spawn fallback fires, it loads the missing module from the consumer's `base_path_dir`. If you `jac start /abs/path/consumer.jac` from an unrelated working directory, the auto-spawned sibling will fail to find `provider.jac`. Either keep all services in the same directory and start with the directory as cwd, or set `JAC_SV_<MODULE>_URL` explicitly so the fallback never runs.
-- **Project layout.** `jac start <relative-path>` requires a `jac.toml` in the cwd. Either run `jac create` first, or pass an absolute path.
+- **Public functions only.** Provider functions reached through `sv import` must be declared `def:pub`; non-public functions are not exposed as endpoints, and calls into them return 404. Walkers similarly need `walker:pub`.
+- **jac-scale on the consumer.** Explicit URLs and env vars work with any jaclang install. Automatic spawning of siblings is provided by jac-scale; a bare jaclang install can still call providers registered by URL.
+- **Project layout.** `jac start <relative-path>` requires a `jac.toml` in the current directory. Run `jac create` first, or pass an absolute path.
+- **Services in the same directory when auto-spawning.** If the consumer auto-spawns a provider, it loads the provider source from the directory you ran `jac start` in. Keep all services in the same project directory, or point the consumer at a provider URL explicitly so auto-spawning never runs.
 
 ### Boundary Types
 
-Types that cross the service boundary use the same wire contract as cl-to-sv interop. The compiler emits a lightweight Python stub class for every type referenced in an `sv import` (like `DivResult` above), with `__from_wire` / `__to_wire` helpers that handle (de)serialization.
+Types that cross the service boundary use the same wire contract as cl-to-sv interop. The compiler emits a matching wrapper on the consumer side for every type referenced in an `sv import`, so values serialize transparently into JSON on the way out and deserialize back into the declared type on the way in.
 
 What works:
 
@@ -844,18 +842,26 @@ What doesn't:
 
 Failures (network errors, missing service, error envelope from the provider) raise `RuntimeError` with a message of the form `sv-to-sv RPC '{module}.{func}' failed: {msg}`.
 
+### Automatic Startup
+
+When you run `jac start consumer.jac`, the consumer finds every service it `sv import`s from and brings them all up **before** it starts accepting requests. Transitive dependencies are included: if A imports B and B imports C, starting A brings up all three.
+
+Startup is **fail-fast**: if any service fails to come up (missing source file, syntax error, port in use), the consumer crashes at startup with the underlying error. You find out at deploy time, not at first request.
+
+Automatic startup only applies to `jac start`. `jac run` is for one-shot scripts and does not bring up long-running sibling services; if it calls an `sv import`-ed function it will try to discover the provider lazily using the rules in [Service Discovery](#service-discovery) below.
+
 ### Service Discovery
 
-When a stub is invoked, `sv_client._ensure_available(module_name)` resolves the target service in this order. The first hit wins:
+For each `sv import`-ed provider, the consumer resolves it in this order. The first match wins:
 
-1. **In-process `TestClient`** -- if a `starlette.testclient.TestClient` was registered via `sv_client.register_test_client(module_name, client)`, calls route through it directly with no HTTP. Used by tests for fast in-process runs.
-2. **Explicit URL registration** -- a URL registered via `sv_client.register(module_name, url)`. Useful when an orchestrator (e.g. a service mesh sidecar, custom plugin) knows where each service lives.
-3. **`JAC_SV_<MODULE>_URL` environment variable** -- automatically consulted using the upper-cased module name. The most common production knob.
-4. **`JacAPIServer.ensure_sv_service` plugin hook** -- last-resort fallback that the default jac-scale impl uses to spawn a sibling service in a background daemon thread on a deterministic free port in the range `18000-18999`. Plugins can override this to spawn services in containers, K8s jobs, or anywhere else.
+1. **Test client** -- if tests have wired up an in-process `TestClient` for the provider, calls go through it with no HTTP. See [Testing](#testing).
+2. **Explicit URL** -- a URL the consumer was handed programmatically (e.g. by a custom orchestrator). See the [sv_client API](#sv_client-api-reference).
+3. **`JAC_SV_<MODULE>_URL` environment variable** -- automatically consulted using the upper-cased module name. This is the knob to reach for when the provider lives on a different host.
+4. **Automatic spawn** -- jac-scale brings up the provider as a sibling inside the consumer process. This is the path that lets `jac start consumer.jac` run the whole cluster from one command.
 
-The auto-spawned sibling binds `127.0.0.1` only -- it is reachable from inside the consumer process but not from outside. It exists for in-process convenience (single-binary local dev, tests that span service boundaries), not for serving traffic to other hosts. For real multi-host deployments, use path 2 or 3.
+Automatically-spawned siblings are bound to `127.0.0.1` -- they are reachable from inside the consumer process but not from outside. This makes single-command mode a supported deployment for **single-host** setups, but you cannot reach a sibling from another machine. For multi-host deployments, wire the consumer with `JAC_SV_<MODULE>_URL` pointing at the provider running elsewhere.
 
-> **Port range collision.** Avoid using ports `18000-18999` for your manual `jac start --port` flags. That range is reserved for auto-spawned siblings, and a manual port that lands at the same hash slot as a future auto-spawn will collide. Pick something in the 8000s or 9000s for explicit external ports.
+Siblings are assigned ports in the range `18000-18999`. Pick ports outside this range (e.g. in the 8000s) for your own `jac start --port` flags so a manual port does not collide with a future automatic spawn.
 
 ### Production Patterns
 
@@ -892,45 +898,31 @@ export JAC_SV_MATH_SERVICE_URL=http://localhost:8002
 jac start order_service.jac --port 8000
 ```
 
-Alternatively, omit the env vars and let the default `ensure_sv_service` hook auto-spawn each missing service as a background daemon thread on its first call. This is convenient for prototyping but is not recommended for production: services share a process, the spawned listener is loopback-only, and there's no health monitoring beyond the initial readiness poll.
+Alternatively, omit the env vars entirely and run `jac start order_service.jac` on its own. The consumer will find every service it `sv import`s from and bring them all up automatically (including transitive dependencies) before serving the first request. This is a supported deployment mode for **single-host** setups -- one process, many logical services. For **multi-host** deployments use the `JAC_SV_*_URL` path instead: automatically-started services bind `127.0.0.1` only and cannot serve traffic to other hosts.
 
 #### Troubleshooting
 
-- **`{"detail":"Invalid anchor id ..."}` 500s.** Stale anchors persisted from a previous run with a different schema. Stop the server, `rm -rf .jac/data/`, and restart. Not specific to sv-to-sv -- any `def:pub` call can hit this after a schema change.
-- **`No module named '<provider>'` from the auto-spawn fallback.** The consumer's `base_path_dir` does not contain the provider source. Run the consumer with the project directory as cwd, or set `JAC_SV_<MODULE>_URL` so the fallback never runs.
-- **Stub call returns 404.** The provider function is not declared `def:pub`. Walkers similarly need `walker:pub`.
+- **`{"detail":"Invalid anchor id ..."}` 500s.** Stale anchors persisted from a previous run with a different schema. Stop the server, `rm -rf .jac/data/`, and restart. Not specific to sv-to-sv; any `def:pub` call can hit this after a schema change.
+- **Consumer crashes at startup with `ModuleNotFoundError: No module named '<provider>'`.** Automatic startup could not find the provider source in the directory you ran `jac start` from. Either move all services into the same project directory, or set `JAC_SV_<MODULE>_URL` to point the consumer at a provider running elsewhere.
+- **Cross-service call returns 404.** The provider function is not declared `def:pub`. Walkers similarly need `walker:pub`.
 
 ### Testing
 
-The recommended in-process test pattern uses `TestClient` and short-circuits the resolution chain:
+To test cross-service behavior without real network I/O, wire each provider up as an in-process `TestClient` before constructing the consumer. `sv_client.register_test_client(module_name, client)` routes the consumer's calls through the registered client directly; no sockets, no port allocation, no background threads.
 
 ```jac
 import from jaclang.runtimelib { sv_client }
 import from starlette.testclient { TestClient }
-import from jac_scale.serve { JacAPIServer }
 
-def make_server(mod: str, base_path: str) -> TestClient {
-    srv = JacAPIServer(module_name=mod, port=0, base_path=base_path);
-    srv.load_module();
-    srv.register_health_endpoint();
-    srv.register_functions_endpoints();
-    srv.register_walkers_endpoints();
-    srv.server.create_server();
-    client = TestClient(srv.server.app, raise_server_exceptions=False);
-    sv_client.register_test_client(mod, client);
-    return client;
-}
-
-test "sv-to-sv: consumer reaches provider" {
+test "consumer reaches provider" {
     sv_client.clear_test_clients();
-    prov = make_server("inventory_service", "/path/to/services");
-    cons = make_server("order_service", "/path/to/services");
 
-    prov.post(
-        "/function/add_product",
-        json={"sku": "W", "name": "Widget", "quantity": 50, "price": 9.99}
-    );
-    resp = cons.post(
+    prov_client: TestClient = ...;  # build a TestClient over the provider app
+    cons_client: TestClient = ...;  # build a TestClient over the consumer app
+    sv_client.register_test_client("inventory_service", prov_client);
+
+    # Calls from the consumer into inventory_service now route through prov_client
+    resp = cons_client.post(
         "/function/create_order",
         json={"items": [{"sku": "W", "quantity": 2}]}
     ).json();
@@ -938,36 +930,30 @@ test "sv-to-sv: consumer reaches provider" {
 }
 ```
 
-Always call `sv_client.clear_test_clients()` between tests to avoid bleed-over. With `register_test_client` in place, no real HTTP, port allocation, or background threads are involved -- everything runs in-process through the ASGI test app.
+The two builder steps marked `...` are the boilerplate of standing up a consumer and provider in-process and wrapping each one in a `starlette.testclient.TestClient`. That scaffolding currently leans on hands-on use of jac-scale's server-construction APIs. The sv-to-sv test suite in the jac-scale source tree has a worked example that copies fixture files into a temp directory and brings both services up end-to-end; start there if you need a runnable harness.
+
+Always call `sv_client.clear_test_clients()` between tests to avoid bleed-over from a previous test's registrations.
 
 ### sv_client API Reference
 
-The `jaclang.runtimelib.sv_client` module exposes a small public surface for runtime control. The compiler emits `sv_client.call(...)` for you on every `sv import`-generated stub, so you rarely need to call it directly.
+`jaclang.runtimelib.sv_client` exposes a small control surface for telling the runtime where to find providers. You rarely need it under normal use -- `JAC_SV_<MODULE>_URL` covers most production wiring, and automatic startup covers single-host setups. Reach for these functions when you are writing tests or a custom orchestrator.
 
 | Function | Purpose |
 |---|---|
-| `register(module_name: str, url: str)` | Register a service URL for resolution. |
-| `unregister(module_name: str)` | Remove a previously-registered URL. |
-| `register_test_client(module_name: str, client)` | Register an in-process `TestClient` (testing only). |
-| `unregister_test_client(module_name: str)` | Remove a `TestClient` registration. |
-| `clear_test_clients()` | Drop all `TestClient` registrations. Call between tests. |
-| `resolve_url(module_name: str) -> str` | Look up the registered URL or `JAC_SV_<MOD>_URL` env var. |
-| `call(module_name, func_name, args: dict) -> Any` | Manual RPC dispatch. The compiler generates calls to this. |
+| `register(module_name: str, url: str)` | Point a provider name at a URL programmatically. Takes precedence over the env var path. |
+| `unregister(module_name: str)` | Remove a registration made via `register`. |
+| `register_test_client(module_name, client)` | Route calls to a provider through an in-process `TestClient` (tests only). See [Testing](#testing). |
+| `unregister_test_client(module_name: str)` | Remove a test-client registration. |
+| `clear_test_clients()` | Drop all test-client registrations. Call between tests to avoid bleed-over. |
+| `resolve_url(module_name: str) -> str` | Look up the URL the consumer would use for a provider (either from `register` or from `JAC_SV_<MOD>_URL`). Returns a string or raises if nothing is registered. |
 
-### Plugin Hook: `ensure_sv_service`
+### Plugin Override: Custom Service Spawning
 
-`JacAPIServer.ensure_sv_service(module_name: str, base_path: str) -> None` is the last-resort step in the resolution chain. Plugins override it to spawn services in their own infrastructure -- Docker containers, Kubernetes Jobs, systemd units, or anything else.
+`JacAPIServer.ensure_sv_service(module_name: str, base_path: str) -> None` is the hook a plugin overrides to change **how** services come up. Default jac-scale behavior spawns a sibling inside the consumer process; a plugin override can launch the service anywhere it wants -- Docker containers, Kubernetes Jobs, systemd units, remote VMs -- as long as it ends by calling `sv_client.register(module_name, <url>)` so subsequent calls skip the hook.
 
-The default jac-scale implementation:
+The hook is called during automatic startup, once per provider, in parallel up to 8 at a time. Overrides must be idempotent and safe to run concurrently. Both properties were already true of the pre-existing lazy contract (concurrent first-call requests could race into the same hook), so a plugin written against any prior version continues to work without modification.
 
-1. Picks a deterministic free port starting at `18000 + (hash(module_name) % 1000)`.
-2. Builds a base `JacAPIServer` (not plugin-resolved, to avoid recursion) with `port=0`.
-3. Wires up a vanilla `http.server.HTTPServer` bound to `127.0.0.1` with the base server's request handler.
-4. Runs `serve_forever` in a daemon thread.
-5. Polls the new server until it returns any non-5xx response (10s deadline). The poll target is `/functions` but a 404 is sufficient -- the check is "the listener is up and serving HTTP", not "this specific endpoint exists".
-6. Calls `sv_client.register(module_name, base_url)` so subsequent calls skip the hook.
-
-A custom plugin replaces this with whatever spawn / health-check / registration logic suits its target environment, then ends with the same `sv_client.register` call.
+The default jac-scale implementation at a high level: pick a free loopback port in `18000-18999`, start an HTTP listener on a daemon thread serving the module's `def:pub` endpoints, wait until the listener responds to an HTTP probe, then register the URL. Consult the jac-scale source if you need the exact details; the contract plugin authors should rely on is the `ensure_sv_service` signature and the requirement to call `sv_client.register` before returning.
 
 ## Storage
 

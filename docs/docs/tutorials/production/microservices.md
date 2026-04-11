@@ -2,7 +2,7 @@
 
 A Jac codebase can run as a single monolith or as several independently-deployed microservices, with no source changes between the two. The trick is the `sv import` keyword: when both the importer and the importee are server-context modules, the compiler generates an HTTP client stub for the imported function instead of pulling the provider into the consumer's process. Calls become RPCs over the wire, but the source still reads like a normal import.
 
-This tutorial walks through splitting a tiny app into two services and watching the round-trip happen, then shows how to point the consumer at a real provider URL and how to test the boundary in-process.
+This tutorial walks through splitting a tiny app into two services, running the whole thing from one command, watching the round-trip happen over real HTTP, and then covers testing and multi-host production deployment.
 
 > **Prerequisites**
 >
@@ -14,17 +14,17 @@ This tutorial walks through splitting a tiny app into two services and watching 
 
 ## Overview
 
-Two services, two `jac start` processes, one HTTP boundary between them. The consumer's `sv import` looks identical to a regular import, but every call out to the provider is a `POST /function/<name>` over the wire.
+Two services, one HTTP boundary between them. The consumer's `sv import` looks identical to a regular import, but every call out to the provider is a `POST /function/<name>` over the wire. The consumer never loads the provider's code into its own memory.
+
+The default single-host deployment runs the whole app from one `jac start` command: the consumer brings the provider up automatically before serving the first request.
 
 ```mermaid
 graph LR
-    Client["Client<br/>(curl, browser)"] -- "POST /function/sum_list" --> Calc["calculator_service<br/>jac start :8002"]
-    Calc -- "POST /function/add (x5)" --> Math["math_service<br/>jac start :8001"]
+    Client["Client<br/>(curl, browser)"] -- "POST /function/sum_list" --> Calc["calculator_service<br/>port 8002"]
+    Calc -- "POST /function/add (x5)" --> Math["math_service<br/>auto-started sibling"]
     Math -- "result" --> Calc
     Calc -- "result" --> Client
 ```
-
-The consumer never imports the provider into its own process. After the call, the consumer's `sys.modules` does not contain `math_service`.
 
 ---
 
@@ -41,7 +41,7 @@ version = "0.1.0"
 EOF
 ```
 
-> **Why `jac.toml`?** `jac start <relative-path>` requires a `jac.toml` in the current directory. Without one, you get `Error: No jac.toml found`. You can also pass an absolute path to `jac start`, but the auto-spawn fallback (covered later) needs both services to live in the same directory anyway, so a project layout is the simplest path.
+> **Why `jac.toml`?** `jac start <relative-path>` requires a `jac.toml` in the current directory. Without one, you get `Error: No jac.toml found`. The services also need to live in the same directory so the consumer can find and auto-start the provider at runtime, so a shared project layout is the simplest path.
 
 ---
 
@@ -109,32 +109,28 @@ Read this file as if `add`, `multiply`, and `divide` were local functions. The c
 
 ---
 
-## 4. Run Both Services
+## 4. Run the App
 
-Open two terminals, both in the `microservices-demo` directory.
-
-**Terminal 1 -- start the provider:**
+From the `microservices-demo` directory, start the consumer:
 
 ```bash
-jac start math_service.jac --port 8001
+jac start calculator_service.jac --port 8002
 ```
 
-**Terminal 2 -- start the consumer with the provider URL:**
+That is all. The consumer finds every service it `sv import`s from (`math_service`, in this case) and brings them up automatically inside the same process before serving the first request. Transitive dependencies come along for free: if `math_service` itself had an `sv import`, that provider would also be auto-started. One command, whole cluster.
 
-```bash
-JAC_SV_MATH_SERVICE_URL=http://localhost:8001 \
-    jac start calculator_service.jac --port 8002
-```
+Startup is **fail-fast**: if any service fails to come up (missing source file, syntax error, port in use), the consumer crashes at startup with the underlying error. You find out at deploy time, not at first request.
 
-The `JAC_SV_<UPPERCASED_MODULE>_URL` env var tells the consumer where to find the named provider. The module name is exactly what you wrote after `sv import from`, upper-cased.
+A couple of things to know about the auto-started services:
 
-> **Avoid ports 18000-18999.** That range is reserved for the auto-spawn fallback (next section). Pick something in the 8000s for explicit external ports.
+- **They are loopback-only.** Auto-started services bind `127.0.0.1`, not `0.0.0.0`, so they cannot serve traffic to other hosts. Single-command mode is a supported deployment for **single-host** setups. When your providers live on different hosts, see [Section 7: Going to Production](#7-going-to-production).
+- **Avoid ports 18000-18999 for your own `--port` flags.** That range is reserved for auto-started sibling services, and a manual port in that range can collide with a future auto-start. Pick something in the 8000s for explicit external ports.
 
 ---
 
 ## 5. Watch the Round-Trip
 
-From a third terminal, exercise the consumer:
+From a second terminal, exercise the consumer:
 
 ```bash
 # Cross-service: 5 add() calls under the hood
@@ -144,24 +140,26 @@ curl -X POST http://localhost:8002/function/sum_list \
 ```
 
 ```json
-{"ok":true,"data":{"result":15,"reports":[]},"error":null,"meta":{"extra":{"http_status":200}}}
+{"ok":true,"type":"response","data":{"result":15,"reports":[]},"error":null,"meta":{"extra":{"http_status":200}}}
 ```
 
-Now look at the **provider** terminal -- you will see five `POST /function/add` lines, one per iteration of the consumer's loop:
+Back in the consumer's terminal you will see the consumer's `sum_list` call followed by five `POST /function/add` lines from the auto-started `math_service` sibling -- one per iteration of the loop -- before the outer `sum_list` closes out:
 
 ```text
-Executing function 'add' with params: {'a': 0, 'b': 1}
-  127.0.0.1:41112 - "POST /function/add HTTP/1.1" 200
-Executing function 'add' with params: {'a': 1, 'b': 2}
-  127.0.0.1:41124 - "POST /function/add HTTP/1.1" 200
-...
+Executing function 'sum_list' with params: {'numbers': [1, 2, 3, 4, 5]}
+127.0.0.1 - "POST /function/add HTTP/1.1" 200 -
+127.0.0.1 - "POST /function/add HTTP/1.1" 200 -
+127.0.0.1 - "POST /function/add HTTP/1.1" 200 -
+127.0.0.1 - "POST /function/add HTTP/1.1" 200 -
+127.0.0.1 - "POST /function/add HTTP/1.1" 200 -
+  127.0.0.1:52652 - "POST /function/sum_list HTTP/1.1" 200
 ```
 
-That is the proof: the consumer's loop is fanning out to the provider on each iteration. The two services are real processes talking over real HTTP.
+That is the proof: the consumer's loop is fanning out to the provider on each iteration, over real HTTP. The auto-started sibling is a separate server inside the same process, not a function call.
 
 ### Boundary Type Round-Trip
 
-`safe_divide` returns a `DivResult` from the provider, which the consumer hands back to its own caller. The compiler generates a Python stub class for `DivResult` on the consumer side with `from_wire` / `to_wire` helpers, so the wrapped object behaves like a normal `obj` instance.
+`safe_divide` returns a `DivResult` from the provider, which the consumer hands back to its own caller. The compiler generates a matching wrapper on the consumer side that serializes and deserializes the type across the wire, so callers see a normal `DivResult` on both sides of the boundary.
 
 ```bash
 curl -X POST http://localhost:8002/function/safe_divide \
@@ -170,7 +168,7 @@ curl -X POST http://localhost:8002/function/safe_divide \
 ```
 
 ```json
-{"ok":true,"data":{"result":{"_jac_type":"DivResult","error":"","result":5.0},"reports":[]},...}
+{"ok":true,"type":"response","data":{"result":{"_jac_type":"DivResult","_jac_id":"...","_jac_archetype":"archetype","error":"","result":5.0},"reports":[]},"error":null,"meta":{"extra":{"http_status":200}}}
 ```
 
 ```bash
@@ -180,114 +178,59 @@ curl -X POST http://localhost:8002/function/safe_divide \
 ```
 
 ```json
-{"ok":true,"data":{"result":{"_jac_type":"DivResult","error":"division by zero","result":null},"reports":[]},...}
+{"ok":true,"type":"response","data":{"result":{"_jac_type":"DivResult","_jac_id":"...","_jac_archetype":"archetype","error":"division by zero","result":null},"reports":[]},"error":null,"meta":{"extra":{"http_status":200}}}
 ```
 
-Both error and success cases survive the boundary intact. The `_jac_type` metadata lets the consumer's runtime hand the caller a real `DivResult` instance, not a raw dict.
+Both error and success cases survive the boundary intact. The `_jac_type` metadata lets the consumer's runtime hand the caller a real `DivResult` instance, not a raw dict; `_jac_id` and `_jac_archetype` are envelope bookkeeping the runtime uses to hydrate the object on the other side.
 
 ---
 
-## 6. Auto-Spawn Fallback (Prototyping)
+## 6. Test the Boundary In-Process
 
-For fast local iteration you can skip the second `jac start` entirely. If no `JAC_SV_*_URL` env var is set, the consumer's first call to a missing service triggers `JacAPIServer.ensure_sv_service`, which spawns the provider as a background daemon thread inside the consumer process and registers it under `127.0.0.1` on a port in the 18000-18999 range.
+When you write tests for the consumer, you do not want them to hit a real provider over HTTP. Instead, register an in-process `TestClient` for each provider, and the consumer's calls route through it directly -- no sockets, no port allocation, no background threads.
 
-Stop both services from the previous step, clear any leftover state, and start only the consumer:
-
-```bash
-rm -rf .jac/data/
-jac start calculator_service.jac --port 8002
-```
-
-Now hit `sum_list` again:
-
-```bash
-curl -X POST http://localhost:8002/function/sum_list \
-  -H "Content-Type: application/json" \
-  -d '{"numbers":[1,2,3]}'
-```
-
-```json
-{"ok":true,"data":{"result":6,"reports":[]},...}
-```
-
-The first call takes a fraction of a second longer because the consumer is spawning the sibling listener and polling it for readiness; subsequent calls are direct.
-
-> **The auto-spawned sibling is loopback-only.** It binds `127.0.0.1`, not `0.0.0.0`. That makes it convenient for single-binary local dev and tests, but it cannot serve traffic to other hosts. For real deployments, run each service as its own `jac start` and wire them with `JAC_SV_*_URL` env vars (or [override the plugin hook](../../reference/plugins/jac-scale.md#plugin-hook-ensure_sv_service)).
-
-The auto-spawn fallback also requires both services to live in the same directory: it loads the missing module from the consumer's `base_path_dir`, so `jac start` from the project root works, but `jac start /some/abs/path/calc.jac` from an unrelated cwd does not.
-
----
-
-## 7. Test the Boundary In-Process
-
-When you write tests for the consumer, you do not want them to hit a real provider over HTTP. Register an in-process `TestClient` instead, and the consumer's stub calls route through it directly.
+The core pattern is three lines:
 
 ```jac
-# test_microservices.jac
-import sys;
-import shutil;
-import tempfile;
-import from pathlib { Path }
-import from jaclang { JacRuntime as Jac }
-import from jaclang.jac0core.constant { Constants as Con }
 import from jaclang.runtimelib { sv_client }
-import from starlette.testclient { TestClient }
-import from jac_scale.serve { JacAPIServer }
 
-glob HERE: Path = Path(__file__).parent;
-
-def make_server(mod: str, base_path: str) -> TestClient {
-    if mod in Jac.loaded_modules { del Jac.loaded_modules[mod]; }
-    if mod in sys.modules { del sys.modules[mod]; }
-    Jac.jac_import(target=mod, base_path=base_path, lng="jac");
-    srv = JacAPIServer(module_name=mod, port=0, base_path=base_path);
-    srv.load_module();
-    srv.register_health_endpoint();
-    srv.register_walkers_endpoints();
-    srv.register_functions_endpoints();
-    srv.register_create_user_endpoint();
-    srv.register_login_endpoint();
-    srv.user_manager.create_user(Con.GUEST.value, '__no_password__');
-    srv.server.create_server();
-    client = TestClient(srv.server.app, raise_server_exceptions=False);
-    sv_client.register_test_client(mod, client);
-    return client;
-}
-
-test "calculator routes through math via TestClient" {
-    tmp = tempfile.mkdtemp();
-    try {
-        shutil.copy2(HERE / "math_service.jac", Path(tmp) / "math_service.jac");
-        shutil.copy2(HERE / "calculator_service.jac", Path(tmp) / "calculator_service.jac");
-        Jac.set_base_path(tmp);
-        Jac.set_context(Jac.create_j_context(user_root=None));
-        sv_client.clear_test_clients();
-
-        prov = make_server("math_service", tmp);
-        cons = make_server("calculator_service", tmp);
-
-        resp = cons.post(
-            "/function/sum_list", json={"numbers": [1, 2, 3, 4, 5]}
-        ).json();
-        assert resp["ok"] is True;
-        assert resp["data"]["result"] == 15;
-    } finally {
-        shutil.rmtree(tmp, ignore_errors=True);
-    }
+with entry {
+    sv_client.clear_test_clients();
+    sv_client.register_test_client("math_service", math_test_client);
+    # ...the consumer's sv-imported calls into math_service now go through math_test_client
 }
 ```
 
-```bash
-python -m pytest test_microservices.jac -v
-```
+Always call `sv_client.clear_test_clients()` between tests to avoid bleed-over from a previous test's registrations.
 
-Always call `sv_client.clear_test_clients()` between tests to avoid bleed-over from a previous test's registration. With `register_test_client` in place, no real HTTP, port allocation, or background threads are involved -- everything runs in-process through the ASGI test app, which makes the suite fast and deterministic.
+The pieces left unshown here -- building a `TestClient` over a consumer and provider from the same source tree -- require hands-on use of the jac-scale server-construction APIs and are currently more verbose than the tutorial should be. The sv-to-sv test suite in the jac-scale source tree has a worked example that copies fixtures into a temp directory and stands both sides up end-to-end. Start there if you need a ready-to-run harness.
 
 ---
 
-## 8. Going to Production
+## 7. Going to Production
 
-For real deployments, each service runs as its own `Deployment` (or VM, container, systemd unit) and the consumer is told where the provider lives via `JAC_SV_*_URL`.
+Single-command mode is great for a single host, but once your services live on **different hosts** you need to tell each consumer where its providers actually are. The mechanism is the `JAC_SV_<UPPERCASED_MODULE>_URL` environment variable: when set, it takes precedence over auto-start and points the consumer at the URL you provide. The module name is exactly what you wrote after `sv import from`, upper-cased.
+
+### Local Multi-Process
+
+Before jumping to containers, you can test the multi-process flow on your own machine by running each service as its own `jac start` and wiring the consumer with an env var.
+
+Open two terminals, both in the `microservices-demo` directory.
+
+**Terminal 1 -- start the provider:**
+
+```bash
+jac start math_service.jac --port 8001
+```
+
+**Terminal 2 -- start the consumer pointed at the provider URL:**
+
+```bash
+JAC_SV_MATH_SERVICE_URL=http://localhost:8001 \
+    jac start calculator_service.jac --port 8002
+```
+
+Hitting `/function/sum_list` on port 8002 now produces the same round-trip as single-command mode, except the provider logs appear in Terminal 1 instead of being interleaved with the consumer's output. This is the stepping stone to a real multi-host deployment: the env var is the only thing pointing the consumer at the provider, and swapping `localhost` for a cluster DNS name or public hostname is the only change you make when you deploy.
 
 ### Kubernetes
 
@@ -332,31 +275,19 @@ spec:
           value: "http://inventory-service.default.svc.cluster.local:8000"
 ```
 
-The convention is `JAC_SV_<UPPERCASED_MODULE_NAME>_URL`. The module name is exactly the value used in `sv import from <module_name>`. Hyphens in module names become underscores; dots stay as dots.
+Hyphens in module names become underscores in the env var name; dots stay as dots.
 
 For the full Kubernetes deployment story (image building, ingress, autoscaling), see the [Kubernetes tutorial](kubernetes.md) -- it applies here unchanged, you just deploy each service separately and wire them with env vars.
-
-### Local Multi-Service
-
-The same pattern works locally with shell exports:
-
-```bash
-export JAC_SV_INVENTORY_SERVICE_URL=http://localhost:8001
-export JAC_SV_MATH_SERVICE_URL=http://localhost:8002
-jac start order_service.jac --port 8000
-```
-
-Each consumer process picks up its `JAC_SV_*_URL` vars at the moment of the first cross-service call, so you can `export` them in your shell profile or a `.env` file loaded by your dev workflow.
 
 ---
 
 ## Common Pitfalls
 
-- **`{"detail":"Invalid anchor id ..."}` 500s.** Stale anchor data persisted from a previous run with a different schema. Stop the server, `rm -rf .jac/data/`, and restart. Not specific to sv-to-sv -- any `def:pub` call can hit this after a schema change.
-- **`No module named '<provider>'` from the auto-spawn fallback.** The consumer's `base_path_dir` does not contain the provider source. Run the consumer from the project root, or set `JAC_SV_<MODULE>_URL` so the fallback never runs.
-- **Stub call returns 404.** The provider function is not declared `def:pub`. Walkers similarly need `walker:pub`.
+- **`{"detail":"Invalid anchor id ..."}` 500s.** Stale anchor data persisted from a previous run with a different schema. Stop the server, `rm -rf .jac/data/`, and restart. Not specific to sv-to-sv; any `def:pub` call can hit this after a schema change.
+- **Consumer crashes at startup with `ModuleNotFoundError: No module named '<provider>'`.** Automatic startup could not find the provider source in the directory you ran `jac start` from. Either move all services into the same project directory and run `jac start` from there, or set `JAC_SV_<MODULE>_URL` to point at a provider already running elsewhere.
+- **Cross-service call returns 404.** The provider function is not declared `def:pub`. Walkers similarly need `walker:pub`.
 - **`Error: No jac.toml found`.** `jac start <relative-path>` requires a `jac.toml` in the current directory. Run `jac create` (or just create an empty one), or pass an absolute path.
-- **Cross-service errors arrive as `RuntimeError`.** Network failures, missing services, and provider-side error envelopes all surface in the consumer as `RuntimeError("sv-to-sv RPC '{module}.{func}' failed: {msg}")`. Catch them at boundaries where you want graceful degradation.
+- **Cross-service errors raise an exception.** Network failures, missing services, and error responses from the provider all surface at the call site as an exception with the message `sv-to-sv RPC '<module>.<func>' failed: <reason>`. Catch at the boundaries where you want graceful degradation.
 
 ---
 

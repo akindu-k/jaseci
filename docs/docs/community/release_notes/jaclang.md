@@ -4,6 +4,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.13.6 (Unreleased)
 
+- **Feat: SV-to-SV Eager Auto-Spawn**: `jac start consumer.jac` now brings up every `sv import`-ed provider (including transitive ones via BFS) at consumer startup, before the first request arrives; the env var path stays for cross-host providers.
 - **Feat: SV-to-SV Microservice Interop**: `sv import` between two server modules now generates Python HTTP client stubs that route calls through `jaclang.runtimelib.sv_client` instead of loading the provider in-process.
 - **Fix: ES Codegen Method Dispatch on `.cl.jac` Files**: Operator-side primitive dispatch now walks the receiver's MRO, so `"a" in name.lower()` lowers to `.includes()` instead of a runtime-crashing JS `in`. When the receiver's static type isn't a JS-native primitive, Python method idioms (`lower`, `upper`, `strip`, `lstrip`, `rstrip`, `append`, `extend`, `pop`) now route through `_jac.poly.*` runtime helpers that `typeof`-dispatch to the native JS operation, instead of leaking Python identifiers into the JS output.
 - **Fix: Console BrokenPipeError in Sidecar Mode**: Console `print()` and `flush()` now catch `BrokenPipeError`/`OSError`, preventing crashes when stdout is closed (e.g., Tauri sidecar after port discovery).
