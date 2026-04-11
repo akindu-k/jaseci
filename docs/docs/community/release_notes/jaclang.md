@@ -33,6 +33,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Fix: Hover on LHS Assignment Shows Post-Write Type**: Hover on an assignment target (flat or destructuring) now reflects the post-write effective type instead of the pre-write declared type, matching pyright/pylance.
 - **Fix: NamedTuple Destructure Narrowing**: Destructuring a `NamedTuple` (`(x, _) = point`) now narrows each target to its field type, matching the behavior already available for plain tuple literals.
 - **Removed: W2052 Broad Exception Warning**: Removed the `W2052` warning that flagged `except Exception` as overly broad. Catching `Exception` is a legitimate and common pattern at system boundaries (e.g., LLM calls, network I/O), and the warning produced false positives in these cases.
+- **CLI: `jac jac2js` (and `jac js` deprecated)**: Added `jac jac2js` as the canonical Jac→JavaScript transform command, mirroring `jac jac2py`. `jac js` still works but now emits a deprecation warning on stderr and forwards to `jac jac2js`; it will be removed in a future release. Also fixed a pre-existing bug where `JacSuperConsole.warning` wrote to stdout instead of stderr.
 
 ## jaclang 0.13.5 (Latest Release)
 

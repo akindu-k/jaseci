@@ -37,7 +37,7 @@ The CLI is extensible through plugins. When you install plugins like `jac-scale`
 | `jac jac2py` | Convert Jac to Python |
 | `jac tool` | Language tools (IR, AST) |
 | `jac lsp` | Language server |
-| `jac js` | JavaScript output |
+| `jac jac2js` | Convert Jac to JavaScript |
 | `jac build` | Build for target platform (jac-client) |
 | `jac setup` | Setup build target (jac-client) |
 
@@ -1069,12 +1069,12 @@ jac create myproject --use mytemplate
 
 ---
 
-### jac js
+### jac jac2js
 
 Generate JavaScript output from Jac code (used for jac-client frontend compilation).
 
 ```bash
-jac js [-h] filename
+jac jac2js [-h] filename
 ```
 
 | Option | Description | Default |
@@ -1085,8 +1085,12 @@ jac js [-h] filename
 
 ```bash
 # Generate JS from Jac file
-jac js app.jac
+jac jac2js app.jac
 ```
+
+> **Deprecated:** `jac js` is a deprecated alias for `jac jac2js` and will be
+> removed in a future release. It still works but emits a deprecation warning
+> on stderr; update scripts to use `jac jac2js`.
 
 ---
 
