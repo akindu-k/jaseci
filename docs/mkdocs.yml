@@ -57,6 +57,7 @@ nav:
           - jac-scale Reference: "reference/plugins/jac-scale.md"
           - Learn by Doing:
               - Local API Server: "tutorials/production/local.md"
+              - Microservices with sv import: "tutorials/production/microservices.md"
               - Kubernetes: "tutorials/production/kubernetes.md"
       - Developer Workflow:
           - CLI Commands: "reference/cli/index.md"

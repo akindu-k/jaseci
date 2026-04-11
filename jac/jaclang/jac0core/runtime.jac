@@ -569,6 +569,17 @@ class JacAPIServer {
         """
     static def get_api_server_class -> type;
 
+    """Lazily ensure an sv-imported microservice is started and registered.
+
+        Called from sv_client.call() when an sv-imported function is invoked
+        for the first time and the service has no URL or TestClient yet.
+        Plugins (e.g. jac-scale) can override this to spawn their own
+        enhanced server. The default implementation spawns a base
+        JacAPIServer in a background thread, waits for the server to be
+        responsive, and registers the URL via sv_client.register().
+        """
+    static def ensure_sv_service(module_name: str, base_path: str) -> None;
+
     """Create the API server instance.
 
     If the specified port is in use, tries subsequent ports up to max_retries times.

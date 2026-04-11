@@ -133,6 +133,144 @@ impl PyastGenPass._gen_native_interop_stubs(nd: uni.NativeBlock) -> None {
     }
 }
 
+"""Generate Python HTTP client stubs for sv-to-sv microservice imports."""
+impl PyastGenPass._generate_sv_to_sv_stubs(nd: uni.Import) -> bool {
+    manifest = self.ir_in.gen.interop_manifest;
+    if (not manifest) {
+        return False;
+    }
+    if (not nd.from_loc or not nd.from_loc.path) {
+        return False;
+    }
+    module_name_parts = [
+        p.value
+        for p in nd.from_loc.path
+        if p?.value
+    ];
+    module_name = '.'.join(module_name_parts) if module_name_parts else None;
+    if not module_name {
+        return False;
+    }
+    sv_to_sv_names: set = set();
+    for b in manifest.server_exports_to_server {
+        if b.source_module == module_name {
+            sv_to_sv_names.add(b.name);
+        }
+    }
+    if not sv_to_sv_names {
+        return False;
+    }
+    boundary_types = manifest.boundary_types;
+    parts: list[str] = ["from jaclang.runtimelib import sv_client as __jac_sv_client"];
+    for item in nd.items {
+        if not isinstance(item, uni.ModuleItem) {
+            continue;
+        }
+        item_name = getattr(item.name, 'value', str(item.name));
+        local_name = item.alias.sym_name if item.alias else item_name;
+        if item_name in boundary_types {
+            info = boundary_types[item_name];
+            parts.append(self._gen_py_boundary_stub_class(local_name, info));
+            continue;
+        }
+        if item_name not in sv_to_sv_names {
+            continue;
+        }
+        binding = None;
+        for b in manifest.server_exports_to_server {
+            if b.name == item_name and b.source_module == module_name {
+                binding = b;
+                break;
+            }
+        }
+        if binding is None {
+            continue;
+        }
+        parts.append(
+            self._gen_py_sv_func_stub(
+                local_name, item_name, module_name, binding, boundary_types
+            )
+        );
+    }
+    if (len(parts) <= 1) {
+        return False;
+    }
+    src = '\n\n'.join(parts);
+    parsed = ast3.parse(src);
+    nd.gen.py_ast = `list(parsed.body);
+    return True;
+}
+
+"""Build a Python source string for an sv-to-sv function stub."""
+impl PyastGenPass._gen_py_sv_func_stub(
+    local_name: str,
+    func_name: str,
+    module_name: str,
+    binding: object,
+    boundary_types: dict
+) -> str {
+    params = ', '.join(binding.param_names) if binding.param_names else '';
+    args_kvs: list[str] = [];
+    for i in range(len(binding.param_names)) {
+        pname = binding.param_names[i];
+        ptype = binding.param_types[i] if i < len(binding.param_types) else '';
+        if (ptype in boundary_types and boundary_types[ptype].kind != "enum") {
+            args_kvs.append(
+                "'" + pname + "': (" + pname + "._to_wire() if hasattr(" + pname + ", '_to_wire') else " + pname + ")"
+            );
+        } else {
+            args_kvs.append("'" + pname + "': " + pname);
+        }
+    }
+    args_dict = '{' + ', '.join(args_kvs) + '}';
+    ret_type = binding.ret_type;
+    raw_call = (
+        "__jac_sv_client.call('" + module_name + "', '" + func_name + "', " + args_dict + ")"
+    );
+    if (ret_type in boundary_types and boundary_types[ret_type].kind != "enum") {
+        ret_expr = ret_type + '._from_wire(' + raw_call + ')';
+    } else {
+        ret_expr = raw_call;
+    }
+    return 'def ' + local_name + '(' + params + '):\n    return ' + ret_expr;
+}
+
+"""Build a Python source string for a boundary type stub class."""
+impl PyastGenPass._gen_py_boundary_stub_class(class_name: str, info: object) -> str {
+    field_names: list[str] = [];
+    for f in info.fields {
+        field_names.append(f[0]);
+    }
+    fields_pieces: list[str] = [];
+    for fname in field_names {
+        fields_pieces.append("'" + fname + "'");
+    }
+    fields_repr = '[' + ', '.join(fields_pieces) + ']';
+    lines: list[str] = [];
+    lines.append('class ' + class_name + ':');
+    lines.append('    __jac_fields__ = ' + fields_repr);
+    lines.append('    def __init__(self, **kw):');
+    lines.append('        for k, v in kw.items():');
+    lines.append('            setattr(self, k, v)');
+    lines.append('    def _to_wire(self):');
+    lines.append(
+        '        return {f: getattr(self, f, None) for f in self.__jac_fields__}'
+    );
+    lines.append('    @classmethod');
+    lines.append('    def _from_wire(cls, d):');
+    lines.append('        if d is None:');
+    lines.append('            return None');
+    lines.append('        if isinstance(d, list):');
+    lines.append('            return [cls._from_wire(i) for i in d]');
+    lines.append('        if not isinstance(d, dict):');
+    lines.append('            return d');
+    lines.append('        inst = cls.__new__(cls)');
+    lines.append('        for k, v in d.items():');
+    lines.append('            setattr(inst, k, v)');
+    lines.append('        return inst');
+    return '\n'.join(lines);
+}
+
 """Return the object from jaclib as ast node based on the import config."""
 impl PyastGenPass.jaclib_obj(obj_name: str) -> ast3.Name {
     self.jaclib_imports.add(obj_name);
@@ -935,6 +1073,19 @@ impl PyastGenPass.exit_import(nd: uni.Import) -> None {
             nd.gen.py_ast = [];
             return;
         }
+    }
+    # sv-to-sv microservice import: replace import with HTTP client stubs.
+    # Only triggered when the user explicitly wrote `sv import from ...`
+    # (we detect this via the sv token, not code_context which defaults
+    # to SERVER for all nodes).
+    if (
+        nd.from_loc
+        and nd.items
+        and nd._source_context_token() is not None
+        and nd._source_context_token().name == Tok.KW_SERVER
+        and self._generate_sv_to_sv_stubs(nd)
+    ) {
+        return;
     }
     py_nodes: list[ast3.AST] = [];
     if nd.doc {

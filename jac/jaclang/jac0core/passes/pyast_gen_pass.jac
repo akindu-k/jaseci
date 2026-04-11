@@ -131,6 +131,29 @@ ctypes.
         """
     def _gen_native_interop_stubs(nd: uni.NativeBlock) -> None;
 
+    """Generate Python HTTP client stubs for sv-to-sv microservice imports.
+
+        For each function imported via an sv import from another server module,
+        generates a Python function that routes the call over HTTP via
+        jaclang.runtimelib.sv_client. For each typed object imported, generates
+        a lightweight stub class with from_wire / to_wire reconstruction.
+        Returns True if the import was handled (caller should not emit a normal
+        Python import), False otherwise.
+        """
+    def _generate_sv_to_sv_stubs(nd: uni.Import) -> bool;
+
+    """Build a Python source string for an sv-to-sv function stub."""
+    def _gen_py_sv_func_stub(
+        local_name: str,
+        func_name: str,
+        module_name: str,
+        binding: object,
+        boundary_types: dict
+    ) -> str;
+
+    """Build a Python source string for a boundary type stub class."""
+    def _gen_py_boundary_stub_class(class_name: str, info: object) -> str;
+
     """Return the object from jaclib as ast node based on the import config."""
     def jaclib_obj(obj_name: str) -> ast3.Name;
 

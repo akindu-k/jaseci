@@ -1705,6 +1705,83 @@ impl JacAPIServer.get_api_server_class -> type {
     return JacAPIServer;
 }
 
+"""Default implementation: spawn a base JacAPIServer in a background thread.
+
+    Steps:
+      1. Pick a free port (deterministic per module name).
+      2. Build a base JacAPIServer (NOT plugin-resolved) with port=0 so
+         postinit skips its create_server hook.
+      3. Wire up a vanilla HTTPServer manually using its handler.
+      4. Run serve_forever in a daemon thread.
+      5. Poll /functions until the server is responsive.
+      6. Register the URL via sv_client.register().
+    """
+impl JacAPIServer.ensure_sv_service(module_name: str, base_path: str) -> None {
+    import os;
+    import socket;
+    import time;
+    import threading;
+    import urllib.request;
+    import from http.server { HTTPServer }
+    import from jaclang.runtimelib { sv_client }
+    import from jaclang.runtimelib.server { JacAPIServer as CoreJacAPIServer }
+    if module_name in sv_client._registry {
+        return;
+    }
+    if module_name in sv_client._test_clients {
+        return;
+    }
+    base_port = 18000 + (hash(module_name) % 1000);
+    port = base_port;
+    bind_ok = False;
+    for _ in range(100) {
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM);
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1);
+        try {
+            s.bind(('127.0.0.1', port));
+            s.close();
+            bind_ok = True;
+            break;
+        } except OSError {
+            s.close();
+            port = port + 1;
+        }
+    }
+    if not bind_ok {
+        raise RuntimeError(f"Could not find free port near {base_port}");
+    }
+    srv = CoreJacAPIServer(module_name=module_name, port=0, base_path=base_path);
+    srv.port = port;
+    srv.load_module();
+    handler_class = srv.create_handler();
+    httpd = HTTPServer(('127.0.0.1', port), handler_class);
+    srv.server = httpd;
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True);
+    thread.start();
+    time.sleep(0.05);
+    base_url = f"http://127.0.0.1:{port}";
+    deadline = time.time() + 10.0;
+    healthy = False;
+    while time.time() < deadline {
+        try {
+            with urllib.request.urlopen(f"{base_url}/functions", timeout=1) as resp {
+                if resp.status < 500 {
+                    healthy = True;
+                    break;
+                }
+            }
+        } except Exception {
+            time.sleep(0.05);
+        }
+    }
+    if not healthy {
+        raise RuntimeError(
+            f"sv-to-sv service '{module_name}' did not become healthy at {base_url}"
+        );
+    }
+    sv_client.register(module_name, base_url);
+}
+
 """Create the API server instance.
 
 If the specified port is in use, tries subsequent ports up to max_retries times.
