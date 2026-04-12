@@ -485,7 +485,16 @@ impl CFGBuildPass.exit_bool_expr(nd: uni.BoolExpr) -> None {
         return;
     }
     if len(nd.values) >= 2 {
-        self._wire_bool_operands(nd.values, _bool_is_and(nd), None, None);
+        entry = self._wire_bool_operands(nd.values, _bool_is_and(nd), None, None);
+        # Connect the operand sub-CFG to the nearest enclosing CFG node so
+        # that upstream narrowing (e.g., isinstance guard on an enclosing
+        # if-stmt) flows into the operand chain. Without this edge the
+        # sub-CFG is orphaned and narrowing established before the BoolExpr
+        # cannot be discovered by the backward CFG walk.
+        enclosing_flow = nd.find_parent_of_type(uni.UniCFGNode);
+        if enclosing_flow is not None {
+            self.link_bbs(enclosing_flow, entry);
+        }
     }
 }
 

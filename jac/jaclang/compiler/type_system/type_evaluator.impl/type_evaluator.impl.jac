@@ -3112,7 +3112,13 @@ impl TypeEvaluator._get_type_from_flow_node(
         }
 
         # Fast path: predecessor neither narrows nor assigns this key.
-        if key not in pred.affected_symbols {
+        # CfgExpr nodes are transparent wrappers for short-circuit
+        # operands — they only track symbols relevant to their own
+        # boolean expression, so a missing key does not mean the
+        # variable is unnarrowed.  Walk through them to reach the
+        # enclosing statement-level CFG node where the real narrowing
+        # (e.g., an isinstance guard on an if-stmt) may reside.
+        if key not in pred.affected_symbols and not isinstance(pred, uni.CfgExpr) {
             has_unnarrowed_pred = True;
             continue;
         }

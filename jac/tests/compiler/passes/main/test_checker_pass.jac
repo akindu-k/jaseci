@@ -3419,3 +3419,35 @@ test "type_alias_narrowing" {
         program.errors_had[1].pretty_print()
     );
 }
+
+test "param_isinstance_narrowing" {
+    program = JacProgram();
+    mod = program.compile(
+        os.path.join(CHECKER_FIXTURES, "checker_param_isinstance_narrowing.jac"),
+        options=NO_TC
+    );
+    TypeCheckPass(ir_in=mod, prog=program);
+
+    # Only the unguarded access (test_no_guard) should produce errors.
+    # The guarded cases should all pass thanks to isinstance narrowing.
+    # Error 1: attribute "bark" not found on object
+    # Error 2: cascade — return type Unknown vs expected str
+    assert len(program.errors_had) == 2 , f"Expected exactly 2 type errors, but got " + f"{len(
+        program.errors_had
+    )}:\n" + "\n---\n".join(err.pretty_print() for err in program.errors_had);
+
+    assert_error_pretty_found(
+        """
+        return other.bark();  # <-- Error: object has no attribute "bark"
+                     ^^^^
+    """,
+        program.errors_had[0].pretty_print()
+    );
+    assert_error_pretty_found(
+        """
+        return other.bark();  # <-- Error: object has no attribute "bark"
+        ^^^^^^^^^^^^^^^^^^^^
+    """,
+        program.errors_had[1].pretty_print()
+    );
+}
