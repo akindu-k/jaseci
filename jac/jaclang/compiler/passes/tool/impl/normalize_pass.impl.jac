@@ -480,7 +480,8 @@ impl NormalizePass.enter_enum(nd: uni.Enum) -> None {
             new_kid.append(nd.gen_token(Tok.LBRACE));
             prev_stmt = None;
             for stmt in nd.body {
-                if isinstance(prev_stmt, uni.EnumBlockStmt) and prev_stmt.is_enum_stmt {
+                if isinstance(prev_stmt, uni.EnumBlockStmt)
+                and prev_stmt.is_enum_stmt {
                     new_kid.append(nd.gen_token(Tok.COMMA));
                 }
                 new_kid.append(stmt);
@@ -736,7 +737,11 @@ impl NormalizePass.enter_else_if(nd: uni.ElseIf) -> None {
 
 """Normalize ElseStmt kid list."""
 impl NormalizePass.enter_else_stmt(nd: uni.ElseStmt) -> None {
-    new_kid: list[uni.UniNode] = [nd.gen_token(Tok.KW_ELSE), nd.gen_token(Tok.LBRACE), ];
+    new_kid: list[uni.UniNode] = [
+        nd.gen_token(Tok.KW_ELSE),
+        nd.gen_token(Tok.LBRACE),
+
+    ];
     for stmt in nd.body {
         new_kid.append(stmt);
     }

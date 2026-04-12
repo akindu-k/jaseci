@@ -101,7 +101,9 @@ impl InteropAnalysisPass.enter_import(
                 and not mod_path_str.endswith('.na.jac')
                 and not mod_path_str.endswith('.impl.jac')
             );
-            sv_token = nd._source_context_token() if nd?._source_context_token else None;
+            sv_token = nd._source_context_token()
+                if nd?._source_context_token
+                else None;
             has_sv_prefix = sv_token is not None and sv_token.name == Tok.KW_SERVER;
             if (has_sv_prefix and not native_path and in_server_module and nd.items) {
                 self._register_sv_to_sv_import(nd, module_name);

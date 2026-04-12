@@ -773,10 +773,7 @@ This determines whether hasattr is being used as a guard before accessing the at
 (safe to convert) vs a standalone existence check (not safe to convert).
 """
 impl JacAutoLintPass._bool_expr_has_matching_access(
-    parent: uni.BoolExpr,
-    hasattr_node: uni.FuncCall,
-    obj_expr: uni.Expr,
-    attr_name: str
+    parent: uni.BoolExpr, hasattr_node: uni.FuncCall, obj_expr: uni.Expr, attr_name: str
 ) -> bool {
     for val in parent.values {
         if val is hasattr_node {

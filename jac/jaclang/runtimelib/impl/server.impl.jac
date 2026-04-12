@@ -86,7 +86,9 @@ impl UserManager.authenticate(
 """Validate token and return username."""
 impl UserManager.validate_token(token: str) -> (str | None) {
     self._ensure_connection();
-    cursor = self._conn.execute("SELECT username FROM users WHERE token = ?", (token, ));
+    cursor = self._conn.execute(
+        "SELECT username FROM users WHERE token = ?", (token, )
+    );
     row = cursor.fetchone();
     return row[0] if row else None;
 }
@@ -438,7 +440,9 @@ impl ModuleIntrospector._extract_access_levels -> None {
             }
             sym = source_ast.lookup(name) if source_ast else None;
             is_walker = sym is not None and sym.sym_type == SymbolType.WALKER_ARCH;
-            decl_node = sym.decl.find_parent_of_type(uni.AstAccessNode) if sym else None;
+            decl_node = sym.decl.find_parent_of_type(uni.AstAccessNode)
+                if sym
+                else None;
             if is_walker {
                 walker_access[name] = not is_public(decl_node);
             } else {
@@ -1077,7 +1081,9 @@ impl AuthHandler.update_password(
             meta=Meta(extra={'http_status': 400})
         );
     }
-    result = self.user_manager.update_password(username, current_password, new_password);
+    result = self.user_manager.update_password(
+        username, current_password, new_password
+    );
     if ('error' in result) {
         return TransportResponse.fail(
             code='UPDATE_FAILED',
@@ -1417,7 +1423,9 @@ impl JacAPIServer.create_handler -> type[BaseHTTPRequestHandler] {
                             Jac.send_css(self, css_content);
                             return;
                         } elif assets_file_simple.exists() {
-                            css_content = assets_file_simple.read_text(encoding='utf-8');
+                            css_content = assets_file_simple.read_text(
+                                encoding='utf-8'
+                            );
                             Jac.send_css(self, css_content);
                             return;
                         } else {

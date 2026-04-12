@@ -1,9 +1,6 @@
 """Helper: get type metadata dict."""
 impl Serializer._type_info(`obj: object, `include: bool) -> dict[str, object] {
-    return {
-        '__type__': type(`obj).__name__,
-        '__module__': type(`obj).__module__
-    }
+    return {'__type__': type(`obj).__name__, '__module__': type(`obj).__module__}
         if `include
         else {};
 }

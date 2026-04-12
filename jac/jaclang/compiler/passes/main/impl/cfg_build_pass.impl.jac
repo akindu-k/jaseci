@@ -48,7 +48,9 @@ impl CoalesceBBPass.printgraph_cfg -> str {
     }
     for (key, value) in cfg.items() {
         if value.get('bb_stmts') {
-            stmts = '\\n'.join([stmt.replace('"', '\\"') for stmt in value['bb_stmts']]);
+            stmts = '\\n'.join(
+                [stmt.replace('"', '\\"') for stmt in value['bb_stmts']]
+            );
             dot += f'  {key} [label="BB{key}\\n{stmts}", shape=box];' + "\n";
         } else {
             dot += f'  {key} [label="BB{key}"];' + "\n";

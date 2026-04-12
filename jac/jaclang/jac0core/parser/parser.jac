@@ -148,7 +148,12 @@ import from jaclang.jac0core.unitree {
     GenCompr,
     InnerCompr
 }
-import from jaclang.jac0core.unitree { FString, FormattedValue, MultiString, LambdaExpr }
+import from jaclang.jac0core.unitree {
+    FString,
+    FormattedValue,
+    MultiString,
+    LambdaExpr
+}
 import from jaclang.jac0core.unitree { AwaitExpr, ConcurrentExpr }
 import from jaclang.jac0core.unitree { EdgeOpRef, FilterCompr, AssignCompr }
 import from jaclang.jac0core.unitree { ConnectOp, DisconnectOp }
@@ -421,8 +426,14 @@ obj Parser {
     def error(message: str);
     def error_at(message: str, loc: SourceLoc);
     def warn_at(message: str, loc: SourceLoc);
-    def emit_diag(diag: DiagnosticInfo, loc: SourceLoc | None = None, **kwargs: object);
-    def emit_warn(diag: DiagnosticInfo, loc: SourceLoc | None = None, **kwargs: object);
+    def emit_diag(
+        diag: DiagnosticInfo, loc: SourceLoc | None = None, **kwargs: object
+    );
+
+    def emit_warn(
+        diag: DiagnosticInfo, loc: SourceLoc | None = None, **kwargs: object
+    );
+
     def make_uni_token(tok: Token) -> UniToken;
     def make_name(tok: Token, is_enum_stmt: bool = False) -> Name;
     def make_special_name(tok: Token) -> Name;

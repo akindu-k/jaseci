@@ -212,9 +212,9 @@ class JacWalker {
         `walker: WalkerArchetype,
         expr:
             (
-                list[
-                    (NodeArchetype | EdgeArchetype)
-                ] | list[NodeArchetype] | list[EdgeArchetype] | NodeArchetype | EdgeArchetype | ObjectSpatialPath
+                list[(NodeArchetype | EdgeArchetype)] | list[NodeArchetype] | list[
+                    EdgeArchetype
+                ] | NodeArchetype | EdgeArchetype | ObjectSpatialPath
             ),
         insert_loc: int = -1
     ) -> bool;
@@ -248,9 +248,7 @@ class JacWalker {
         Returns True if walker should continue, False if disengaged.
         """
     static def _visit_node_recursive(
-        warch: WalkerArchetype,
-        `walker: WalkerAnchor,
-        anchor: (NodeAnchor | EdgeAnchor)
+        warch: WalkerArchetype, `walker: WalkerAnchor, anchor: (NodeAnchor | EdgeAnchor)
     ) -> bool;
 
     """Jac's spawn operator feature with recursive DFS semantics.
@@ -291,9 +289,7 @@ class JacWalker {
         Returns True if walker should continue, False if disengaged.
         """
     static async def _async_visit_node_recursive(
-        warch: WalkerArchetype,
-        `walker: WalkerAnchor,
-        anchor: (NodeAnchor | EdgeAnchor)
+        warch: WalkerArchetype, `walker: WalkerAnchor, anchor: (NodeAnchor | EdgeAnchor)
     ) -> bool;
 
     """Jac's async spawn operator feature with recursive DFS semantics.

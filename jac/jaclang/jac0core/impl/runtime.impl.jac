@@ -115,8 +115,7 @@ impl JacAccessValidation.check_access_level(
         return AccessLevel.WRITE;
     }
     if (
-        not no_custom
-        and ((custom_level := `to.archetype.__jac_access__()) is not None)
+        not no_custom and ((custom_level := `to.archetype.__jac_access__()) is not None)
     ) {
         return AccessLevel.cast(custom_level);
     }
@@ -277,9 +276,9 @@ impl JacWalker.`visit(
     `walker: WalkerArchetype,
     expr:
         (
-            list[
-                (NodeArchetype | EdgeArchetype)
-            ] | list[NodeArchetype] | list[EdgeArchetype] | NodeArchetype | EdgeArchetype | ObjectSpatialPath
+            list[(NodeArchetype | EdgeArchetype)] | list[NodeArchetype] | list[
+                EdgeArchetype
+            ] | NodeArchetype | EdgeArchetype | ObjectSpatialPath
         ),
     insert_loc: int = -1
 ) -> bool {
@@ -1127,7 +1126,9 @@ impl JacBasics.jac_import(
             import from jaclang.meta_importer { JacMetaImporter }
             finder = JacMetaImporter();
             spec = finder.find_spec(module_name, None);
-            if (spec and spec.origin and spec.origin.endswith('.jac') and (lng == 'py')) {
+            if (
+                spec and spec.origin and spec.origin.endswith('.jac') and (lng == 'py')
+            ) {
                 spec = None;
             }
             if ((not spec or not spec.origin) and (lng == 'py')) {
@@ -1221,7 +1222,9 @@ impl JacBasics.jac_test(description: str = "") -> Callable {
             test_fun(JacTestCheck());
         }
         test_deco.__name__ = test_fun.__name__;
-        JacTestCheck.add_test(file_path, func_name, test_deco, display_name=description);
+        JacTestCheck.add_test(
+            file_path, func_name, test_deco, display_name=description
+        );
         return test_deco;
     }
     return decorator;
@@ -1302,7 +1305,9 @@ impl JacBasics.run_test(
                         f"\n\n\t\t* Inside {root_dir}/{file} *"
                     );
                     JacTestCheck.reset();
-                    JacRuntimeInterface.jac_import(target=file[:-4], base_path=root_dir);
+                    JacRuntimeInterface.jac_import(
+                        target=file[:-4], base_path=root_dir
+                    );
                     JacTestCheck.run_test(
                         xit, maxfail, verbose, os.path.abspath(file), func_name
                     );
@@ -2197,11 +2202,7 @@ impl JacUtils.create_archetype_from_source(
     }
     import tempfile;
     with tempfile.NamedTemporaryFile(
-        mode='w',
-        suffix='.jac',
-        prefix=(module_name + '_'),
-        dir=base_path,
-        delete=False
+        mode='w', suffix='.jac', prefix=(module_name + '_'), dir=base_path, delete=False
     ) as tmp_file {
         tmp_file_path = tmp_file.name;
         tmp_file.write(source_code);
@@ -2286,7 +2287,9 @@ impl JacUtils.spawn_walker(
     walker_name: str, attributes: (dict | None) = None, module_name: str = '__main__'
 ) -> WalkerArchetype {
     walker_class = JacRuntimeInterface.get_archetype(module_name, walker_name);
-    if (isinstance(walker_class, `type) and issubclass(walker_class, WalkerArchetype)) {
+    if (
+        isinstance(walker_class, `type) and issubclass(walker_class, WalkerArchetype)
+    ) {
         if (attributes is None) {
             attributes = {};
         }

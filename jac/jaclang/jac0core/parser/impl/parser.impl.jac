@@ -97,7 +97,12 @@ import from jaclang.jac0core.unitree {
     GenCompr,
     InnerCompr
 }
-import from jaclang.jac0core.unitree { FString, FormattedValue, MultiString, LambdaExpr }
+import from jaclang.jac0core.unitree {
+    FString,
+    FormattedValue,
+    MultiString,
+    LambdaExpr
+}
 import from jaclang.jac0core.unitree { AwaitExpr, ConcurrentExpr }
 import from jaclang.jac0core.unitree { EdgeOpRef, FilterCompr, AssignCompr }
 import from jaclang.jac0core.unitree { ConnectOp, DisconnectOp }
@@ -1476,15 +1481,9 @@ impl Parser.parse_atomic_chain -> Expr {
             filter_expr = self.parse_filter_compr_bracket();
             kid = [expr, filter_expr];
             expr = AtomTrailer(
-                target=expr,
-                right=filter_expr,
-                is_attr=False,
-                is_null_ok=False,
-                kid=kid
+                target=expr, right=filter_expr, is_attr=False, is_null_ok=False, kid=kid
             );
-        } elif (
-            self.check(TokenKind.NULL_OK) and self.check_peek(TokenKind.LSQUARE)
-        )
+        } elif (self.check(TokenKind.NULL_OK) and self.check_peek(TokenKind.LSQUARE))
         or self.check(TokenKind.LSQUARE) {
             # Parse index or slice: a[x], a?[x], a[x,y], a[1:2], a[::3], etc.
             is_null_ok_index = False;
@@ -1581,7 +1580,9 @@ impl Parser.parse_index_slice -> IndexSlice {
             colon_s2_uni = self.consume_uni(TokenKind.COLON);
             sn_kid.append(colon_s2_uni);
             e2: UniNode | None = None;
-            if not self.check_any(TokenKind.COLON, TokenKind.RSQUARE, TokenKind.COMMA) {
+            if not self.check_any(
+                TokenKind.COLON, TokenKind.RSQUARE, TokenKind.COMMA
+            ) {
                 e2 = self.parse_expression();
                 sn_kid.append(e2);
             }
@@ -2520,9 +2521,7 @@ impl Parser.continue_edge_ref_chain(start_expr: Expr, lsquare_uni: UniToken) -> 
             fcond = FilterCompr(f_type=f_type, compares=[], kid=fcompr_kid);
             end_uni = self.consume_uni(TokenKind.ARROW_R_P2);
             edge_op_ref = EdgeOpRef(
-                filter_cond=fcond,
-                edge_dir=EdgeDir.OUT,
-                kid=[start_uni, fcond, end_uni]
+                filter_cond=fcond, edge_dir=EdgeDir.OUT, kid=[start_uni, fcond, end_uni]
             );
         } elif self.check(TokenKind.ARROW_L_P1) {
             self.advance();
@@ -2926,11 +2925,7 @@ impl Parser.parse_compr_clause -> InnerCompr {
         kid.append(ifs[i]);
     }
     return InnerCompr(
-        is_async=is_async,
-        target=target,
-        collection=iter_expr,
-        conditional=ifs,
-        kid=kid
+        is_async=is_async, target=target, collection=iter_expr, conditional=ifs, kid=kid
     );
 }
 
@@ -3776,9 +3771,7 @@ impl Parser.parse_code_block_stmts -> list {
             # In Jac, semstrings go before the declaration, not inside.
             is_docstring = False;
             if (
-                not checked_first
-                and isinstance(stmt, ExprStmt)
-                and not stmt.in_fstring
+                not checked_first and isinstance(stmt, ExprStmt) and not stmt.in_fstring
             ) {
                 if isinstance(stmt.expr, String) {
                     is_docstring = True;
@@ -4163,7 +4156,9 @@ impl Parser.parse_for_stmt{
         if is_async {
             kid.append(async_uni);
         }
-        kid.extend([for_uni, init_assign, to_uni, end_val, by_uni, step_assign, lb_uni]);
+        kid.extend(
+            [for_uni, init_assign, to_uni, end_val, by_uni, step_assign, lb_uni]
+        );
         kid.extend(body);
         kid.append(rb_uni);
         if else_body {
@@ -6216,9 +6211,7 @@ impl Parser.parse_switch_case -> SwitchCase {
     }
     colon_uni = self.consume_uni(TokenKind.COLON);
     body: list = [];
-    while not self.check_any(
-        TokenKind.KW_CASE, TokenKind.KW_DEFAULT, TokenKind.RBRACE
-    )
+    while not self.check_any(TokenKind.KW_CASE, TokenKind.KW_DEFAULT, TokenKind.RBRACE)
     and not self.at_end() {
         before = self.pos;
         stmt = self.parse_statement();

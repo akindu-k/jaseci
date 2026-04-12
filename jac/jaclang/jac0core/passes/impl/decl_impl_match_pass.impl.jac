@@ -141,9 +141,7 @@ impl DeclImplMatchPass.connect_impls(
             continue;
         }
         if (
-            not isinstance(
-                (valid_decl := decl_node.name_of), uni.AstImplNeedingNode
-            )
+            not isinstance((valid_decl := decl_node.name_of), uni.AstImplNeedingNode)
             or not (valid_decl.sym_tab and sym.decl.name_of.sym_tab)
         ) {
             raise self.ice(
