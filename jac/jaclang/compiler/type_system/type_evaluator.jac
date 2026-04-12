@@ -81,6 +81,11 @@ import from jaclang.jac0core.diagnostics {
     E1097,
     E1098,
     E1099,
+    E1100,
+    E1101,
+    E1102,
+    E1103,
+    E1104,
     W1100
 }
 
@@ -122,6 +127,8 @@ obj PrefetchedTypes {
         node_class: types.ClassType | None = None,
         walker_class: types.ClassType | None = None,
         jsx_element_class: types.ClassType | None = None,
+        # Intrinsic element prop types (from dom_types.pyi)
+        html_common_props_class: types.ClassType | None = None,
         # Fixed-width numeric types
         i8_class: types.ClassType | None = None,
         u8_class: types.ClassType | None = None,
@@ -498,6 +505,23 @@ obj TypeEvaluator {
         is_constructor_call: bool = False
     ) -> dict[str, TypeBase];
 
+    # -------------------------------------------------------------------------
+    # JSX prop validation
+    # -------------------------------------------------------------------------
+    def _validate_jsx_props(
+        expr: uni.JsxElement, expected_type: TypeBase | None = None
+    ) -> None;
+
+    def _resolve_jsx_component_type(
+        name: uni.JsxElementName
+    ) -> types.FunctionType | None;
+
+    def _get_intrinsic_props_type(tag_name: str) -> types.ClassType | None;
+    def _validate_component_jsx_props(
+        expr: uni.JsxElement, component_name: str
+    ) -> None;
+
+    def _validate_intrinsic_jsx_props(expr: uni.JsxElement, tag_name: str) -> None;
     # -------------------------------------------------------------------------
     # TypeVar scope validation (Pyright: validateTypeVarUsage)
     # -------------------------------------------------------------------------

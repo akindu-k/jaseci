@@ -117,6 +117,11 @@ impl TypeCheckPass.exit_func_call(self: TypeCheckPass, nd: uni.FuncCall) -> None
     }
 }
 
+"""Handle JSX element node — validates props against component signature or intrinsic types."""
+impl TypeCheckPass.exit_jsx_element(self: TypeCheckPass, nd: uni.JsxElement) -> None {
+    self.evaluator.get_type_of_expression(nd);
+}
+
 """Handle the binary expression node."""
 impl TypeCheckPass.exit_binary_expr(self: TypeCheckPass, nd: uni.BinaryExpr) -> None {
     self.evaluator.get_type_of_expression(nd);

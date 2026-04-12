@@ -448,18 +448,34 @@ impl TypeEvaluator._get_type_of_expression_core(
         case uni.LambdaExpr():
             return_type: TypeBase = types.UnknownType();
             parameters: list[types.Parameter] = [];
+            # Bidirectional inference: if expected_type is a FunctionType,
+            # seed untyped lambda params from the expected callable signature.
+            expected_func: types.FunctionType | None = None;
+            if (
+                isinstance(expected_type, types.FunctionType)
+                and expected_type.parameters
+            ) {
+                expected_func = expected_type;
+            }
             if isinstance(expr.signature, uni.FuncSignature) {
                 if isinstance(expr.signature.return_type, uni.Expr) {
                     return_type = self._convert_to_instance(
                         self.get_type_of_expression(expr.signature.return_type)
                     );
                 }
-                for param in expr.signature.get_parameters() {
+                sig_params = expr.signature.get_parameters();
+                for (idx, param) in enumerate(sig_params) {
                     param_type: TypeBase | None = None;
                     if param.type_tag {
                         param_type = self._convert_to_instance(
                             self.get_type_of_expression(param.type_tag.tag)
                         );
+                    } elif (
+                        expected_func
+                        and expected_func.parameters
+                        and idx < len(expected_func.parameters)
+                    ) {
+                        param_type = expected_func.parameters[idx].param_type;
                     }
                     parameters.append(
                         types.Parameter(
@@ -483,6 +499,7 @@ impl TypeEvaluator._get_type_of_expression_core(
 
         case uni.JsxElement():
             if self.prefetch and self.prefetch.jsx_element_class {
+                self._validate_jsx_props(expr, expected_type);
                 return self._convert_to_instance(self.prefetch.jsx_element_class);
             }
 
@@ -2865,6 +2882,7 @@ impl TypeEvaluator._prefetch_types{
     self.prefetch.node_class = get_jac_builtin_class("Node");
     self.prefetch.walker_class = get_jac_builtin_class("Walker");
     self.prefetch.jsx_element_class = get_jac_builtin_class("JsxElement");
+    self.prefetch.html_common_props_class = get_jac_builtin_class("_HtmlCommonProps");
     # Fixed-width numeric types
     self.prefetch.i8_class = get_jac_builtin_class("i8");
     self.prefetch.u8_class = get_jac_builtin_class("u8");
@@ -2959,15 +2977,20 @@ impl TypeEvaluator.postinit -> None {
         self._JAC_BUILTINS_STUB_FILE_PATH
     );
     self.dom_types_module = self._load_stub_module(self._DOM_TYPES_STUB_FILE_PATH);
-    # This avoids parent_scope chaining which can cause recursion issues
+    # Merge jac_builtins into builtins. Override imported symbols from builtins.pyi
+    # (e.g. Callable, Any, Protocol) with the jac_builtins.pyi versions so they
+    # pass the lookup_symtab import filter (builtins.pyi marks them as internal
+    # imports, but jac_builtins.pyi intentionally re-exports them for user code).
     for (name, sym) in self.jac_builtins_module.names_in_scope.items() {
-        if name not in self.builtins_module.names_in_scope {
+        existing = self.builtins_module.names_in_scope.get(name);
+        if existing is None or existing.imported {
             self.builtins_module.names_in_scope[name] = sym;
         }
     }
     # Merge DOM types (Event, ChangeEvent, HTMLElement, etc.) into builtins
     for (name, sym) in self.dom_types_module.names_in_scope.items() {
-        if name not in self.builtins_module.names_in_scope {
+        existing = self.builtins_module.names_in_scope.get(name);
+        if existing is None or existing.imported {
             self.builtins_module.names_in_scope[name] = sym;
         }
     }

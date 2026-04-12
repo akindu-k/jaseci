@@ -3207,7 +3207,9 @@ test "root_cause_9_any_in_union" {
         if e.loc and 396 <= e.loc.first_line <= 415
     ];
     # CFG narrowing resolved 1 of 3 any-in-union errors.
-    assert len(rc9_errors) == 2 , f"Expected 2 any-in-union errors, got {len(
+    # 4 errors: 2 primary (E1099 attribute missing from Any) + 2 cascading
+    # (E1002 unknown return, E1053 unknown->Sized) from improved Any resolution.
+    assert len(rc9_errors) == 4 , f"Expected 4 any-in-union errors, got {len(
         rc9_errors
     )}:\n" + "\n---\n".join(e.pretty_print() for e in rc9_errors);
 }
@@ -3272,8 +3274,8 @@ test "root_causes_total_error_count" {
     );
     TypeCheckPass(ir_in=mod, prog=program);
 
-    # RC9 dropped 3→2, RC5 dropped 2→0. Total: 34
-    assert len(program.errors_had) == 34 , f"Expected 34 total errors, got {len(
+    # RC9 now 4 (was 2 before Callable/Any resolution fix), RC5 dropped 2→0. Total: 36
+    assert len(program.errors_had) == 36 , f"Expected 36 total errors, got {len(
         program.errors_had
     )}:\n" + "\n---\n".join(e.pretty_print() for e in program.errors_had);
 }
@@ -3449,5 +3451,116 @@ test "param_isinstance_narrowing" {
         ^^^^^^^^^^^^^^^^^^^^
     """,
         program.errors_had[1].pretty_print()
+    );
+}
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# JSX type safety tests (Steps 1-6)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+test "jsx_step1_callable_annotation" {
+    path = os.path.join(CHECKER_FIXTURES, "checker_jsx_step1_callable_annotation.jac");
+    program = JacProgram();
+    mod = program.compile(path, options=NO_TC);
+    TypeCheckPass(ir_in=mod, prog=program);
+
+    e1053_errors = [
+        e
+        for e in program.errors_had
+        if e.code and e.code.code == "E1053"
+    ];
+    assert len(e1053_errors) >= 1 , f"Expected E1053 for int->Callable mismatch, got {len(
+        e1053_errors
+    )} errors:\n" + "\n---\n".join(err.pretty_print() for err in program.errors_had);
+}
+
+test "jsx_step2_handler_aliases" {
+    path = os.path.join(CHECKER_FIXTURES, "checker_jsx_step2_handler_aliases.jac");
+    program = JacProgram();
+    mod = program.compile(path, options=NO_TC);
+    TypeCheckPass(ir_in=mod, prog=program);
+
+    e1053_errors = [
+        e
+        for e in program.errors_had
+        if e.code and e.code.code == "E1053"
+    ];
+    assert len(e1053_errors) >= 1 , f"Expected E1053 for bad_handler->MouseEventHandler mismatch, got {len(
+        e1053_errors
+    )} errors:\n" + "\n---\n".join(err.pretty_print() for err in program.errors_had);
+}
+
+test "jsx_step3_jsx_prop_check" {
+    path = os.path.join(CHECKER_FIXTURES, "checker_jsx_step3_jsx_prop_check.jac");
+    program = JacProgram();
+    mod = program.compile(path, options=NO_TC);
+    TypeCheckPass(ir_in=mod, prog=program);
+
+    e1100_errors = [
+        e
+        for e in program.errors_had
+        if e.code and e.code.code == "E1100"
+    ];
+    assert len(e1100_errors) >= 1 , f"Expected E1100 for JSX prop type mismatch, got {len(
+        e1100_errors
+    )} E1100 errors. All errors:\n" + "\n---\n".join(
+        f"{err.code.code if err.code else '?'}: {err.pretty_print()}"
+        for err in program.errors_had
+    );
+}
+
+test "jsx_step4_lambda_inference" {
+    path = os.path.join(CHECKER_FIXTURES, "checker_jsx_step4_lambda_inference.jac");
+    program = JacProgram();
+    mod = program.compile(path, options=NO_TC);
+    TypeCheckPass(ir_in=mod, prog=program);
+
+    e1032_errors = [
+        e
+        for e in program.errors_had
+        if e.code and e.code.code == "E1032"
+    ];
+    assert len(e1032_errors) >= 1 , f"Expected E1032 for e.nonexistent on inferred MouseEvent, got {len(
+        e1032_errors
+    )} E1032 errors. All errors:\n" + "\n---\n".join(
+        f"{err.code.code if err.code else '?'}: {err.pretty_print()}"
+        for err in program.errors_had
+    );
+}
+
+test "jsx_step5_intrinsic_props" {
+    path = os.path.join(CHECKER_FIXTURES, "checker_jsx_step5_intrinsic_props.jac");
+    program = JacProgram();
+    mod = program.compile(path, options=NO_TC);
+    TypeCheckPass(ir_in=mod, prog=program);
+
+    e1103_errors = [
+        e
+        for e in program.errors_had
+        if e.code and e.code.code == "E1103"
+    ];
+    assert len(e1103_errors) >= 1 , f"Expected E1103 for intrinsic prop type mismatch, got {len(
+        e1103_errors
+    )} E1103 errors. All errors:\n" + "\n---\n".join(
+        f"{err.code.code if err.code else '?'}: {err.pretty_print()}"
+        for err in program.errors_had
+    );
+}
+
+test "jsx_step6_spread_props" {
+    path = os.path.join(CHECKER_FIXTURES, "checker_jsx_step6_spread_props.jac");
+    program = JacProgram();
+    mod = program.compile(path, options=NO_TC);
+    TypeCheckPass(ir_in=mod, prog=program);
+
+    e1104_errors = [
+        e
+        for e in program.errors_had
+        if e.code and e.code.code == "E1104"
+    ];
+    assert len(e1104_errors) >= 1 , f"Expected E1104 for non-dict spread, got {len(
+        e1104_errors
+    )} E1104 errors. All errors:\n" + "\n---\n".join(
+        f"{err.code.code if err.code else '?'}: {err.pretty_print()}"
+        for err in program.errors_had
     );
 }
