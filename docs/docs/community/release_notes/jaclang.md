@@ -4,6 +4,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.13.6 (Unreleased)
 
+- 1 internal refactor.
 - **Feat: `to cl:` / `to sv:` / `to na:` Section Headers**: Module-level section headers set the default client/server/native context for every following statement until the next header; the legacy `cl { ... }` / `sv { ... }` / `na { ... }` braced blocks now emit a deprecation warning.
 - **Format: `to cl:` / `to sv:` / `to na:` Section Headers**: `jac format` now emits section headers on their own line with a blank-line separator and the body dedented to module scope, and the parser models them as implicit `ClientBlock` / `ServerBlock` / `NativeBlock` so existing codegen and analysis passes work on sections unchanged.
 - **Type Checker: Unannotated Variables Widen on Reassignment**: The classic `x = None; ...; x = value;` sentinel pattern no longer errors with `E1001: Cannot assign T to NoneType`. Reassigning any unannotated variable now widens its inferred type, matching Pyright. Variables with an explicit annotation (`x: T = ...`) still enforce the declared type.
