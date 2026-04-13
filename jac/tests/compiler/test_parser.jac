@@ -276,7 +276,10 @@ cl {
     client_block = bd[2];
     assert isinstance(client_block, uni.ClientBlock);
     assert len(client_block.body) == 2;
-    assert [type(stmt).__name__ for stmt in client_block.body] == ["GlobalVars", "Test"];
+    assert [type(stmt).__name__ for stmt in client_block.body] == [
+        "GlobalVars",
+        "Test"
+    ];
     assert all(
         stmt.code_context == CodeContext.CLIENT
         for stmt in client_block.body
@@ -354,6 +357,130 @@ cl test my_test {}
         for stmt in bd
         if isinstance(stmt, uni.ContextAwareNode)
     );
+}
+
+test "to section headers" {
+    # Basic: 'to cl:' / 'to sv:' / 'to na:' tag subsequent stmts until next header
+    source = """
+to sv:
+def sv_fn() -> int { return 1; }
+to cl:
+def cl_fn() -> int { return 2; }
+to na:
+def na_fn() -> int { return 3; }
+to sv:
+def sv_fn2() -> int { return 4; }
+""";
+    prog = JacProgram();
+    mod = prog.parse_str(source, "test.jac");
+    assert not prog.errors_had;
+    bd = mod.body;
+    ctxs = [
+        stmt.code_context
+        for stmt in bd
+        if isinstance(stmt, uni.ContextAwareNode)
+    ];
+    assert ctxs == [
+        CodeContext.SERVER,
+        CodeContext.CLIENT,
+        CodeContext.NATIVE,
+        CodeContext.SERVER
+    ];
+
+    # Explicit cl/sv/na prefix on a single stmt overrides the active section
+    source = """
+to cl:
+def cl_a() -> int { return 1; }
+sv def sv_b() -> int { return 2; }
+def cl_c() -> int { return 3; }
+""";
+    prog = JacProgram();
+    mod = prog.parse_str(source, "test.jac");
+    assert not prog.errors_had;
+    bd = mod.body;
+    ctxs = [
+        stmt.code_context
+        for stmt in bd
+        if isinstance(stmt, uni.ContextAwareNode)
+    ];
+    assert ctxs == [CodeContext.CLIENT, CodeContext.SERVER, CodeContext.CLIENT];
+
+    # cl {} / sv {} / na {} braced blocks still win inside their own scope, and
+    # after the block closes the active section resumes.
+    source = """
+to sv:
+def sv_a() -> int { return 1; }
+cl {
+    def cl_b() -> int { return 2; }
+}
+def sv_c() -> int { return 3; }
+""";
+    prog = JacProgram();
+    mod = prog.parse_str(source, "test.jac");
+    assert not prog.errors_had;
+    bd = mod.body;
+    assert isinstance(bd[1], uni.ClientBlock);
+    assert bd[0].code_context == CodeContext.SERVER;
+    assert bd[2].code_context == CodeContext.SERVER;
+    assert all(
+        stmt.code_context == CodeContext.CLIENT
+        for stmt in bd[1].body
+        if isinstance(stmt, uni.ContextAwareNode)
+    );
+
+    # A 'to X:' header at EOF with no following stmt is consumed silently.
+    source = """
+def a() -> int { return 1; }
+to cl:
+""";
+    prog = JacProgram();
+    mod = prog.parse_str(source, "test.jac");
+    assert not prog.errors_had;
+    assert mod.body[0].code_context == CodeContext.SERVER;
+}
+
+test "cl/sv/na braced-block deprecation warning" {
+    # Braced block form emits W0064 for each block
+    source = """
+cl { def a() -> int { return 1; } }
+sv { def b() -> int { return 2; } }
+na { def c() -> int { return 3; } }
+""";
+    prog = JacProgram();
+    prog.parse_str(source, "test.jac");
+    assert not prog.errors_had;
+    w_codes: list[str] = [];
+    for w in prog.warnings_had {
+        c = w.code;
+        if c is not None {
+            w_codes.append(c.code);
+        }
+    }
+    assert w_codes.count("W0064") == 3;
+
+    # Section headers and single-statement prefix forms do not warn
+    source = """
+to cl:
+def a() -> int { return 1; }
+to sv:
+def b() -> int { return 2; }
+to na:
+def c() -> int { return 3; }
+cl def d() -> int { return 4; }
+sv def e() -> int { return 5; }
+na def f() -> int { return 6; }
+""";
+    prog = JacProgram();
+    prog.parse_str(source, "test.jac");
+    assert not prog.errors_had;
+    w_codes: list[str] = [];
+    for w in prog.warnings_had {
+        c = w.code;
+        if c is not None {
+            w_codes.append(c.code);
+        }
+    }
+    assert "W0064" not in w_codes;
 }
 
 test "anonymous ability decl" {

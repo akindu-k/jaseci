@@ -47,7 +47,8 @@ import from jaclang.jac0core.diagnostics {
     E0051,
     W0060,
     W0061,
-    W0063
+    W0063,
+    W0064
 }
 import from jaclang.jac0core.unitree { Name, String, Int, Float, Bool, Null }
 import from jaclang.jac0core.unitree {
@@ -401,7 +402,9 @@ obj Parser {
         file_path: str = "<input>",
         source_code: str = "",
         source: Source | None = None,
-        prog: object | None = None;
+        prog: object | None = None,
+        section_context: CodeContext | None = None,
+        _explicit_section: bool = False;
 
     def current -> Token;
     def peek(offset: int = 1) -> Token;
