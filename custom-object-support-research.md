@@ -5,6 +5,7 @@
 When a Jac walker has a field typed as a custom `obj`, the generated FastAPI endpoint does not produce a proper nested JSON schema. Instead, the custom type falls through to `str` (the default in `_get_python_type`), resulting in a flat, incorrect request body.
 
 **Example:**
+
 ```jac
 walker mywalker {
     has user: User;
@@ -25,6 +26,7 @@ obj User {
 The type information flows through 4 stages, and the problem spans all of them:
 
 ### Stage 1: Introspection (`introspect_walker`)
+
 **File:** `jac/jaclang/runtimelib/impl/server.impl.jac:778-823`
 
 ```
@@ -38,20 +40,25 @@ get_type_hints(walker_cls.init)  ->  type_obj (actual Python type)
 **Problem:** The actual `type_obj` (the Python class for `User`) is discarded. Only the string name `"User"` is returned. This is where the type information is lost.
 
 ### Stage 2: Parameter Creation (`create_walker_parameters`)
+
 **File:** `jac-scale/jac_scale/impl/serve.endpoints.impl.jac:49-89`
 
 Creates `APIParameter` objects with `data_type: str = "User"`. The `APIParameter.data_type` field is a plain string -- there's no way to carry the actual type object.
 
 ### Stage 3: Type Resolution (`_get_python_type`)
+
 **File:** `jac-scale/jac_scale/jserver/impl/jfast_api.impl.jac:188-208`
 
 Maps type strings to Python types via a hardcoded dictionary:
+
 ```python
 {'str': str, 'int': int, 'float': float, 'bool': bool, 'list': list, 'dict': dict, 'object': dict}
 ```
+
 `"User"` is not in this map, so it defaults to `str`.
 
 ### Stage 4: Pydantic Model Generation (`generate_body_model`)
+
 **File:** `jac-scale/jac_scale/jserver/impl/jfast_api.impl.jac:282-313`
 
 Calls `_get_python_type(param.data_type)` to get the Python type, then uses `create_model('RequestBody', **fields)` to build a dynamic Pydantic model. Since `User` resolved to `str`, the generated model is wrong.
@@ -85,6 +92,7 @@ The `$ref`/`$type` pattern from PR #5387 could be reused on the response model s
 ## Proposed Approach
 
 ### Design Principles
+
 1. **Preserve actual type objects** through the pipeline instead of just strings
 2. **Recursively generate Pydantic models** from Jac `obj` definitions
 3. **Cache generated models** to handle recursive types and avoid duplication
@@ -295,6 +303,7 @@ The `__jac_base__` check excludes base archetypes (Root, GenericEdge, etc.) so w
 ## Handling Edge Cases
 
 ### 1. Recursive / Self-referencing Types
+
 ```jac
 obj TreeNode {
     has value: str;
@@ -305,6 +314,7 @@ obj TreeNode {
 **Solution:** The model cache (`self._models`) with placeholder registration handles this. When `_build_pydantic_model` encounters `TreeNode` while building `TreeNode`, it returns the placeholder. Pydantic's `model_rebuild()` can resolve forward references after all models are registered.
 
 ### 2. Optional Custom Objects
+
 ```jac
 walker mywalker {
     has user: User | None = None;
@@ -314,6 +324,7 @@ walker mywalker {
 **Solution:** The `_resolve_type` method handles `Union` types (which `X | None` desugars to). It resolves each union member individually, so `User` gets converted to a Pydantic model and the result is `Optional[UserModel]`.
 
 ### 3. Collections of Custom Objects
+
 ```jac
 walker mywalker {
     has users: list[User];
@@ -324,6 +335,7 @@ walker mywalker {
 **Solution:** The `_resolve_type` method handles `list[X]` and `dict[K, V]` generics by recursively resolving type arguments.
 
 ### 4. Nested Custom Objects
+
 ```jac
 obj Address {
     has street: str;
@@ -339,6 +351,7 @@ walker mywalker {
 ```
 
 **Solution:** `_build_pydantic_model` calls `_resolve_type` for each field, which recursively builds Pydantic models for nested `obj` types. The expected schema:
+
 ```json
 {
   "user": {
@@ -352,6 +365,7 @@ walker mywalker {
 ```
 
 ### 5. Node/Edge/Walker Types as Parameters
+
 ```jac
 walker mywalker {
     has target_node: MyNode;
@@ -361,6 +375,7 @@ walker mywalker {
 **Decision:** Node/Edge/Walker archetypes should probably NOT be expanded into Pydantic models (they have internal Jac machinery like anchors, paths, etc.). Instead, they should be accepted as their serialized ID (string UUID) and resolved from the context memory. This aligns with PR #5387's `$ref` pattern.
 
 ### 6. Enum Types
+
 ```jac
 enum Color { RED, GREEN, BLUE }
 walker mywalker {
