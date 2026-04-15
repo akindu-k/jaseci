@@ -757,7 +757,6 @@ impl ModuleIntrospector.introspect_callable(
         type_obj = type_hints.get(name, Any);
         params[name] = {
             'type': getattr(type_obj, '__name__', str(type_obj)),
-            'type_obj': type_obj,
             'required': (param.default == inspect.Parameter.empty),
             'default': None
                 if (param.default == inspect.Parameter.empty)
@@ -798,7 +797,6 @@ impl ModuleIntrospector.introspect_walker(
             # Fall back to parameter annotation
             annotation = param.annotation;
             if (annotation != inspect.Parameter.empty) {
-                type_obj = annotation;
                 type_name = getattr(annotation, '__name__', str(annotation));
             } else {
                 type_name = 'Any';
@@ -806,7 +804,6 @@ impl ModuleIntrospector.introspect_walker(
         }
         fields[name] = {
             'type': type_name,
-            'type_obj': type_obj,
             'required': (param.default == inspect.Parameter.empty),
             'default': None
                 if (param.default == inspect.Parameter.empty)
@@ -815,7 +812,6 @@ impl ModuleIntrospector.introspect_walker(
     }
     fields['_jac_spawn_node'] = {
         'type': 'str (node ID, optional)',
-        'type_obj': str,
         'required': False,
         'default': 'root'
     };
