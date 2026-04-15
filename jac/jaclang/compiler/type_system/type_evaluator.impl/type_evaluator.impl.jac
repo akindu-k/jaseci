@@ -273,7 +273,6 @@ impl TypeEvaluator._get_type_of_expression_core(
                         isinstance(expected_type, types.ClassType)
                         and self.prefetch.tuple_class
                         and expected_type.shared == self.prefetch.tuple_class.shared
-                        and expected_type.private
                         and expected_type.private.type_args
                         and elem_types_t
                     ) {
@@ -448,18 +447,34 @@ impl TypeEvaluator._get_type_of_expression_core(
         case uni.LambdaExpr():
             return_type: TypeBase = types.UnknownType();
             parameters: list[types.Parameter] = [];
+            # Bidirectional inference: if expected_type is a FunctionType,
+            # seed untyped lambda params from the expected callable signature.
+            expected_func: types.FunctionType | None = None;
+            if (
+                isinstance(expected_type, types.FunctionType)
+                and expected_type.parameters
+            ) {
+                expected_func = expected_type;
+            }
             if isinstance(expr.signature, uni.FuncSignature) {
                 if isinstance(expr.signature.return_type, uni.Expr) {
                     return_type = self._convert_to_instance(
                         self.get_type_of_expression(expr.signature.return_type)
                     );
                 }
-                for param in expr.signature.get_parameters() {
+                sig_params = expr.signature.get_parameters();
+                for (idx, param) in enumerate(sig_params) {
                     param_type: TypeBase | None = None;
                     if param.type_tag {
                         param_type = self._convert_to_instance(
                             self.get_type_of_expression(param.type_tag.tag)
                         );
+                    } elif (
+                        expected_func
+                        and expected_func.parameters
+                        and idx < len(expected_func.parameters)
+                    ) {
+                        param_type = expected_func.parameters[idx].param_type;
                     }
                     parameters.append(
                         types.Parameter(
@@ -476,6 +491,10 @@ impl TypeEvaluator._get_type_of_expression_core(
                 if isinstance(return_type, types.UnknownType) {
                     return_type = body_type;
                 }
+            } elif isinstance(return_type, types.UnknownType) {
+                # Block-body lambda: infer return type from return statements,
+                # defaulting to NoneType when no return-with-value is present.
+                return_type = self._infer_lambda_block_return_type(expr.body);
             }
             return types.FunctionType(
                 func_name="<lambda>", return_type=return_type, parameters=parameters,
@@ -483,6 +502,7 @@ impl TypeEvaluator._get_type_of_expression_core(
 
         case uni.JsxElement():
             if self.prefetch and self.prefetch.jsx_element_class {
+                self._validate_jsx_props(expr, expected_type);
                 return self._convert_to_instance(self.prefetch.jsx_element_class);
             }
 
@@ -528,6 +548,14 @@ impl TypeEvaluator._get_type_of_expression_core(
                 # Member lookup on (narrowed) base type
                 assert isinstance(expr.right, uni.Name);
                 if isinstance(base_type, types.ModuleType) {
+                    # Foreign-source modules (JS/TS/asset/etc.) are opaque
+                    # to the Jac type system; any attribute access yields
+                    # gradual Any rather than looking up a symbol table
+                    # that doesn't (and can't) exist.
+                    if base_type.is_external {
+                        expr.right.type = types.AnyType();
+                        return expr.right.type;
+                    }
                     # getTypeOfMemberAccessWithBaseType()
                     if sym := type_utils.lookup_symtab(
                         base_type.symbol_table, expr.right.value, self.builtins_module
@@ -615,7 +643,6 @@ impl TypeEvaluator._get_type_of_expression_core(
                     if not self.is_any_type(lookup_type) {
                         _has_tvars = (
                             isinstance(lookup_type, types.ClassType)
-                            and lookup_type.private is not None
                             and lookup_type.private.type_args is not None
                             and any(
                                 isinstance(a, types.TypeVarType)
@@ -646,7 +673,6 @@ impl TypeEvaluator._get_type_of_expression_core(
                     if (
                         self.prefetch.final_class
                         and base_type.shared == self.prefetch.final_class.shared
-                        and base_type.private is not None
                         and base_type.private.type_args
                     ) {
                         inner = base_type.private.type_args[0];
@@ -941,6 +967,14 @@ impl TypeEvaluator._get_type_of_expression_core(
                     return types.UnknownType();
                 } elif isinstance(base_type, types.TypeVarType) {
                     attr_name = expr.right.value;
+                    # ParamSpec.args / ParamSpec.kwargs -- the only attributes
+                    # a ParamSpec exposes (used in `*args: _P.args, **kwargs:
+                    # _P.kwargs` signatures). Full ParamSpecArgs/Kwargs
+                    # modelling is future work; returning AnyType is gradually
+                    # safe and silences bogus E1031 on typeshed stubs.
+                    if base_type.is_param_spec and attr_name in ("args", "kwargs") {
+                        return types.AnyType();
+                    }
                     # Constrained TypeVar - check all constraint types
                     if base_type.constraints {
                         found_member: Any = None;
@@ -1133,7 +1167,6 @@ impl TypeEvaluator._get_type_of_expression_core(
                 # Use class_name check instead of shared instance comparison for cache compatibility.
                 if (
                     isinstance(base_type, types.ClassType)
-                    and base_type.shared is not None
                     and base_type.shared.is_builtin_class
                     and base_type.shared.class_name == "_SpecialForm"
                 ) {
@@ -2173,9 +2206,9 @@ impl TypeEvaluator._assign_class(
     # Check if src class is a subclass of dest class.
     if self.is_sub_class(dest_type, src_type) {
         # If dest has type_args, verify src supplies compatible args through MRO.
-        if dest_type.private and dest_type.private.type_args {
+        if dest_type.private.type_args {
             specialized = type_utils.specialize_for_base_class(src_type, dest_type);
-            src_args = specialized.private.type_args if specialized.private else [];
+            src_args = specialized.private.type_args;
             if src_args and len(src_args) == len(dest_type.private.type_args) {
                 for i in range(len(src_args)) {
                     src_arg = self._convert_to_instance(src_args[i]);
@@ -2223,7 +2256,7 @@ impl TypeEvaluator._assign_class(
     is_protocol = False;
     # Check 1: Direct Protocol/_SpecialForm base class from builtins
     for base_cls in dest_type.shared.base_classes {
-        if not isinstance(base_cls, types.ClassType) or base_cls.shared is None {
+        if not isinstance(base_cls, types.ClassType) or base_cls._shared is None {
             continue;
         }
         # Exact match with prefetched Protocol class
@@ -2252,7 +2285,7 @@ impl TypeEvaluator._assign_class(
     # Check 3: Check MRO for Protocol/_SpecialForm from stdlib (handles inheritance)
     if not is_protocol {
         for mro_cls in dest_type.shared.mro {
-            if isinstance(mro_cls, types.ClassType) and mro_cls.shared {
+            if isinstance(mro_cls, types.ClassType) {
                 if (
                     mro_cls.shared.is_builtin_class
                     or mro_cls.shared.is_from_stdlib_stub
@@ -2403,34 +2436,59 @@ impl TypeEvaluator.is_any_type(ty: TypeBase) -> bool {
     return False;
 }
 
+"""Match a typing special form loaded from any stdlib typing stub.
+
+Prefetch pins a single definition (e.g. typing.ParamSpec) but typeshed's
+typing_extensions.pyi declares its own ParamSpec/TypeVar/TypeVarTuple
+classes. Python unifies them at runtime; we match by canonical name
+constrained to stdlib stubs so user classes can't collide.
+"""
+impl TypeEvaluator._is_typing_special_form(ty: TypeBase, name: str) -> bool {
+    return (
+        isinstance(ty, types.ClassType)
+        and ty.shared is not None
+        and ty.shared.class_name == name
+        and ty.shared.is_from_stdlib_stub
+    );
+}
+
 """Check if a type is the TypeVar class itself (not a TypeVarType instance)."""
 impl TypeEvaluator.is_typevar_class(ty: TypeBase) -> bool {
-    return (
+    if (
         self.prefetch
         and self.prefetch.type_var_class
         and isinstance(ty, types.ClassType)
         and ty.shared == self.prefetch.type_var_class.shared
-    );
+    ) {
+        return True;
+    }
+    return self._is_typing_special_form(ty, "TypeVar");
 }
 
 """Check if a type is the ParamSpec class itself (not a TypeVarType instance)."""
 impl TypeEvaluator.is_paramspec_class(ty: TypeBase) -> bool {
-    return (
+    if (
         self.prefetch
         and self.prefetch.param_spec_class
         and isinstance(ty, types.ClassType)
         and ty.shared == self.prefetch.param_spec_class.shared
-    );
+    ) {
+        return True;
+    }
+    return self._is_typing_special_form(ty, "ParamSpec");
 }
 
 """Check if a type is the TypeVarTuple class itself (not a TypeVarType instance)."""
 impl TypeEvaluator.is_type_var_tuple_class(ty: TypeBase) -> bool {
-    return (
+    if (
         self.prefetch
         and self.prefetch.type_var_tuple_class
         and isinstance(ty, types.ClassType)
         and ty.shared == self.prefetch.type_var_tuple_class.shared
-    );
+    ) {
+        return True;
+    }
+    return self._is_typing_special_form(ty, "TypeVarTuple");
 }
 
 """Assign the source type to the destination type."""
@@ -2645,7 +2703,7 @@ impl TypeEvaluator.assign_type(src_type: TypeBase, dest_type: TypeBase) -> bool 
             if dest_type.shared == self.prefetch.type_class.shared {
                 if src_type.is_instantiable_class() {
                     # Parameterized type[X]: check covariance
-                    if dest_type.private and dest_type.private.type_args {
+                    if dest_type.private.type_args {
                         target_inner = self._convert_to_instance(
                             dest_type.private.type_args[0]
                         );
@@ -2686,7 +2744,6 @@ impl TypeEvaluator.assign_type(src_type: TypeBase, dest_type: TypeBase) -> bool 
         and isinstance(src_type, types.ClassType)
         and src_type.is_class_instance()
         and dest_type.is_class_instance()
-        and dest_type.shared
     ) {
         _protocol_methods: dict[str, str] = {
             "SupportsIndex": "__index__",
@@ -2865,6 +2922,7 @@ impl TypeEvaluator._prefetch_types{
     self.prefetch.node_class = get_jac_builtin_class("Node");
     self.prefetch.walker_class = get_jac_builtin_class("Walker");
     self.prefetch.jsx_element_class = get_jac_builtin_class("JsxElement");
+    self.prefetch.html_common_props_class = get_jac_builtin_class("_HtmlCommonProps");
     # Fixed-width numeric types
     self.prefetch.i8_class = get_jac_builtin_class("i8");
     self.prefetch.u8_class = get_jac_builtin_class("u8");
@@ -2959,15 +3017,20 @@ impl TypeEvaluator.postinit -> None {
         self._JAC_BUILTINS_STUB_FILE_PATH
     );
     self.dom_types_module = self._load_stub_module(self._DOM_TYPES_STUB_FILE_PATH);
-    # This avoids parent_scope chaining which can cause recursion issues
+    # Merge jac_builtins into builtins. Override imported symbols from builtins.pyi
+    # (e.g. Callable, Any, Protocol) with the jac_builtins.pyi versions so they
+    # pass the lookup_symtab import filter (builtins.pyi marks them as internal
+    # imports, but jac_builtins.pyi intentionally re-exports them for user code).
     for (name, sym) in self.jac_builtins_module.names_in_scope.items() {
-        if name not in self.builtins_module.names_in_scope {
+        existing = self.builtins_module.names_in_scope.get(name);
+        if existing is None or existing.imported {
             self.builtins_module.names_in_scope[name] = sym;
         }
     }
     # Merge DOM types (Event, ChangeEvent, HTMLElement, etc.) into builtins
     for (name, sym) in self.dom_types_module.names_in_scope.items() {
-        if name not in self.builtins_module.names_in_scope {
+        existing = self.builtins_module.names_in_scope.get(name);
+        if existing is None or existing.imported {
             self.builtins_module.names_in_scope[name] = sym;
         }
     }
@@ -3831,10 +3894,8 @@ impl TypeEvaluator._type_matches_isinstance(
     # Both must be ClassTypes for subclass checking
     if isinstance(t, types.ClassType) and isinstance(target_type, types.ClassType) {
         # Same class?
-        if t.shared is not None and target_type.shared is not None {
-            if t.shared == target_type.shared {
-                return True;
-            }
+        if t.shared == target_type.shared {
+            return True;
         }
         # Is t a subclass of target_type?
         if self.is_sub_class(target_type, t) {
@@ -3869,7 +3930,7 @@ impl TypeEvaluator._union_narrowed_types(types_list: list) -> TypeBase {
     unique: list[TypeBase] = [];
     seen_shared: set = set();
     for t in flat {
-        if isinstance(t, types.ClassType) and t.shared is not None {
+        if isinstance(t, types.ClassType) {
             shared_id = id(t.shared);
             if shared_id not in seen_shared {
                 seen_shared.add(shared_id);
@@ -3908,7 +3969,7 @@ impl TypeEvaluator.exclude_type_from_union(
             to_exclude_list = [to_exclude];
         }
         for excl_t in to_exclude_list {
-            if isinstance(excl_t, types.ClassType) and excl_t.shared is not None {
+            if isinstance(excl_t, types.ClassType) {
                 exclude_shareds.add(id(excl_t.shared));
             } else {
                 exclude_ids.add(id(excl_t));
@@ -3916,7 +3977,7 @@ impl TypeEvaluator.exclude_type_from_union(
         }
         remaining: list[TypeBase] = [];
         for t in original.types {
-            if isinstance(t, types.ClassType) and t.shared is not None {
+            if isinstance(t, types.ClassType) {
                 if id(t.shared) in exclude_shareds {
                     continue;
                 }
@@ -3940,8 +4001,6 @@ impl TypeEvaluator.exclude_type_from_union(
     # should be NeverType (unreachable path), not the original NoneType.
     if isinstance(original, types.ClassType)
     and isinstance(to_exclude, types.ClassType)
-    and original.shared is not None
-    and to_exclude.shared is not None
     and original.shared == to_exclude.shared {
         return types.NeverType();
     }
@@ -4092,13 +4151,12 @@ impl TypeEvaluator._is_callable_type(t: types.TypeBase) -> bool {
         if (
             self.prefetch
             and self.prefetch.callable_class
-            and t.shared is not None
             and t.shared == self.prefetch.callable_class.shared
         ) {
             return True;
         }
         # Check for classes with __call__ method
-        if t.shared is not None and t.shared.symbol_table is not None {
+        if t.shared.symbol_table is not None {
             if t.shared.symbol_table.lookup("__call__", deep=False) is not None {
                 return True;
             }
@@ -4181,7 +4239,6 @@ impl TypeEvaluator._is_type_alias_annotation(
     # Structural check: TypeAlias is a _SpecialForm, same as Callable etc.
     is_special_form = (
         isinstance(annotation_type, types.ClassType)
-        and annotation_type.shared is not None
         and annotation_type.shared == self.prefetch.callable_class.shared
     );
     # Name check: verify the tag is specifically "TypeAlias"

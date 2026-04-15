@@ -117,6 +117,11 @@ impl TypeCheckPass.exit_func_call(self: TypeCheckPass, nd: uni.FuncCall) -> None
     }
 }
 
+"""Handle JSX element node — validates props against component signature or intrinsic types."""
+impl TypeCheckPass.exit_jsx_element(self: TypeCheckPass, nd: uni.JsxElement) -> None {
+    self.evaluator.get_type_of_expression(nd);
+}
+
 """Handle the binary expression node."""
 impl TypeCheckPass.exit_binary_expr(self: TypeCheckPass, nd: uni.BinaryExpr) -> None {
     self.evaluator.get_type_of_expression(nd);
@@ -132,11 +137,28 @@ impl TypeCheckPass.exit_assignment(self: TypeCheckPass, nd: uni.Assignment) -> N
     import from jaclang.compiler.type_system { types }
     if ((len(nd.target) == 1) and (nd.value is not None)) {
         target = nd.target[0];
+        # Track whether this is a reassignment of a variable whose
+        # declaration has no type annotation.  For such variables the
+        # declared type is *inferred* from the first assignment, so
+        # later reassignments should be allowed to widen the inferred
+        # type — matching Pyright's behaviour for patterns like
+        # `x = None; …; x = value` or `x = 0; …; x = "str"`.
+        is_unannotated_reassign = False;
         # For assignment targets, use the declared symbol type (not the
         # narrowed type). Narrowing reflects the *current* value; the
         # variable's declared type determines what can be assigned to it.
         if isinstance(target, uni.Name) and target.sym {
             left_type = self.evaluator.get_type_of_symbol(target.sym);
+            # Detect unannotated reassignment: the current target is not
+            # the declaration site and the declaration has no type
+            # annotation (plain `x = expr` form).
+            if (
+                target.sym.decl.name_of is not target
+                and isinstance(target.sym.decl.name_of.parent, uni.Assignment)
+                and target.sym.decl.name_of.parent.type_tag is None
+            ) {
+                is_unannotated_reassign = True;
+            }
             # `target.type` is the hover cache — show the post-write type
             # for re-assignments, declared type otherwise. `left_type`
             # stays declared for the compat check and bare-generic warnings.
@@ -326,7 +348,10 @@ impl TypeCheckPass.exit_assignment(self: TypeCheckPass, nd: uni.Assignment) -> N
                     E1010, node_override=nd, op=nd.aug_op.name, type=left_type.name
                 );
             }
-        } elif not self.evaluator.assign_type(right_type, left_type) {
+        } elif (
+            not is_unannotated_reassign
+            and not self.evaluator.assign_type(right_type, left_type)
+        ) {
             self.emit(E1001, actual=str(right_type), expected=str(left_type));
         }
         # Validate augmented assignment operator (+=, -=, etc.)
@@ -514,107 +539,15 @@ impl TypeCheckPass.exit_ability(self: TypeCheckPass, nd: uni.Ability) -> None {
     }
 }
 
-"""Check if a code block always returns a value on all paths."""
+"""Check if a code block always returns a value on all paths.
+
+Delegates to TypeEvaluator._collect_return_types which is the canonical
+control-flow analysis for return statements — used both here (boolean only)
+and in lambda block-body return type inference (boolean + collected types)."""
 impl TypeCheckPass._body_always_returns(
     self: TypeCheckPass, body: list[uni.CodeBlockStmt]
 ) -> bool {
-    for stmt in reversed(body) {
-        if isinstance(stmt, uni.ReturnStmt) {
-            return True;
-        }
-        if isinstance(stmt, uni.IfStmt) {
-            if_returns = self._body_always_returns(list(stmt.body));
-            else_returns = False;
-            if isinstance(stmt.else_body, uni.ElseIf) {
-                else_returns = self._body_always_returns(list(stmt.else_body.body));
-                if not else_returns {
-                    continue;
-                }
-                if stmt.else_body.else_body {
-                    if isinstance(stmt.else_body.else_body, uni.ElseStmt) {
-                        else_returns = self._body_always_returns(
-                            list(stmt.else_body.else_body.body)
-                        );
-                    } elif isinstance(stmt.else_body.else_body, uni.ElseIf) {
-                        else_returns = self._body_always_returns(
-                            [stmt.else_body.else_body]
-                        );
-                    }
-                } else {
-                    else_returns = False;
-                }
-            } elif isinstance(stmt.else_body, uni.ElseStmt) {
-                else_returns = self._body_always_returns(list(stmt.else_body.body));
-            }
-            if if_returns and else_returns {
-                return True;
-            }
-        }
-        if isinstance(stmt, uni.MatchStmt) {
-            # Match statement always returns if all cases return.
-            # This handles both explicit wildcard (case _:) and exhaustive
-            # union coverage (case A() + case B() covering A|B).
-            if stmt.cases {
-                all_cases_return = True;
-                for case in stmt.cases {
-                    match_case: uni.MatchCase = case;
-                    if not self._body_always_returns(list(match_case.body)) {
-                        all_cases_return = False;
-                        break;
-                    }
-                }
-                if all_cases_return {
-                    return True;
-                }
-            }
-        }
-        if isinstance(stmt, uni.SwitchStmt) {
-            if stmt.cases {
-                has_default = False;
-                all_cases_return = True;
-                for case in stmt.cases {
-                    switch_case: uni.SwitchCase = case;
-                    if switch_case.pattern is None {
-                        has_default = True;
-                    }
-                    if not self._body_always_returns(list(switch_case.body)) {
-                        all_cases_return = False;
-                    }
-                }
-                if has_default and all_cases_return {
-                    return True;
-                }
-            }
-        }
-        if isinstance(stmt, uni.WithStmt) {
-            if self._body_always_returns(list(stmt.body)) {
-                return True;
-            }
-        }
-        if isinstance(stmt, uni.TryStmt) {
-            try_returns = self._body_always_returns(list(stmt.body));
-            if try_returns {
-                if not stmt.excepts or len(stmt.excepts) == 0 {
-                    return True;
-                }
-                all_excepts_return = True;
-                for exc in stmt.excepts {
-                    except_clause: uni.Except = exc;
-                    if not self._body_always_returns(list(except_clause.body)) {
-                        all_excepts_return = False;
-                        break;
-                    }
-                }
-                if all_excepts_return {
-                    return True;
-                }
-            }
-        }
-        if isinstance(stmt, uni.RaiseStmt) {
-            return True;
-        }
-    }
-    return False;
+    return self.evaluator._collect_return_types(body, []);
 }
 
 """Exit a type alias node."""

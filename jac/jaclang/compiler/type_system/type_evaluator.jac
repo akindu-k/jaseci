@@ -81,7 +81,14 @@ import from jaclang.jac0core.diagnostics {
     E1097,
     E1098,
     E1099,
-    W1100
+    E1100,
+    E1101,
+    E1102,
+    E1103,
+    E1104,
+    W1100,
+    W1101,
+    W1102
 }
 
 """Types whose definitions are prefetched and cached by the type evaluator."""
@@ -122,6 +129,8 @@ obj PrefetchedTypes {
         node_class: types.ClassType | None = None,
         walker_class: types.ClassType | None = None,
         jsx_element_class: types.ClassType | None = None,
+        # Intrinsic element prop types (from dom_types.pyi)
+        html_common_props_class: types.ClassType | None = None,
         # Fixed-width numeric types
         i8_class: types.ClassType | None = None,
         u8_class: types.ClassType | None = None,
@@ -283,6 +292,9 @@ obj TypeEvaluator {
     def is_paramspec_class(ty: TypeBase) -> bool;
     # Check if a type is the TypeVarTuple class itself (not a TypeVarType instance).
     def is_type_var_tuple_class(ty: TypeBase) -> bool;
+    # Match a typing special form by canonical name from stdlib stubs so
+    # typing.X and typing_extensions.X (distinct classes in typeshed) both count.
+    def _is_typing_special_form(ty: TypeBase, name: str) -> bool;
     # Comments from pyright:
     # // Determines if the source type can be assigned to the dest type.
     # // If constraint are provided, type variables within the destType are
@@ -362,6 +374,15 @@ obj TypeEvaluator {
     def _get_declared_return_type(
         scope: uni.Ability | uni.LambdaExpr
     ) -> TypeBase | None;
+
+    def _infer_lambda_block_return_type(body: list[uni.CodeBlockStmt]) -> TypeBase;
+    def _collect_return_types(
+        stmts: list[uni.CodeBlockStmt], out: list[TypeBase]
+    ) -> bool;
+
+    def _collect_if_else_returns(
+        else_body: uni.ElseIf | uni.ElseStmt | None, out: list[TypeBase]
+    ) -> bool;
 
     def _get_enclosing_method(nd: uni.UniNode) -> uni.Ability | None;
     def _get_enclosing_class(nd: uni.UniNode) -> uni.Archetype | None;
@@ -498,6 +519,23 @@ obj TypeEvaluator {
         is_constructor_call: bool = False
     ) -> dict[str, TypeBase];
 
+    # -------------------------------------------------------------------------
+    # JSX prop validation
+    # -------------------------------------------------------------------------
+    def _validate_jsx_props(
+        expr: uni.JsxElement, expected_type: TypeBase | None = None
+    ) -> None;
+
+    def _resolve_jsx_component_type(
+        name: uni.JsxElementName
+    ) -> types.FunctionType | None;
+
+    def _get_intrinsic_props_type(tag_name: str) -> types.ClassType | None;
+    def _validate_component_jsx_props(
+        expr: uni.JsxElement, component_name: str
+    ) -> None;
+
+    def _validate_intrinsic_jsx_props(expr: uni.JsxElement, tag_name: str) -> None;
     # -------------------------------------------------------------------------
     # TypeVar scope validation (Pyright: validateTypeVarUsage)
     # -------------------------------------------------------------------------
