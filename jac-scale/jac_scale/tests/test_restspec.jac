@@ -357,3 +357,104 @@ test "walker with node parameter functional test" {
         client.close();
     }
 }
+
+# ============================================================================
+# Custom Object Body Parameter Tests
+# ============================================================================
+test "custom obj body - openapi nested schema" {
+    client = make_client("restspec_fixtures.jac");
+    try {
+        spec = client._server.server.app.openapi();
+        schemas = spec["components"]["schemas"];
+
+        # UserBody schema exists with correct field types
+        assert "UserBody" in schemas;
+        user_schema = schemas["UserBody"];
+        assert user_schema["properties"]["name"]["type"] == "string";
+        assert user_schema["properties"]["age"]["type"] == "integer";
+        assert set(user_schema["required"]) == {"name","age"};
+
+        # Walker body schema references UserBody, not a flat 'str' field
+        walker_paths = [
+            p
+            for p in spec["paths"]
+            if p.startswith("/walker/CreateUser")
+        ];
+        assert walker_paths;
+        post = spec["paths"]["/walker/CreateUser"]["post"];
+        body_ref = post["requestBody"]["content"]["application/json"]["schema"]["$ref"];
+        body_schema = schemas[body_ref.rsplit("/", 1)[1]];
+        user_field = body_schema["properties"]["user"];
+        assert user_field.get("$ref", "").endswith("/UserBody");
+    } finally {
+        client.close();
+    }
+}
+
+test "custom obj body - walker receives typed instance" {
+    client = make_client("restspec_fixtures.jac");
+    try {
+        response = client.post(
+            "/walker/CreateUser", json={"user": {"name": "Alice", "age": 30}}
+        );
+        assert response.status_code == 200 , response.text;
+        data = extract_data(response.json())["reports"][0];
+        assert data["name"] == "Alice";
+        assert data["age"] == 30;
+        assert data["user_type"] == "UserBody";
+    } finally {
+        client.close();
+    }
+}
+
+test "custom obj body - nested obj" {
+    client = make_client("restspec_fixtures.jac");
+    try {
+        response = client.post(
+            "/walker/CreateUserWithAddress",
+            json={
+                "user": {
+                    "name": "Bob",
+                    "address": {"street": "1 Main", "city": "Springfield"}
+                }
+            }
+        );
+        assert response.status_code == 200 , response.text;
+        data = extract_data(response.json())["reports"][0];
+        assert data["name"] == "Bob";
+        assert data["street"] == "1 Main";
+        assert data["city"] == "Springfield";
+        assert data["address_type"] == "Address";
+    } finally {
+        client.close();
+    }
+}
+
+test "custom obj body - list of objs" {
+    client = make_client("restspec_fixtures.jac");
+    try {
+        response = client.post(
+            "/walker/CreateUsers",
+            json={"users": [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]}
+        );
+        assert response.status_code == 200 , response.text;
+        data = extract_data(response.json())["reports"][0];
+        assert data["count"] == 2;
+        assert data["names"] == ["Alice", "Bob"];
+        assert data["first_type"] == "UserBody";
+    } finally {
+        client.close();
+    }
+}
+
+test "custom obj body - validation rejects bad types" {
+    client = make_client("restspec_fixtures.jac");
+    try {
+        response = client.post(
+            "/walker/CreateUser", json={"user": {"name": "Alice", "age": "not-an-int"}}
+        );
+        assert response.status_code == 422;
+    } finally {
+        client.close();
+    }
+}

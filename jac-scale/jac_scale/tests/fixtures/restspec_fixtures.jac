@@ -174,3 +174,64 @@ walker:pub LoadUserProfile {
         };
     }
 }
+
+# ============================================================================
+# Custom Object Body Parameter Tests
+# ============================================================================
+obj Address {
+    has street: str,
+        city: str;
+}
+
+obj UserBody {
+    has name: str,
+        age: int;
+}
+
+obj UserWithAddress {
+    has name: str,
+        address: Address;
+}
+
+"""Walker with a custom obj as a body parameter."""
+walker:pub CreateUser {
+    has user: UserBody;
+
+    can create with Root entry {
+        report {
+            "message": "CreateUser executed",
+            "name": self.user.name,
+            "age": self.user.age,
+            "user_type": type(self.user).__name__
+        };
+    }
+}
+
+"""Walker with a nested custom obj body parameter."""
+walker:pub CreateUserWithAddress {
+    has user: UserWithAddress;
+
+    can create with Root entry {
+        report {
+            "message": "CreateUserWithAddress executed",
+            "name": self.user.name,
+            "street": self.user.address.street,
+            "city": self.user.address.city,
+            "address_type": type(self.user.address).__name__
+        };
+    }
+}
+
+"""Walker with a list of custom objs."""
+walker:pub CreateUsers {
+    has users: list[UserBody];
+
+    can create with Root entry {
+        report {
+            "message": "CreateUsers executed",
+            "count": len(self.users),
+            "names": [u.name for u in self.users],
+            "first_type": type(self.users[0]).__name__ if self.users else None
+        };
+    }
+}
