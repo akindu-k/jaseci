@@ -4,6 +4,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jaclang 0.13.6 (Unreleased)
 
+- **Feat: `ModuleIntrospector` Preserves Type Objects**: `introspect_walker()` and `introspect_callable()` now include `type_obj` (the resolved Python type) alongside the stringified `type` name in their returned field metadata. Downstream consumers (e.g. jac-scale's FastAPI endpoint generator) can distinguish `User` the custom obj from `"User"` the string and generate proper nested Pydantic models instead of falling back to `str`. Additive, backward-compatible — existing readers of `['type']` are unaffected.
 - 1 internal refactor.
 - **Feat: `to cl:` / `to sv:` / `to na:` Section Headers**: Module-level section headers set the default client/server/native context for every following statement until the next header; the legacy `cl { ... }` / `sv { ... }` / `na { ... }` braced blocks now emit a deprecation warning.
 - **Format: `to cl:` / `to sv:` / `to na:` Section Headers**: `jac format` now emits section headers on their own line with a blank-line separator and the body dedented to module scope, and the parser models them as implicit `ClientBlock` / `ServerBlock` / `NativeBlock` so existing codegen and analysis passes work on sections unchanged.
