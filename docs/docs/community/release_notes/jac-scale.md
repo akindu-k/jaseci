@@ -2,7 +2,9 @@
 
 This document provides a summary of new features, improvements, and bug fixes in each version of **Jac-Scale**. For details on changes that might require updates to your existing code, please refer to the [Breaking Changes](../breaking-changes.md) page.
 
-## jac-scale 0.2.14 (Unreleased)
+## jac-scale 0.2.15 (Unreleased)
+
+## jac-scale 0.2.14 (Latest Release)
 
 - **Feat: Custom Object Support in Walker/Function API Parameters**: Walkers and `@restspec` functions with `has`/parameter fields typed as user-defined Jac `obj` (or nested/list/optional thereof) now generate proper nested Pydantic request bodies and OpenAPI schemas instead of collapsing to `str`. Endpoint wrappers reconstruct typed archetype instances from validated JSON before dispatch, so walker handlers receive real `UserBody` (etc.) instances, not raw dicts. Recursive obj types (`obj TreeNode { has children: list[TreeNode]; }`) are handled via a placeholder-cached model registry inspired by PR #5387's ref-mode tracking. Implemented by resolving each parameter's actual `type_obj` via `get_type_hints` in `create_{walker,function}_parameters`, carrying it through `APIParameter.type_obj`, and adding `_resolve_type` / `_build_pydantic_model` / `_pydantic_to_jac` to `JFastApiServer`.
 - **Feat: SV-to-SV Eager Auto-Spawn in `jac start`**: `jac start consumer.jac` now brings up every `sv import`-ed provider (including transitive ones) automatically before serving the first request, so single-host multi-service deployments need exactly one terminal and zero env vars.
@@ -15,7 +17,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Fix: `jac start` crashes without `jac-scale[scheduler]`**: The scheduler setup in `jac start` unconditionally initialized APScheduler, causing a `'NoneType' object is not callable` error when APScheduler wasn't installed. The scheduler now gracefully degrades: static/interval/cron tasks still work via the core jaclang scheduler, and dynamic scheduling features are skipped with a clear log message when APScheduler is absent.
 - 1 small refactor/change.
 
-## jac-scale 0.2.13 (Latest Release)
+## jac-scale 0.2.13
 
 - **jac-mcp included by default**: Added to the default Kubernetes package set in jac-scale.
 
