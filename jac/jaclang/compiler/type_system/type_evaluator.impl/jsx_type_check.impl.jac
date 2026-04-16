@@ -34,19 +34,13 @@ impl TypeEvaluator._resolve_jsx_component_type(
     if not component_name or not component_name[0].isupper() {
         return None;
     }
-    # Try sym first (populated by sem_def_match_pass for some Name nodes).
+    # The JsxElement expression handler drives get_type_of_expression()
+    # on each Name part before reaching this method, so .sym is already
+    # populated via the standard name-resolution pipeline (lines 1613-1626
+    # of type_evaluator.impl.jac). Read it directly.
     sym: uni.Symbol | None = None;
     if isinstance(first_part, uni.Name) and first_part.sym {
         sym = first_part.sym;
-    }
-    # Fallback: walk the scope chain to find the name.
-    if sym is None {
-        scope_node = name.find_parent_of_type(uni.UniScopeNode);
-        if scope_node is not None and self.builtins_module is not None {
-            sym = type_utils.lookup_symtab(
-                scope_node, component_name, self.builtins_module
-            );
-        }
     }
     if sym is not None {
         sym_type = self.get_type_of_symbol(sym);
