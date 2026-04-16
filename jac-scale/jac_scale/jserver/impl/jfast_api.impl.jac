@@ -874,7 +874,7 @@ impl JFastApiServer.init(
         import from fastapi.responses { JSONResponse }
         authorization = request.headers.get('Authorization');
         token: (str | None) = None;
-        user_id: (str | None) = None;
+        username: (str | None) = None;
         user_root_id: (str | None) = None;
         token_attempted: bool = False;
 
@@ -885,15 +885,15 @@ impl JFastApiServer.init(
             token_attempted = True;
 
             if self._user_manager {
-                user_id = self._user_manager.validate_jwt_token(token);
+                username = self._user_manager.validate_jwt_token(token);
 
-                if user_id {
-                    user_root_id = self._user_manager.get_root_id(user_id);
+                if username {
+                    user_root_id = self._user_manager.get_root_id(username);
                 }
             }
         }
 
-        if token_attempted and not user_id {
+        if token_attempted and not username {
             return JSONResponse(
                 status_code=401,
                 content={
@@ -904,7 +904,7 @@ impl JFastApiServer.init(
         }
 
         setattr(request.state, 'user_root_id', user_root_id);
-        setattr(request.state, 'user_id', user_id);
+        setattr(request.state, 'username', username);
 
         response = await call_next(request);
         return response;

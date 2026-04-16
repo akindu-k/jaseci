@@ -1959,10 +1959,22 @@ test "jwt middleware: per-user isolation and token rejection" {
     try {
         def reg(name: str) -> str {
             r = client.post(
-                "/user/register", json={"username": name, "password": "Pass!99"}
+                "/user/register",
+                json={
+                    "identities": [{"type": "username", "value": name}],
+                    "credential": {"type": "password", "password": "Pass!99"}
+                }
             );
             assert r.status_code == 201;
-            return extract_data(r.json())["token"];
+            login = client.post(
+                "/user/login",
+                json={
+                    "identity": {"type": "username", "value": name},
+                    "credential": {"type": "password", "password": "Pass!99"}
+                }
+            );
+            assert login.status_code == 200;
+            return extract_data(login.json())["token"];
         }
         def task_titles(tok: str) -> set[str] {
             r = client.post(
