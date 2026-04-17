@@ -2,10 +2,6 @@
 
 This document provides a summary of new features, improvements, and bug fixes in each version of **Jac-Scale**. For details on changes that might require updates to your existing code, please refer to the [Breaking Changes](../breaking-changes.md) page.
 
-## jac-scale 0.2.15 (Unreleased)
-
-- **Fix: Authenticated requests now always run as the correct user**: Previously, there was a brief window during request startup where a request could execute as the system root instead of the authenticated user, even with a valid JWT. This has been resolved by moving JWT validation into a dedicated middleware that runs before the request context is created. Your user's root node is set correctly from the very first operation in every request. Invalid, expired, or forged tokens are now rejected with `401 Unauthorized` immediately at the middleware layer rather than silently falling through.
-
 ## jac-scale 0.2.14 (Latest Release)
 
 - **Identity-based auth system**: Replaced flat username/password user model with a flexible identity + credential architecture. Users can register with multiple identities (username, email) and credentials (password), stored as arrays in MongoDB. Login accepts any identity type. SSO accounts are stored as identities (`type: sso`, `provider: google`) within the user document instead of a separate `sso_accounts` collection.
