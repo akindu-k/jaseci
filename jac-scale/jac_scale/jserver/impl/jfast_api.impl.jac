@@ -322,21 +322,23 @@ impl JFastApiServer._resolve_type(
 
 """Build (and cache) a Pydantic model mirroring a Jac archetype's `has` fields.
 
-Registers a placeholder in the cache before recursing so self-referential
-types (e.g. `TreeNode` with `children: list[TreeNode]`) terminate.
+Registers a `ForwardRef` in the cache before recursing so self-referential
+types (e.g. `TreeNode` with `children: list[TreeNode]`) terminate; the
+forward refs are resolved via `model_rebuild` once the real model exists.
 """
 impl JFastApiServer._build_pydantic_model(
     self: JFastApiServer, jac_cls: Any
 ) -> type[BaseModel] {
-    import from typing { get_type_hints }
+    import from typing { get_type_hints, ForwardRef }
     model_name = jac_cls.__name__;
     cached = self._models.get(model_name);
     if cached is not None {
         return cached;
     }
-    # Placeholder to break cycles; will be replaced with the real model.
-    placeholder = create_model(model_name);
-    self._models[model_name] = placeholder;
+    # Register a ForwardRef before recursing. Self-references inside this
+    # archetype's fields will resolve to this ForwardRef and be resolved
+    # by `model_rebuild` once the real model is registered.
+    self._models[model_name] = ForwardRef(model_name);
     sig = inspect.signature(jac_cls.init);
     try {
         hints = get_type_hints(jac_cls.init);
@@ -360,6 +362,19 @@ impl JFastApiServer._build_pydantic_model(
     }
     model = create_model(model_name, **fields);
     self._models[model_name] = model;
+    # Resolve any ForwardRefs now that every referenced model is built.
+    # Only pass fully-built models to the namespace (ForwardRef values in
+    # the cache belong to models still in the middle of building).
+    namespace = {
+        k: v
+        for (k, v) in self._models.items()
+        if isinstance(v, type)
+    };
+    try {
+        model.model_rebuild(force=True, _types_namespace=namespace);
+    } except Exception {
+        ;
+    }
     return model;
 }
 

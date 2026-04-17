@@ -61,7 +61,13 @@ test "custom method func" {
     client = make_client("restspec_fixtures.jac");
     try {
         client.register_user("u1", "p1");
-        login = client.post("/user/login", json={"identity": {"type": "username", "value": "u1"}, "credential": {"type": "password", "password": "p1"}});
+        login = client.post(
+            "/user/login",
+            json={
+                "identity": {"type": "username", "value": "u1"},
+                "credential": {"type": "password", "password": "p1"}
+            }
+        );
         token = extract_data(login.json())["token"];
 
         response = client.get(
@@ -79,7 +85,13 @@ test "custom path func" {
     client = make_client("restspec_fixtures.jac");
     try {
         client.register_user("u1", "p1");
-        login = client.post("/user/login", json={"identity": {"type": "username", "value": "u1"}, "credential": {"type": "password", "password": "p1"}});
+        login = client.post(
+            "/user/login",
+            json={
+                "identity": {"type": "username", "value": "u1"},
+                "credential": {"type": "password", "password": "p1"}
+            }
+        );
         token = extract_data(login.json())["token"];
 
         response = client.get(
@@ -98,7 +110,13 @@ test "post method func" {
     client = make_client("restspec_fixtures.jac");
     try {
         client.register_user("u1", "p1");
-        login = client.post("/user/login", json={"identity": {"type": "username", "value": "u1"}, "credential": {"type": "password", "password": "p1"}});
+        login = client.post(
+            "/user/login",
+            json={
+                "identity": {"type": "username", "value": "u1"},
+                "credential": {"type": "password", "password": "p1"}
+            }
+        );
         token = extract_data(login.json())["token"];
 
         response = client.post(
@@ -117,7 +135,13 @@ test "default method func" {
     client = make_client("restspec_fixtures.jac");
     try {
         client.register_user("u1", "p1");
-        login = client.post("/user/login", json={"identity": {"type": "username", "value": "u1"}, "credential": {"type": "password", "password": "p1"}});
+        login = client.post(
+            "/user/login",
+            json={
+                "identity": {"type": "username", "value": "u1"},
+                "credential": {"type": "password", "password": "p1"}
+            }
+        );
         token = extract_data(login.json())["token"];
 
         response = client.post(
@@ -152,7 +176,13 @@ test "get func with params" {
     client = make_client("restspec_fixtures.jac");
     try {
         client.register_user("u1", "p1");
-        login = client.post("/user/login", json={"identity": {"type": "username", "value": "u1"}, "credential": {"type": "password", "password": "p1"}});
+        login = client.post(
+            "/user/login",
+            json={
+                "identity": {"type": "username", "value": "u1"},
+                "credential": {"type": "password", "password": "p1"}
+            }
+        );
         token = extract_data(login.json())["token"];
 
         response = client.get(
@@ -452,6 +482,174 @@ test "custom obj body - validation rejects bad types" {
             "/walker/CreateUser", json={"user": {"name": "Alice", "age": "not-an-int"}}
         );
         assert response.status_code == 422;
+    } finally {
+        client.close();
+    }
+}
+
+# ============================================================================
+# Custom Object Body Parameter Tests — Functions
+# ============================================================================
+test "custom obj body - function receives typed instance" {
+    client = make_client("restspec_fixtures.jac");
+    try {
+        client.register_user("u_fn", "p_fn");
+        token = client.login_user("u_fn", "p_fn");
+        auth = {"Authorization": f"Bearer {token}"};
+
+        response = client.post(
+            "/func/create_user",
+            headers=auth,
+            json={"user": {"name": "Alice", "age": 30}}
+        );
+        assert response.status_code == 200 , response.text;
+        data = extract_data(response.json())["result"];
+        assert data["name"] == "Alice";
+        assert data["age"] == 30;
+        assert data["user_type"] == "UserBody";
+    } finally {
+        client.close();
+    }
+}
+
+test "custom obj body - function nested obj" {
+    client = make_client("restspec_fixtures.jac");
+    try {
+        client.register_user("u_fn2", "p_fn2");
+        token = client.login_user("u_fn2", "p_fn2");
+        auth = {"Authorization": f"Bearer {token}"};
+
+        response = client.post(
+            "/func/create_user_with_address",
+            headers=auth,
+            json={
+                "user": {
+                    "name": "Bob",
+                    "address": {"street": "1 Main", "city": "Springfield"}
+                }
+            }
+        );
+        assert response.status_code == 200 , response.text;
+        data = extract_data(response.json())["result"];
+        assert data["name"] == "Bob";
+        assert data["street"] == "1 Main";
+        assert data["city"] == "Springfield";
+        assert data["address_type"] == "Address";
+    } finally {
+        client.close();
+    }
+}
+
+test "custom obj body - function list of objs" {
+    client = make_client("restspec_fixtures.jac");
+    try {
+        client.register_user("u_fn3", "p_fn3");
+        token = client.login_user("u_fn3", "p_fn3");
+        auth = {"Authorization": f"Bearer {token}"};
+
+        response = client.post(
+            "/func/create_users",
+            headers=auth,
+            json={"users": [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]}
+        );
+        assert response.status_code == 200 , response.text;
+        data = extract_data(response.json())["result"];
+        assert data["count"] == 2;
+        assert data["names"] == ["Alice", "Bob"];
+        assert data["first_type"] == "UserBody";
+    } finally {
+        client.close();
+    }
+}
+
+test "custom obj body - function validation rejects bad types" {
+    client = make_client("restspec_fixtures.jac");
+    try {
+        client.register_user("u_fn4", "p_fn4");
+        token = client.login_user("u_fn4", "p_fn4");
+        auth = {"Authorization": f"Bearer {token}"};
+
+        response = client.post(
+            "/func/create_user",
+            headers=auth,
+            json={"user": {"name": "Alice", "age": "not-an-int"}}
+        );
+        assert response.status_code == 422;
+    } finally {
+        client.close();
+    }
+}
+
+# ============================================================================
+# Recursive Type Tests — self-referential obj (walker + function)
+# ============================================================================
+test "recursive obj body - walker receives typed tree" {
+    client = make_client("restspec_fixtures.jac");
+    try {
+        tree = {
+            "name": "root",
+            "children": [
+                {"name": "child1", "children": [{"name": "leaf1", "children": []}]},
+                {"name": "child2", "children": []}
+            ]
+        };
+        response = client.post("/walker/CreateTreeWalker", json={"root": tree});
+        assert response.status_code == 200 , response.text;
+        data = extract_data(response.json())["reports"][0];
+        assert data["root_name"] == "root";
+        assert data["root_type"] == "TreeNode";
+        assert data["child_type"] == "TreeNode";
+        assert data["depth"] == 3;
+        assert data["node_count"] == 4;
+    } finally {
+        client.close();
+    }
+}
+
+test "recursive obj body - function receives typed tree" {
+    client = make_client("restspec_fixtures.jac");
+    try {
+        client.register_user("u_rec", "p_rec");
+        token = client.login_user("u_rec", "p_rec");
+        auth = {"Authorization": f"Bearer {token}"};
+
+        tree = {
+            "name": "root",
+            "children": [
+                {
+                    "name": "child1",
+                    "children": [
+                        {"name": "leaf1", "children": []},
+                        {"name": "leaf2", "children": []}
+                    ]
+                },
+                {"name": "child2", "children": []}
+            ]
+        };
+        response = client.post("/func/create_tree", headers=auth, json={"root": tree});
+        assert response.status_code == 200 , response.text;
+        data = extract_data(response.json())["result"];
+        assert data["root_name"] == "root";
+        assert data["root_type"] == "TreeNode";
+        assert data["child_type"] == "TreeNode";
+        assert data["depth"] == 3;
+        assert data["node_count"] == 5;
+    } finally {
+        client.close();
+    }
+}
+
+test "recursive obj body - openapi schema self-refs" {
+    client = make_client("restspec_fixtures.jac");
+    try {
+        spec = client._server.server.app.openapi();
+        schemas = spec["components"]["schemas"];
+        assert "TreeNode" in schemas;
+        tree_schema = schemas["TreeNode"];
+        children_schema = tree_schema["properties"]["children"];
+        # children is a list referencing TreeNode itself (self-reference)
+        item_schema = children_schema.get("items", {});
+        assert item_schema.get("$ref", "").endswith("/TreeNode") , f"Expected children items to $ref TreeNode, got {item_schema}";
     } finally {
         client.close();
     }
