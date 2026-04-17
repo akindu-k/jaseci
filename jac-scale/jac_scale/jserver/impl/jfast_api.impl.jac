@@ -345,6 +345,8 @@ impl JFastApiServer._build_pydantic_model(
     } except Exception {
         hints = {};
     }
+    import dataclasses;
+    dc_fields: dict[(str, Any)] = getattr(jac_cls, '__dataclass_fields__', {});
     fields: dict[str, Any] = {};
     for (name, param) in sig.parameters.items() {
         if (name in ('self', 'args', 'kwargs')) {
@@ -354,10 +356,21 @@ impl JFastApiServer._build_pydantic_model(
         resolved = self._resolve_type(
             getattr(field_type_obj, '__name__', str(field_type_obj)), field_type_obj
         );
-        if (param.default != inspect.Parameter.empty) {
-            fields[name] = (resolved, Field(default=param.default));
-        } else {
+        if (param.default == inspect.Parameter.empty) {
             fields[name] = (resolved, Field(...));
+        } else {
+            dc_field = dc_fields.get(name);
+            if (
+                dc_field is not None
+                and dc_field.default_factory is not dataclasses.MISSING
+            ) {
+                fields[name] = (
+                    resolved,
+                    Field(default_factory=dc_field.default_factory)
+                );
+            } else {
+                fields[name] = (resolved, Field(default=param.default));
+            }
         }
     }
     model = create_model(model_name, **fields);
