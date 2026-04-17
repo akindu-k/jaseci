@@ -387,58 +387,36 @@ test "walker with node parameter functional test" {
 }
 
 # ============================================================================
-# Custom Object Body Parameter Tests
+# Custom Object Body Parameter Tests — walker + function + recursive
+# One integration test per variant; schema + runtime + validation in one flow.
 # ============================================================================
-test "custom obj body - openapi nested schema" {
+test "custom obj body - walker flows" {
     client = make_client("restspec_fixtures.jac");
     try {
+        # OpenAPI: UserBody schema + CreateUser body references it via $ref
         spec = client._server.server.app.openapi();
         schemas = spec["components"]["schemas"];
-
-        # UserBody schema exists with correct field types
         assert "UserBody" in schemas;
         user_schema = schemas["UserBody"];
-        assert user_schema["properties"]["name"]["type"] == "string";
-        assert user_schema["properties"]["age"]["type"] == "integer";
-        assert set(user_schema["required"]) == {"name","age"};
-
-        # Walker body schema references UserBody, not a flat 'str' field
-        walker_paths = [
-            p
-            for p in spec["paths"]
-            if p.startswith("/walker/CreateUser")
-        ];
-        assert walker_paths;
-        post = spec["paths"]["/walker/CreateUser"]["post"];
-        body_ref = post["requestBody"]["content"]["application/json"]["schema"]["$ref"];
+        assert user_schema["properties"]["name"]["type"] == "string"
+        and user_schema["properties"]["age"]["type"] == "integer"
+        and set(user_schema["required"]) == {"name","age"};
+        body_ref = spec["paths"]["/walker/CreateUser"]["post"]["requestBody"]["content"][
+            "application/json"
+        ]["schema"]["$ref"];
         body_schema = schemas[body_ref.rsplit("/", 1)[1]];
-        user_field = body_schema["properties"]["user"];
-        assert user_field.get("$ref", "").endswith("/UserBody");
-    } finally {
-        client.close();
-    }
-}
+        assert body_schema["properties"]["user"].get("$ref", "").endswith("/UserBody");
 
-test "custom obj body - walker receives typed instance" {
-    client = make_client("restspec_fixtures.jac");
-    try {
-        response = client.post(
+        # Flat obj
+        r = client.post(
             "/walker/CreateUser", json={"user": {"name": "Alice", "age": 30}}
         );
-        assert response.status_code == 200 , response.text;
-        data = extract_data(response.json())["reports"][0];
-        assert data["name"] == "Alice";
-        assert data["age"] == 30;
-        assert data["user_type"] == "UserBody";
-    } finally {
-        client.close();
-    }
-}
+        assert r.status_code == 200 , r.text;
+        d = extract_data(r.json())["reports"][0];
+        assert d["name"] == "Alice" and d["age"] == 30 and d["user_type"] == "UserBody";
 
-test "custom obj body - nested obj" {
-    client = make_client("restspec_fixtures.jac");
-    try {
-        response = client.post(
+        # Nested obj
+        r = client.post(
             "/walker/CreateUserWithAddress",
             json={
                 "user": {
@@ -447,79 +425,52 @@ test "custom obj body - nested obj" {
                 }
             }
         );
-        assert response.status_code == 200 , response.text;
-        data = extract_data(response.json())["reports"][0];
-        assert data["name"] == "Bob";
-        assert data["street"] == "1 Main";
-        assert data["city"] == "Springfield";
-        assert data["address_type"] == "Address";
-    } finally {
-        client.close();
-    }
-}
+        assert r.status_code == 200 , r.text;
+        d = extract_data(r.json())["reports"][0];
+        assert d["name"] == "Bob"
+        and d["street"] == "1 Main"
+        and d["city"] == "Springfield"
+        and d["address_type"] == "Address";
 
-test "custom obj body - list of objs" {
-    client = make_client("restspec_fixtures.jac");
-    try {
-        response = client.post(
+        # List of objs
+        r = client.post(
             "/walker/CreateUsers",
             json={"users": [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]}
         );
-        assert response.status_code == 200 , response.text;
-        data = extract_data(response.json())["reports"][0];
-        assert data["count"] == 2;
-        assert data["names"] == ["Alice", "Bob"];
-        assert data["first_type"] == "UserBody";
-    } finally {
-        client.close();
-    }
-}
+        assert r.status_code == 200 , r.text;
+        d = extract_data(r.json())["reports"][0];
+        assert d["count"] == 2
+        and d["names"] == ["Alice", "Bob"]
+        and d["first_type"] == "UserBody";
 
-test "custom obj body - validation rejects bad types" {
-    client = make_client("restspec_fixtures.jac");
-    try {
-        response = client.post(
+        # Validation rejects wrong field type
+        r = client.post(
             "/walker/CreateUser", json={"user": {"name": "Alice", "age": "not-an-int"}}
         );
-        assert response.status_code == 422;
+        assert r.status_code == 422;
     } finally {
         client.close();
     }
 }
 
-# ============================================================================
-# Custom Object Body Parameter Tests — Functions
-# ============================================================================
-test "custom obj body - function receives typed instance" {
+test "custom obj body - function flows" {
     client = make_client("restspec_fixtures.jac");
     try {
         client.register_user("u_fn", "p_fn");
-        token = client.login_user("u_fn", "p_fn");
-        auth = {"Authorization": f"Bearer {token}"};
+        auth = {"Authorization": f"Bearer {client.login_user('u_fn', 'p_fn')}"};
 
-        response = client.post(
+        # Flat obj
+        r = client.post(
             "/func/create_user",
             headers=auth,
             json={"user": {"name": "Alice", "age": 30}}
         );
-        assert response.status_code == 200 , response.text;
-        data = extract_data(response.json())["result"];
-        assert data["name"] == "Alice";
-        assert data["age"] == 30;
-        assert data["user_type"] == "UserBody";
-    } finally {
-        client.close();
-    }
-}
+        assert r.status_code == 200 , r.text;
+        d = extract_data(r.json())["result"];
+        assert d["name"] == "Alice" and d["age"] == 30 and d["user_type"] == "UserBody";
 
-test "custom obj body - function nested obj" {
-    client = make_client("restspec_fixtures.jac");
-    try {
-        client.register_user("u_fn2", "p_fn2");
-        token = client.login_user("u_fn2", "p_fn2");
-        auth = {"Authorization": f"Bearer {token}"};
-
-        response = client.post(
+        # Nested obj
+        r = client.post(
             "/func/create_user_with_address",
             headers=auth,
             json={
@@ -529,91 +480,68 @@ test "custom obj body - function nested obj" {
                 }
             }
         );
-        assert response.status_code == 200 , response.text;
-        data = extract_data(response.json())["result"];
-        assert data["name"] == "Bob";
-        assert data["street"] == "1 Main";
-        assert data["city"] == "Springfield";
-        assert data["address_type"] == "Address";
-    } finally {
-        client.close();
-    }
-}
+        assert r.status_code == 200 , r.text;
+        d = extract_data(r.json())["result"];
+        assert d["name"] == "Bob"
+        and d["street"] == "1 Main"
+        and d["city"] == "Springfield"
+        and d["address_type"] == "Address";
 
-test "custom obj body - function list of objs" {
-    client = make_client("restspec_fixtures.jac");
-    try {
-        client.register_user("u_fn3", "p_fn3");
-        token = client.login_user("u_fn3", "p_fn3");
-        auth = {"Authorization": f"Bearer {token}"};
-
-        response = client.post(
+        # List of objs
+        r = client.post(
             "/func/create_users",
             headers=auth,
             json={"users": [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]}
         );
-        assert response.status_code == 200 , response.text;
-        data = extract_data(response.json())["result"];
-        assert data["count"] == 2;
-        assert data["names"] == ["Alice", "Bob"];
-        assert data["first_type"] == "UserBody";
-    } finally {
-        client.close();
-    }
-}
+        assert r.status_code == 200 , r.text;
+        d = extract_data(r.json())["result"];
+        assert d["count"] == 2
+        and d["names"] == ["Alice", "Bob"]
+        and d["first_type"] == "UserBody";
 
-test "custom obj body - function validation rejects bad types" {
-    client = make_client("restspec_fixtures.jac");
-    try {
-        client.register_user("u_fn4", "p_fn4");
-        token = client.login_user("u_fn4", "p_fn4");
-        auth = {"Authorization": f"Bearer {token}"};
-
-        response = client.post(
+        # Validation rejects wrong field type
+        r = client.post(
             "/func/create_user",
             headers=auth,
             json={"user": {"name": "Alice", "age": "not-an-int"}}
         );
-        assert response.status_code == 422;
+        assert r.status_code == 422;
     } finally {
         client.close();
     }
 }
 
-# ============================================================================
-# Recursive Type Tests — self-referential obj (walker + function)
-# ============================================================================
-test "recursive obj body - walker receives typed tree" {
+test "recursive obj body flows" {
     client = make_client("restspec_fixtures.jac");
     try {
-        tree = {
+        # OpenAPI: TreeNode.children items $ref TreeNode (self-reference)
+        spec = client._server.server.app.openapi();
+        schemas = spec["components"]["schemas"];
+        assert "TreeNode" in schemas;
+        items = schemas["TreeNode"]["properties"]["children"].get("items", {});
+        assert items.get("$ref", "").endswith("/TreeNode") , f"Expected children items to $ref TreeNode, got {items}";
+
+        # Walker tree (public): 4 nodes, depth 3
+        walker_tree = {
             "name": "root",
             "children": [
                 {"name": "child1", "children": [{"name": "leaf1", "children": []}]},
                 {"name": "child2", "children": []}
             ]
         };
-        response = client.post("/walker/CreateTreeWalker", json={"root": tree});
-        assert response.status_code == 200 , response.text;
-        data = extract_data(response.json())["reports"][0];
-        assert data["root_name"] == "root";
-        assert data["root_type"] == "TreeNode";
-        assert data["child_type"] == "TreeNode";
-        assert data["depth"] == 3;
-        assert data["node_count"] == 4;
-    } finally {
-        client.close();
-    }
-}
+        r = client.post("/walker/CreateTreeWalker", json={"root": walker_tree});
+        assert r.status_code == 200 , r.text;
+        d = extract_data(r.json())["reports"][0];
+        assert d["root_name"] == "root"
+        and d["root_type"] == "TreeNode"
+        and d["child_type"] == "TreeNode"
+        and d["depth"] == 3
+        and d["node_count"] == 4;
 
-test "recursive obj body - function receives typed tree" {
-    client = make_client("restspec_fixtures.jac");
-    try {
+        # Function tree (auth): 5 nodes, depth 3
         client.register_user("u_rec", "p_rec");
-        token = client.login_user("u_rec", "p_rec");
-        auth = {"Authorization": f"Bearer {token}"};
-
-        tree = {
+        auth = {"Authorization": f"Bearer {client.login_user('u_rec', 'p_rec')}"};
+        fn_tree = {
             "name": "root",
             "children": [
                 {
@@ -626,30 +554,14 @@ test "recursive obj body - function receives typed tree" {
                 {"name": "child2", "children": []}
             ]
         };
-        response = client.post("/func/create_tree", headers=auth, json={"root": tree});
-        assert response.status_code == 200 , response.text;
-        data = extract_data(response.json())["result"];
-        assert data["root_name"] == "root";
-        assert data["root_type"] == "TreeNode";
-        assert data["child_type"] == "TreeNode";
-        assert data["depth"] == 3;
-        assert data["node_count"] == 5;
-    } finally {
-        client.close();
-    }
-}
-
-test "recursive obj body - openapi schema self-refs" {
-    client = make_client("restspec_fixtures.jac");
-    try {
-        spec = client._server.server.app.openapi();
-        schemas = spec["components"]["schemas"];
-        assert "TreeNode" in schemas;
-        tree_schema = schemas["TreeNode"];
-        children_schema = tree_schema["properties"]["children"];
-        # children is a list referencing TreeNode itself (self-reference)
-        item_schema = children_schema.get("items", {});
-        assert item_schema.get("$ref", "").endswith("/TreeNode") , f"Expected children items to $ref TreeNode, got {item_schema}";
+        r = client.post("/func/create_tree", headers=auth, json={"root": fn_tree});
+        assert r.status_code == 200 , r.text;
+        d = extract_data(r.json())["result"];
+        assert d["root_name"] == "root"
+        and d["root_type"] == "TreeNode"
+        and d["child_type"] == "TreeNode"
+        and d["depth"] == 3
+        and d["node_count"] == 5;
     } finally {
         client.close();
     }
