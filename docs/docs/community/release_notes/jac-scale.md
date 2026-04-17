@@ -2,10 +2,6 @@
 
 This document provides a summary of new features, improvements, and bug fixes in each version of **Jac-Scale**. For details on changes that might require updates to your existing code, please refer to the [Breaking Changes](../breaking-changes.md) page.
 
-## jac-scale 0.2.15 (Unreleased)
-
-- **Feat: Custom Object Support in Walker/Function API Parameters**: Walkers and `@restspec` functions with `has`/parameter fields typed as user-defined Jac `obj` (or nested/list/optional thereof) now generate proper nested Pydantic request bodies and OpenAPI schemas instead of collapsing to `str`. Endpoint wrappers reconstruct typed archetype instances from validated JSON before dispatch, so walker handlers receive real `UserBody` (etc.) instances, not raw dicts. Recursive obj types (`obj TreeNode { has children: list[TreeNode]; }`) are handled via a placeholder-cached model registry inspired by PR #5387's ref-mode tracking. Implemented by resolving each parameter's actual `type_obj` via `get_type_hints` in `create_{walker,function}_parameters`, carrying it through `APIParameter.type_obj`, and adding `_resolve_type` / `_build_pydantic_model` / `_pydantic_to_jac` to `JFastApiServer`.
-
 ## jac-scale 0.2.14 (Latest Release)
 
 - **Identity-based auth system**: Replaced flat username/password user model with a flexible identity + credential architecture. Users can register with multiple identities (username, email) and credentials (password), stored as arrays in MongoDB. Login accepts any identity type. SSO accounts are stored as identities (`type: sso`, `provider: google`) within the user document instead of a separate `sso_accounts` collection.
