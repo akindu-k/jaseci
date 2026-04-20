@@ -144,8 +144,22 @@ Semantics of `storage_mode=True` (in
    `$ref` by the above rule.
 5. Primitives, UUIDs, enums, datetime, bytes, `Permission`, `Access`, plain
    `__dict__` objects: unchanged from today's `_serialize_value`.
+6. **`set` / `frozenset`:** today's serializer lacks a `set` branch and falls through
+   to the stringify fallback. Add a branch alongside `list`/`tuple`:
+   ```jac
+   if isinstance(val, (set, frozenset)) {
+       items = [Serializer._serialize_value(v, ...) for v in val];
+       items.sort(key=_stable_key);   # deterministic order for _compute_hash
+       return {'__type__': 'set', 'items': items};
+   }
+   ```
+   Deserializer dispatches `__type__: 'set'` back to `set(...)`. Uniform with
+   `storage_mode=True`: a `set[Profile]` field becomes
+   `{"__type__": "set", "items": [{"$ref": P1, …}, {"$ref": P2, …}]}`. Stable sort is
+   required so mutations to unrelated fields don't perturb the hash via iteration
+   reordering.
 
-Deserialization needs no changes: `_deserialize_value` at
+Deserialization needs no changes for `$ref`: `_deserialize_value` at
 [serializer.impl.jac#L281](jac/jaclang/runtimelib/impl/serializer.impl.jac#L281) already
 detects `$ref` and dispatches to `_deserialize_jac_ref`.
 
@@ -238,59 +252,218 @@ Partial updates at the HTTP boundary need two small pieces on top:
    recursive and `_pydantic_value_to_jac` to locate-then-mutate instead of construct
    fresh. Ship after Layer 3.1 / 3.2.
 
-### Layer 4 — concurrency (edges race, #5451)
+### Layer 4 — concurrency on collection fields
 
-Layer 3 shrinks the write surface per mutation but does not serialize concurrent writes
+Layers 1–3 shrink the write surface per mutation but don't serialize concurrent writes
 to *the same* archetype row. The repro in
 [#5451](https://github.com/jaseci-labs/jaseci/issues/5451) — two walkers both appending
-an edge to Root — is a concurrent write to `Root.edges`, which is a single field on a
-single row. Layers 1–3 do not fix this.
+to `Root.edges` — is one instance of the general problem: any concurrent mutation to a
+shared list / dict / set field races the same way. Two walkers each doing
+`self.tags.append("x")` will clobber each other exactly like edges do.
 
-Two narrow mechanisms — neither requires field-level dirty tracking, neither requires a
-walker-level transaction manager:
+Layer 4 addresses this in three tiers. Tiers 4.2 and 4.3 are the fast path — they make
+the race impossible at the backend level via atomic operators. Tier 4.4 is the escape
+hatch when 4.2/4.3 can't express the mutation.
 
-**4.1 Mongo `$addToSet` / `$pull` for edges.**
+**4.1 Snapshot-based delta detection (shared primitive).**
 
-The `edges` field on NodeAnchor is semantically a set of EdgeAnchor UUIDs. Swap the
-full `$set: {data.edges: [...]}` write for an atomic element-level operator:
+On successful load or flush, record per-collection-field snapshots on the anchor —
+shallow copies, not deep:
 
 ```jac
-# jac-scale/jac_scale/impl/memory_hierarchy.mongo.impl.jac
-#
-# When the only change on this anchor is additions/removals to edges,
-# emit targeted array ops instead of a full $set.
-impl MongoBackend._put_edges_delta(anchor: NodeAnchor, added: set, removed: set) {
-    ops = {};
-    if added   { ops['$addToSet'] = {'data.edges': {'$each': list(added)}}; }
-    if removed { ops['$pull']     = {'data.edges': {'$in': list(removed)}}; }
+anchor._field_snapshots = {
+    'tags':      list(anchor.archetype.tags),
+    'edges':     list(anchor.edges),                 # NodeAnchor.edges
+    'friends':   list(anchor.archetype.friends),
+    'counts':    dict(anchor.archetype.counts),
+    # … one entry per collection-typed `has` field
+};
+```
+
+At flush time, per field:
+
+```jac
+curr   = current_value_of(field);
+snap   = anchor._field_snapshots[field];
+added  = elements_in(curr) - elements_in(snap);
+removed = elements_in(snap) - elements_in(curr);
+# for dict: changed_keys = {k for k in curr if curr[k] != snap.get(k)}
+```
+
+If *only* collection-field deltas changed (scalar fields and the archetype's own
+hash-excluding-these-fields are unchanged), the backend takes the element-level path
+(4.2 or 4.3). Otherwise, fall through to the full-row `put`. On success, refresh the
+snapshots.
+
+Memory cost: O(|collection|) per collection field per live anchor. Acceptable —
+collections are the same shape as what's in `archetype.__dict__` already.
+
+**4.2 Mongo element-level operators.**
+
+Swap full-blob `$set` for targeted atomic ops by field semantics:
+
+| Field typing / marker                             | Append / add                                  | Remove                                        |
+|---------------------------------------------------|-----------------------------------------------|-----------------------------------------------|
+| `set[T]`, `list[T]` + `@jac.set_semantics`, or `NodeAnchor.edges` | `$addToSet: {path: {$each: list(added)}}`     | `$pullAll: {path: list(removed)}`             |
+| plain `list[T]` (ordered, dups allowed)           | `$push:     {path: {$each: list(added)}}`     | `$pullAll: {path: list(removed)}`             |
+| `dict[str, V]` (scalar V)                         | `$set:      {"path.k": v}` per added/changed  | `$unset:    {"path.k": ""}` per removed       |
+| `dict[str, Archetype]`                            | `$set:      {"path.k": {"$ref": …}}` per key  | `$unset:    {"path.k": ""}` per removed key   |
+
+Example for a mixed append + remove on `NodeAnchor.edges`:
+
+```jac
+impl MongoBackend._put_collection_delta(anchor: Anchor, deltas: list) {
+    ops: dict = {};
+    for d in deltas {
+        if d.op == 'addToSet' {
+            ops.setdefault('$addToSet', {})[d.path] = {'$each': d.values};
+        } elif d.op == 'push' {
+            ops.setdefault('$push', {})[d.path] = {'$each': d.values};
+        } elif d.op == 'pullAll' {
+            ops.setdefault('$pullAll', {})[d.path] = d.values;
+        } elif d.op == 'set' {
+            ops.setdefault('$set', {})[d.path] = d.value;
+        } elif d.op == 'unset' {
+            ops.setdefault('$unset', {})[d.path] = "";
+        }
+    }
     self.collection.update_one({'_id': str(anchor.id)}, ops);
 }
 ```
 
-Detecting "only edges changed" is cheap: compare `anchor.edges` vs. the previously
-flushed snapshot (store `anchor._edges_flushed_snapshot` on every successful put — one
-allocation per flush). If the archetype itself is unchanged and only edges differ, use
-the delta path. Otherwise, fall through to the full-row `put`.
+Two concurrent `tags.append("x")` / `tags.append("y")` both land via `$push` — no race,
+no retry, no CAS. Same for `$addToSet`, `$set` on disjoint dict keys, `$pullAll` on
+disjoint values.
 
-Two concurrent walkers each doing `root._jac_.edges.append(e)` both land via
-`$addToSet` — no race, no retry, no CAS. This directly closes #5451.
+**Ordering and duplicates — ordered `list[T]`.** Under `$push`, the final order is
+"whichever Mongo applied first" — no client-visible guarantee across concurrent pushes.
+For set-semantics fields, order doesn't matter and `$addToSet` also dedupes. For
+ordered-list-with-position-matters (e.g., `log_entries[3] = …`), positional writes can't
+be expressed atomically; fall through to 4.4 CAS.
 
-**4.2 Optimistic version check for non-edges writes (opt-in).**
+**4.3 SQLite JSON1 element-level ops.**
 
-Edges cover #5451. For the general case of two walkers racing on the same scalar or
-nested-object field, add a version column and a CAS:
+SQLite has no native set operator, but it has JSON1 + single-writer semantics: any
+single `UPDATE` statement runs under the write lock, so there's no Python-side
+read-modify-write window. Emit:
 
-- `anchors` gets `version INTEGER NOT NULL DEFAULT 0` (SQLite) / `version` field
+```sql
+-- Append (list, with duplicates allowed):
+UPDATE anchors
+   SET data = json_insert(data, '$.archetype.tags[#]', ?),
+       updated_at = ?
+ WHERE id = ?;
+
+-- Set-semantics add (skip if present):
+UPDATE anchors
+   SET data = CASE
+       WHEN NOT EXISTS (
+           SELECT 1 FROM json_each(data, '$.archetype.tags')
+            WHERE json_each.value = ?
+       )
+       THEN json_insert(data, '$.archetype.tags[#]', ?)
+       ELSE data
+   END,
+   updated_at = ?
+ WHERE id = ?;
+
+-- Remove by value (drop all matches):
+UPDATE anchors
+   SET data = (
+       SELECT json_group_array(value)
+         FROM json_each(data, '$.archetype.tags')
+        WHERE value != ?
+   ) ... wrapped via json_set at the field path ...
+ WHERE id = ?;
+
+-- Dict key set:
+UPDATE anchors
+   SET data = json_set(data, '$.archetype.counts.k', ?)
+ WHERE id = ?;
+
+-- Dict key unset:
+UPDATE anchors
+   SET data = json_remove(data, '$.archetype.counts.k')
+ WHERE id = ?;
+```
+
+Batched per anchor as a single statement (or a short chain in one transaction) so
+concurrent writers serialize on SQLite's write lock rather than races in Python.
+
+Requires SQLite 3.38+ for `->>` and modern `json_*` operators. Already present on every
+platform we target (Python 3.11 bundles 3.40+).
+
+**4.4 Optimistic version check — escape hatch.**
+
+For mutations that don't fit 4.2/4.3 — positional list writes (`list[i] = v`, insert
+at non-tail position), conflict-prone dict-value mutations, or anywhere the user wants
+"fail on concurrent change" rather than "merge" semantics — add a version column and
+retry:
+
+- `anchors` gains `version INTEGER NOT NULL DEFAULT 0` (SQLite) / `version` field
   (Mongo).
-- `put` writes `UPDATE ... SET data=?, version=? WHERE id=? AND version=?` (SQLite) or
-  `update_one({_id, version: N}, {$set: {data, …}, $inc: {version: 1}})` (Mongo).
-- On version mismatch: reload, re-serialize (still per-archetype), retry up to
-  `jac.cas_max_retries` (default 3). On exhaustion raise `ConcurrentWriteExhausted`.
+- `put` writes `UPDATE … WHERE id=? AND version=?` / `update_one({_id, version:N}, …)`.
+- On mismatch: reload from L3, re-apply the walker-side mutation against the reloaded
+  anchor, retry up to `jac.cas_max_retries` (default 3). On exhaustion raise
+  `ConcurrentWriteExhausted`.
 
-This is NOT needed to close #5451 — 4.1 alone closes it — and is NOT required for
-partial updates to work. Ship it behind `jac.optimistic_cas` as a follow-up. Keep the
-naive last-writer-wins behavior for scalar fields as the default; most deployments are
-fine with it once the big-blob-overwrite problem is gone.
+Scoped narrowly — this is the rarely-hit fallback, not the main concurrency story.
+Opt-in via `jac.optimistic_cas = true`. Default remains last-writer-wins for writes
+that aren't covered by 4.2/4.3, which is fine now that the blob-overwrite problem is
+gone.
+
+**How #5451 is closed.**
+
+- Mongo deployments (where the incident was reported): `NodeAnchor.edges` routes
+  through 4.2 `$addToSet` / `$pullAll`. Concurrent `edges.append` calls land
+  atomically, no retry. Test 12 in §6 is the direct repro.
+- SQLite deployments: routes through 4.3's `json_insert` + set-semantics guard.
+  Serialized on the write lock; no loss.
+- Generalizes to any user-defined `set[T]` / `@jac.set_semantics list[T]` /
+  `dict[K, V]` field — not just edges.
+
+### Layer 5 — ownership on remove (opt-in)
+
+Archetypes have independent identity. Removing a `$ref` from a list doesn't delete the
+referenced archetype — by design: the same archetype may be referenced from elsewhere.
+But some fields express true ownership: a `Post.comments` list where removing a
+Comment means that Comment is gone. Make ownership opt-in at the field level.
+
+**Default: reference semantics.** `self.friends.remove(p)` drops the `$ref` from the
+parent; `p`'s own row remains until explicitly destroyed via `Jac.destroy(p)` /
+`mem.delete(p.__jac__.id)`. This is the current behavior; just document it.
+
+**Opt-in: `by owned` field modifier.** Extend the `has` field grammar:
+
+```jac
+node Post {
+    has comments: list[Comment] by owned;     # removing from list → destroy
+    has tags:     list[Tag];                   # default: reference
+    has meta:     dict[str, Attachment] by owned;
+}
+```
+
+`by owned` is a new clause alongside `by postinit`. Implementation:
+
+1. Parser surface: accept `by owned` as a field modifier; store the flag in the
+   generated dataclass field metadata.
+2. Sync-time hook: when Layer 4.1's snapshot diff for an owned collection field shows
+   `removed` elements that are Archetype refs, enqueue each for `mem.delete(jid)`
+   after the parent's delta write succeeds.
+3. Field-reassignment (`post.comments = new_list`): diff the old list vs. new list as
+   above; destroy removed archetypes.
+4. Access control: the destroy call still goes through `Jac.check_write_access` on the
+   child. If the walker lacks permission, log and skip — the parent's delta still
+   lands; the ownership cleanup is best-effort, surfaced via metrics.
+
+The delete is ordered *after* the parent's element-level delta commits, so a crash
+between the two leaves a dangling row rather than a dangling `$ref`. Dangling rows are
+recoverable (Layer 5 deferred — reachability GC); dangling refs are not.
+
+**Deferred: reachability GC.** Periodic mark-and-sweep from all roots to reap
+unreachable archetypes (including cycles that reference counting can't handle). Exposed
+as `jac db gc` plus an optional scheduled job in jac-scale. Large undertaking and
+orthogonal to this plan — ship only when leaks are actually observed.
 
 ## 5. Public API summary
 
@@ -298,19 +471,24 @@ fine with it once the big-blob-overwrite problem is gone.
 |---------------------------------------------------------|------------------------------------------------------------|
 | `Serializer.serialize(..., storage_mode: bool = False)` | new flag, always-ref for nested archetypes                 |
 | `_serialize_value` Archetype branch                     | emits `$ref` under `storage_mode` instead of inlining      |
+| `_serialize_value` set/frozenset branch                 | new — `{"__type__": "set", "items": [...sorted...]}`       |
 | `_anchor_to_row` / `_anchor_to_doc`                     | pass `storage_mode=True`                                   |
 | `SqliteMemory.sync`                                     | hash-diff short-circuit (align with Mongo)                 |
 | `_build_pydantic_patch_model(jac_cls)`                  | new, mirrors `_build_pydantic_model` with optional fields  |
 | `@restspec(method="PATCH", …)` / PATCH verb on walkers  | new verb, uses patch body model                            |
-| `MongoBackend._put_edges_delta`                         | `$addToSet` / `$pull` fast path (Layer 4.1)                |
-| `anchor.version: int` (optional, Layer 4.2)             | CAS column/field, opt-in via `jac.optimistic_cas`          |
-| `ConcurrentWriteExhausted` (optional, Layer 4.2)        | new exception                                              |
+| `anchor._field_snapshots: dict`                         | per-collection-field baseline for Layer 4.1 delta detection|
+| `MongoBackend._put_collection_delta`                    | `$addToSet` / `$push` / `$pullAll` / `$set` / `$unset` routing (Layer 4.2) |
+| `SqliteMemory._put_collection_delta`                    | `json_insert` / `json_remove` / `json_set` routing (Layer 4.3) |
+| `@jac.set_semantics` field marker                       | treats `list[T]` as a set for 4.2/4.3 routing              |
+| `anchor.version: int` (opt-in, Layer 4.4)               | CAS column/field, gated by `jac.optimistic_cas`            |
+| `ConcurrentWriteExhausted` (opt-in, Layer 4.4)          | new exception, retry-exhaustion signal                     |
+| `by owned` field modifier                               | opt-in ownership semantics; remove → `mem.delete` (Layer 5)|
 
 No on-disk schema changes required for Layers 1–3. Existing rows — inlined blobs from
 before this change — remain loadable: deserialization of an inlined nested archetype
-still works (the old code path). Rows rewritten after the switch carry the `$ref` shape.
-Deserializer accepts both. Layer 4.2 adds a nullable `version` column as an idempotent
-`ALTER` / lazy-default field.
+still works (the old code path). Rows rewritten after the switch carry the `$ref`
+shape; deserializer accepts both. Layer 4.4 adds a nullable `version` column as an
+idempotent `ALTER` / lazy-default field.
 
 ## 6. Testing
 
@@ -347,12 +525,39 @@ Deserializer accepts both. Layer 4.2 adds a nullable `version` column as an idem
 
 ### Concurrency (Layer 4)
 12. `test_5451_concurrent_edge_appends_mongo` — N concurrent walkers each append a
-    distinct edge to Root; assert all N edges present after flush. With 4.1's
-    `$addToSet` path, passes without any retry. Direct repro of #5451.
-13. `test_5451_concurrent_edge_appends_sqlite` — same with SQLite; relies on 4.2 CAS.
-    Under `jac.optimistic_cas = False`, documents the known last-writer-wins behavior.
-14. `test_cas_version_mismatch_retries` (Layer 4.2) — artificial conflict; assert
-    bounded retry and correct final state.
+    distinct edge to Root; assert all N edges present after flush. Relies on 4.2
+    `$addToSet`. Direct repro of #5451.
+13. `test_5451_concurrent_edge_appends_sqlite` — N concurrent walkers append edges
+    to Root via 4.3's `json_insert` set-semantics path; assert all N present.
+14. `test_concurrent_list_append_user_field_mongo` — two walkers both do
+    `self.tags.append(…)` on the same User; assert both appends land (plain-list
+    `$push` path).
+15. `test_concurrent_set_add_mongo` — `set[T]` field; two walkers add distinct values;
+    assert both present. Same value from two walkers → idempotent.
+16. `test_concurrent_dict_set_disjoint_keys` — walker A sets `counts["a"]=1`, walker B
+    sets `counts["b"]=2`; assert both keys survive (disjoint `$set` paths).
+17. `test_snapshot_delta_detection` — unit test for Layer 4.1: given before/after
+    field values, compute `added`/`removed` correctly for list/set/dict.
+18. `test_full_blob_fallback_on_scalar_change` — if any scalar field changed alongside
+    collection ops, backend falls back to full-row `put` rather than emitting partial
+    element ops.
+19. `test_cas_version_mismatch_retries` (Layer 4.4) — artificial conflict on a
+    positional list write (`list[i] = v`); assert bounded retry and correct final
+    state.
+20. `test_cas_exhaustion_raises` (Layer 4.4) — sustained conflict beyond
+    `cas_max_retries`; assert `ConcurrentWriteExhausted`.
+
+### Ownership (Layer 5)
+21. `test_owned_field_destroys_on_remove` — `by owned` field; remove an element from
+    the collection; assert `mem.delete` was called on that archetype's jid after the
+    parent's delta commit.
+22. `test_reference_field_keeps_row_on_remove` — default (non-owned) field; remove an
+    element; assert the archetype's row still exists and is loadable.
+23. `test_owned_field_reassignment_destroys_prior` — `post.comments = new_list`;
+    assert elements in old list but not new list are destroyed.
+24. `test_owned_delete_honors_access_control` — walker lacks write access to owned
+    child; assert parent delta still lands, child delete is skipped + logged, no
+    exception.
 
 ## 7. Migration / compatibility
 
@@ -371,25 +576,37 @@ Deserializer accepts both. Layer 4.2 adds a nullable `version` column as an idem
   independent flag; callers choose based on audience (wire vs. API vs. storage).
   The three are composable (though only `storage_mode` + `include_type` is used by
   the persistence layer).
-- **Layer 4.2 schema.** `version INTEGER NOT NULL DEFAULT 0` added idempotently by
+- **Layer 4.2 / 4.3: no schema change.** Element-level operators target the same
+  `data` column; only the query shape changes.
+- **Layer 4.4 schema.** `version INTEGER NOT NULL DEFAULT 0` added idempotently by
   `_ensure_connection`; Mongo treats absent `version` as 0. Disable via
   `jac.optimistic_cas = false` in `jac.toml` for single-writer dev loops.
+- **SQLite version.** Layer 4.3 uses JSON1 operators (`json_insert`, `json_remove`,
+  `json_each`, `json_group_array`) present since SQLite 3.38. Python 3.11+ bundles
+  3.40+, so covered on all supported platforms. Feature-detect on startup and warn if
+  missing; fall through to full-row `put` in that case.
+- **Layer 5 grammar.** `by owned` is a new optional modifier on `has` declarations.
+  Parse-level addition only; omitting it preserves today's reference semantics.
 
 ## 8. Phasing
 
-1. **Phase 1 (Layer 1).** Add `storage_mode` to the serializer. Tests 1–5. No callers
-   opt in yet — behavior unchanged for all existing paths.
+1. **Phase 1 (Layer 1).** Add `storage_mode` + `set` branch to the serializer. Tests
+   1–5. No callers opt in yet — behavior unchanged for all existing paths.
 2. **Phase 2 (Layer 2).** Flip `_anchor_to_row` and `_anchor_to_doc` to
    `storage_mode=True`. Add SQLite hash-diff short-circuit. Tests 6–8. This is where
    partial updates ship end-to-end.
-3. **Phase 3 (Layer 3.1–3.2).** PATCH verb + all-optional body model + `model_fields_set`
-   application. Tests 9–10.
-4. **Phase 4 (Layer 4.1).** Mongo `$addToSet` / `$pull` edges fast path. Test 12.
-   Closes #5451 on the deployment target that actually hits it (the reported incident
-   was Mongo-backed).
-5. **Phase 5 (Layer 4.2, follow-up).** Version column + CAS + retry. Tests 13–14.
-   Opt-in, ships only when a concrete use-case outside of edges motivates it.
-6. **Phase 6 (Layer 3.3, follow-up).** Recursive nested PATCH. Test 11.
+3. **Phase 3 (Layer 3.1–3.2).** PATCH verb + all-optional body model +
+   `model_fields_set` application. Tests 9–10.
+4. **Phase 4 (Layer 4.1 + 4.2).** Snapshot-based delta detection + Mongo element-level
+   operators for all collection types. Tests 12, 14, 15, 16, 17, 18. Closes #5451 for
+   Mongo deployments and generalizes to all user-defined collection fields.
+5. **Phase 5 (Layer 4.3).** SQLite JSON1 element-level operators. Test 13. Closes
+   #5451 for SQLite deployments.
+6. **Phase 6 (Layer 4.4).** Version column + CAS + retry escape hatch. Tests 19–20.
+   Opt-in, ships only for mutations 4.2/4.3 can't express (positional writes).
+7. **Phase 7 (Layer 5).** `by owned` field modifier + ownership cleanup at flush.
+   Tests 21–24.
+8. **Phase 8 (Layer 3.3, follow-up).** Recursive nested PATCH. Test 11.
 
 ## 9. Open questions
 
@@ -402,11 +619,22 @@ Deserializer accepts both. Layer 4.2 adds a nullable `version` column as an idem
    `serialize()` call becomes redundant when `storage_mode=True` (every nested
    archetype is always `$ref`, whether seen or not). Keep `_seen` for `ref_mode=True`
    (wire format), drop for `storage_mode=True` (no behavior change, cleaner code).
-3. **List-field ordering under concurrent writes (non-edges).** If two walkers append
-   to a non-edges list on the same archetype, 4.1's set operators don't apply (list
-   may have duplicates / care about order). Without 4.2 CAS, behavior is
-   last-writer-wins on the list field. Document; offer CAS as the fix.
-4. **Access control on refs.** `Jac.check_write_access(anchor)` runs per anchor. When
+3. **Access control on refs.** `Jac.check_write_access(anchor)` runs per anchor. When
    a parent `$ref`s a child the caller lacks write access to, and the child is
    independently writable, today's per-anchor check handles this correctly. Confirm
    with an explicit test in Phase 2.
+4. **Positional list mutations.** `log[3] = v` or `log.insert(2, v)` can't be
+   expressed as atomic element ops — the correct index depends on what other writers
+   have done. Route through 4.4 CAS; document that positional writes under contention
+   incur retries.
+5. **`@jac.set_semantics` ergonomics.** Do we infer set semantics from `type ==
+   set[T]` alone, or require an explicit marker on `list[T]` that should be treated as
+   a set? Current plan: auto-infer for `set[T]` / `frozenset[T]`, require
+   `@jac.set_semantics` on `list[T]`. Straightforward; revisit if users find it
+   surprising.
+6. **Owned-field interaction with refs from elsewhere.** If a Comment is owned by
+   Post A but also `$ref`'d from an unrelated UserProfile.recent_comments list, removing
+   it from Post A will destroy the row and leave a dangling ref in UserProfile. Options:
+   (a) document "ownership implies exclusive reference", (b) refcount-on-destroy
+   (expensive), (c) defer destroy to reachability GC (Layer 5 deferred). Recommend (a)
+   — ownership is the user's declaration of exclusive lifetime.
