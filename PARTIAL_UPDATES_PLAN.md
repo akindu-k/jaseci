@@ -1,603 +1,412 @@
 # Partial Updates Plan
 
-Design for incremental, field-level anchor updates in Jaclang / Jaseci, building on
-PR [#5387](https://github.com/jaseci-labs/jaseci/pull/5387) (`ref_mode` serializer) and
-PR [#5554](https://github.com/jaseci-labs/jaseci/pull/5554) (custom `obj` types as walker /
-`@restspec` body parameters).
+Design for incremental anchor updates in Jaclang / Jaseci, built on PR
+[#5387](https://github.com/jaseci-labs/jaseci/pull/5387)'s `(type, jid)` identity model
+and PR [#5554](https://github.com/jaseci-labs/jaseci/pull/5554)'s typed walker /
+`@restspec` body handling.
+
+Core idea: **the partial-update unit is an archetype row, keyed by `(type, jid)` — not
+a field inside a blob.** Each archetype lives in its own row. A mutation anywhere in the
+graph re-persists only the specific `(type, jid)` rows whose contents changed; their
+parents and siblings are untouched.
 
 ---
 
 ## 1. Problem statement
 
-Today the persistence layer treats an anchor as an atomic unit:
+Today the persistence layer stores a NodeAnchor / EdgeAnchor as a monolithic JSON blob
+with the entire archetype (and all nested archetypes) inlined under `data.archetype`:
 
 - [_anchor_to_row](jac/jaclang/runtimelib/impl/memory.impl.jac#L23) and
   [_anchor_to_doc](jac-scale/jac_scale/impl/memory_hierarchy.mongo.impl.jac#L48) call
-  `Serializer.serialize(anchor, include_type=True)` and dump the **entire** archetype
-  (all `has` fields + edges + access + topology) into a single `data` JSON/BSON blob.
-- [SqliteMemory.put](jac/jaclang/runtimelib/impl/memory.impl.jac#L550) issues
-  `INSERT OR REPLACE INTO anchors … VALUES (?, …)` — the whole row is rewritten.
-- [MongoBackend.put](jac-scale/jac_scale/impl/memory_hierarchy.mongo.impl.jac#L225) issues
-  `update_one({_id}, {$set: doc}, upsert=True)` where `doc` is the whole serialized anchor.
-- [SqliteMemory.sync](jac/jaclang/runtimelib/impl/memory.impl.jac#L681) does dirty detection
-  at *anchor* granularity (`_canonical_json(stored.archetype) != _canonical_json(anchor.archetype)`)
-  and, on any diff, re-serializes + rewrites the full row.
+  `Serializer.serialize(anchor, include_type=True)` with no `ref_mode`. Nested archetypes
+  inside the archetype are fully inlined.
+- [SqliteMemory.put](jac/jaclang/runtimelib/impl/memory.impl.jac#L550) and
+  [MongoBackend.put](jac-scale/jac_scale/impl/memory_hierarchy.mongo.impl.jac#L225)
+  rewrite the whole row on every change.
 
 Consequences:
-1. Mutating `node.counter += 1` rewrites every other field, edge list, access entry, and
-   topology blob on that node.
-2. Large archetypes (long lists, nested objects, embedded binary in `topology_index_data`)
-   pay O(size) write cost for any change.
-3. Concurrent writes to disjoint fields of the same anchor race — last writer wins,
-   silently clobbering the other field.
-4. `@restspec` PATCH-style endpoints cannot express "update only these fields": the walker
-   receives a *full* reconstructed archetype from the Pydantic body (PR 5554), so any field
-   the client omitted defaults to the schema default and overwrites the stored value on
-   flush.
+1. Mutating `root.profile.display_name` rewrites Root's full blob — including every
+   edge, access entry, topology index, and every other inlined archetype.
+2. A nested archetype has *two* representations on disk: inlined inside its parent's
+   row, and (when `ref_mode=True`) as a standalone anchor row created by
+   `mem.put(jac_anchor)` in
+   [serializer.impl.jac#L141](jac/jaclang/runtimelib/impl/serializer.impl.jac#L141).
+   They drift.
+3. Graph traversals that touch N archetypes cost O(N × blob_size) to persist, when
+   only O(N × local_fields) actually changed.
 
-## 2. What PR 5387 and PR 5554 give us
+## 2. What PR 5387 gives us
 
-### PR 5387 — `ref_mode` serializer
+PR 5387 introduces the primitive we need:
 
-- [Serializer.serialize(obj, ref_mode=True)](jac/jaclang/runtimelib/serializer.jac#L103)
-  tracks visited archetype UUIDs in `_seen` and emits
-  `{"$ref": "<uuid-hex>", "$type": "<kind>"}` for repeats instead of inlining.
-- Each first-time Jac archetype encountered is registered via
-  `Jac.get_context().mem.put(jac_anchor)` at
-  [serializer.impl.jac#L141-L148](jac/jaclang/runtimelib/impl/serializer.impl.jac#L141-L148),
-  so it persists *as its own row* rather than being embedded.
-- [Serializer._deserialize_jac_ref](jac/jaclang/runtimelib/impl/serializer.impl.jac#L197)
-  resolves `$ref` back to the live archetype on read, lazily populating stubs.
+- Every Jac archetype has `(type, jid)` identity. Serialization can emit
+  `{"$ref": jid.hex, "$type": "node" | "edge" | "walker" | "object"}` at
+  [serializer.impl.jac#L136](jac/jaclang/runtimelib/impl/serializer.impl.jac#L136).
+- Deserialization resolves refs back to live archetypes via
+  [_deserialize_jac_ref](jac/jaclang/runtimelib/impl/serializer.impl.jac#L197) →
+  `mem.get(uuid)` with lazy stub fallback.
+- First-sighting of a Jac archetype in a given `serialize()` call registers it via
+  `Jac.get_context().mem.put(jac_anchor)` — so the referenced archetype is persisted as
+  its own standalone row.
 
-This is the primitive we need: **anchors can reference other anchors by UUID rather than
-inline them**. A partial-update scheme can reuse this shape at the *field* level.
+But PR 5387's `ref_mode` is scoped per-call (`_seen` is reset every `serialize()`), so
+it only dedupes *within* one serialization. Across the sync loop, each parent's
+`serialize()` gets a fresh `_seen`, and the nested archetype is inlined again in every
+parent that references it.
 
-### PR 5554 — custom `obj` types at the HTTP boundary
+We extend this: a new serialization mode — **always-ref for nested archetypes** — that
+makes each `(type, jid)` authoritative in exactly one row, referenced from elsewhere.
 
-- `APIParameter.type_obj` preserves the real Python type object alongside the stringified
-  `data_type`.
-- `_resolve_type(type_string, type_obj)` maps Jac archetypes → dynamic Pydantic models,
-  handles `list[T]` / `dict[K,V]` / `T | None` recursively.
-- `_build_pydantic_model(jac_cls)` mirrors a Jac archetype's `has` fields into a Pydantic
-  `BaseModel`, with `ForwardRef` caching for self-referential types (`TreeNode`).
-- `_pydantic_to_jac(...)` rebuilds actual Jac archetype instances from the validated body
-  before the walker runs.
+## 3. Approach: graph-flat persistence via always-ref
 
-This gives us the round-trip machinery for typed, nested, validated JSON patches coming in
-over HTTP. A partial-update endpoint can reuse `_resolve_type` / `_build_pydantic_model`
-with all fields made `Optional` to express a PATCH body.
+### 3.1 Current shape (inline-everything)
 
-## 3. Design
+```
+anchors table
+  Root (NodeAnchor, uuid=R)
+    data = { archetype: {
+               profile: { __type__: Profile, display_name: "Alice", avatar: {...} },
+               ...
+             },
+             edges: [e1, e2, e3] }
+```
 
-Three layers. Each can ship independently; layer 1 is the hard requirement, layer 2
-delivers most of the win, layer 3 is the HTTP surface.
+Mutating `profile.display_name` → rewrite the entire Root row.
 
-### Layer 1 — dirty-field tracking on archetypes
+### 3.2 Target shape (always-ref)
 
-Goal: at flush time, know *which fields* of an anchor were written since last persist.
+```
+anchors table
+  Root (NodeAnchor, uuid=R)
+    data = { archetype: {
+               profile: { $ref: P, $type: "object" },   ← pointer, not inline
+               ...
+             },
+             edges: [e1, e2, e3] }
+  Profile (ObjectAnchor, uuid=P)
+    data = { archetype: { display_name: "Alice", avatar: { $ref: A, $type: "object" } } }
+  Avatar (ObjectAnchor, uuid=A)
+    data = { archetype: { url: "...", width: 128 } }
+```
 
-1. **Per-archetype dirty set.**
-   Add a non-persistent attribute on `Archetype` (parallel to `__jac__`):
-   `_jac_dirty: set[str] | None`. It is `None` on a freshly-loaded anchor (everything is
-   "clean"); becomes a `set` once any write happens.
+Mutating `profile.display_name`:
+- Profile's archetype hash changes → Profile row (P) rewritten.
+- Root's blob still says `{ $ref: P }` — byte-identical — so Root's hash does not
+  change → Root row not touched. Same for Avatar.
 
-2. **Instrument `__setattr__`.**
-   Extend [Archetype.__setattr__](jac/jaclang/jac0core/impl/archetype.impl.jac#L289) so
-   user-defined `has` fields (filtered via `dataclasses.fields(type(self))`) add their name
-   to `self._jac_dirty` before delegating to `object.__setattr__`. Ignore writes to
-   `__jac__`, `_jac_dirty`, and other dunder/internal names.
+This is the partial update. It is *per-archetype*, which is the right granularity for
+this codebase because:
+- `(type, jid)` is already the unit of identity at load time (`mem.get(uuid)`), access
+  control (`anchor.access`), and drift detection (per-class `__jac_fingerprint__`).
+- Existing dirty detection — `_compute_hash(anchor) == anchor.hash` in
+  [MongoBackend.sync](jac-scale/jac_scale/impl/memory_hierarchy.mongo.impl.jac#L353) —
+  already skips unchanged anchors at exactly this granularity. The hash just happens to
+  be too coarse today because *the blob is too large*. Shrinking the blob to own-fields
+  only makes the existing mechanism effective.
 
-3. **Mutable-collection writes.**
-   `list.append`, `dict[k] = v`, `set.add` do not go through `__setattr__`. Two options:
-   - **(A) Coarse:** leave collection mutations as "replace whole field" — if the user
-     assigned `self.items` at any point, mark `items` dirty and re-serialize that field.
-     The existing `_compute_hash` in
-     [memory.impl.jac](jac/jaclang/runtimelib/impl/memory.impl.jac) already catches
-     mutations; we only need to *also* know *which* field changed. On mismatch, compare
-     current vs. stored `_serialize_attrs` dict and derive the diff (one-shot, at sync
-     time) — acceptable because the cost is still bounded by number of fields, not total
-     payload.
-   - **(B) Precise:** wrap `list` / `dict` / `set` collection values in jac-aware proxies
-     that forward mutation events back to the owning archetype. More work, more invasive.
-     Defer.
+No new dirty-field tracking, no JSON-path patches, no op logs. Just: make each
+archetype's row contain only its own fields + refs, and the existing per-anchor
+hash-diff sync becomes the partial-update mechanism for free.
 
-   Ship (A) first. Revisit (B) if profiling shows the diff step dominates.
+## 4. Design
 
-4. **Clear on persist.**
-   After a successful `put`/`sync`, set `anchor.archetype._jac_dirty = set()` and update
-   `anchor.hash = Serializer._compute_hash(anchor)` as today. After a fresh load from L3,
-   set `_jac_dirty = None` (absent-means-clean, distinguishable from "empty set after
-   flush").
+### Layer 1 — serializer: `storage_mode` (always-ref for nested archetypes)
 
-**Exit criteria.** `node.archetype._jac_dirty` reflects the set of `has` fields written
-since load/flush. Existing tests in
-[test_memory_hierarchy.jac](jac-scale/jac_scale/tests/test_memory_hierarchy.jac) still
-pass (hash invariants unchanged).
-
-### Layer 2 — partial persistence at the storage boundary
-
-Goal: when only *k* of *n* fields are dirty, write O(k) to the backend, not O(n).
-
-#### 2a. Serializer: produce a field-level delta
-
-Add a new helper mirroring `_serialize_attrs`:
+Extend [Serializer.serialize](jac/jaclang/runtimelib/serializer.jac#L103) with a new
+flag:
 
 ```jac
-static def _serialize_delta(
+static def serialize(
     `obj: object,
-    fields: set[str],              # names to include
-    include_type: bool,
+    include_type: bool = False,
+    api_mode: bool = False,
     ref_mode: bool = False,
-    _seen: (tuple[set, set] | None) = None
-) -> dict[str, object];
+    storage_mode: bool = False      # new
+) -> object;
 ```
 
-Returns `{field_name: serialized_value}` for just the named fields, reusing
-`_serialize_value` per entry. `$ref` logic from PR 5387 works unchanged: a dirty field
-whose value is an already-persisted Jac archetype emits `{"$ref": …}`.
+Semantics of `storage_mode=True` (in
+[_serialize_value](jac/jaclang/runtimelib/impl/serializer.impl.jac#L37)):
 
-#### 2b. SQLite backend — JSON patch via `json_set`
+1. Top-level Anchor branch (`isinstance(val, Anchor)`): unchanged — the Anchor's
+   archetype is inlined in its own row's blob (otherwise the row would be empty).
+2. **Nested Archetype branch (`isinstance(val, Archetype)`):** if `val` has a
+   `__jac__` anchor (every user archetype does via `Archetype.__init_subclass__`):
+   - Always emit `{"$ref": val.__jac__.id.hex, "$type": <kind>}`.
+   - Call `Jac.get_context().mem.put(val.__jac__)` to ensure the referenced archetype
+     is scheduled for its own row write.
+   - Do NOT fall through to `_serialize_attrs(val)`. The referenced row is the
+     authoritative copy.
+3. Archetype without `__jac__` (rare — literal archetype subclass used as a value
+   type, no identity): fall back to the current inline behavior.
+4. Collections (list, tuple, dict, set) of archetypes: recurse; each element emits
+   `$ref` by the above rule.
+5. Primitives, UUIDs, enums, datetime, bytes, `Permission`, `Access`, plain
+   `__dict__` objects: unchanged from today's `_serialize_value`.
 
-SQLite 3.38+ ships `json_set` / `jsonb_set`. Path map:
+Deserialization needs no changes: `_deserialize_value` at
+[serializer.impl.jac#L281](jac/jaclang/runtimelib/impl/serializer.impl.jac#L281) already
+detects `$ref` and dispatches to `_deserialize_jac_ref`.
 
-| Dirty kind             | JSON path                                            |
-|------------------------|------------------------------------------------------|
-| archetype field `name` | `$.archetype.name`                                   |
-| `edges` (NodeAnchor)   | `$.edges`                                            |
-| `access`               | `$.access`                                           |
-| `topology_index_data`  | `$.topology_index_data`                              |
+**Corner case — unpopulated parent.** When an archetype was loaded lazily and hasn't
+been populated, `val.__jac__` exists but its archetype is a stub. `storage_mode` still
+emits `$ref` for it (the jid is stable across populate/depopulate). No need to populate
+solely to serialize a reference.
 
-New method on `PersistentMemory`:
+**Corner case — NodeAnchor.edges.** Edges are already a `list[str(uuid)]` of EdgeAnchor
+UUIDs at
+[serializer.impl.jac#L98](jac/jaclang/runtimelib/impl/serializer.impl.jac#L98) — already
+ref-like, just via a bespoke format. Leave as-is. EdgeAnchors get their own rows via
+the existing Anchor code path.
+
+**Corner case — ref to archetype owned by another root.** `mem.put` handles
+cross-root scheduling; access-control checks (`Jac.check_write_access`) still apply per
+referenced anchor before each write.
+
+### Layer 2 — persistence: use `storage_mode=True` and rely on per-anchor hash diff
+
+One-line change in each backend helper:
 
 ```jac
-def patch(anchor: Anchor, fields: (set[str] | None) = None) -> None abs;
+# jac/jaclang/runtimelib/impl/memory.impl.jac  (_anchor_to_row)
+data = Serializer.serialize(anchor, include_type=True, storage_mode=True);
+
+# jac-scale/jac_scale/impl/memory_hierarchy.mongo.impl.jac  (_anchor_to_doc)
+data = Serializer.serialize(anchor, include_type=True, storage_mode=True);
 ```
 
-[SqliteMemory.patch](jac/jaclang/runtimelib/impl/memory.impl.jac) implementation sketch:
+Then tighten the sync loops to lean on the hash diff we already compute:
+
+- **MongoBackend.sync** at
+  [memory_hierarchy.mongo.impl.jac#L343](jac-scale/jac_scale/impl/memory_hierarchy.mongo.impl.jac#L343)
+  already uses `if current_hash == anchor.hash { continue; }`. Nothing to change —
+  once blobs shrink, this becomes a true partial-update skip for unchanged anchors.
+- **SqliteMemory.sync** at
+  [memory.impl.jac#L681](jac/jaclang/runtimelib/impl/memory.impl.jac#L681) currently
+  does a more expensive `_canonical_json(stored.archetype) != _canonical_json(anchor.archetype)`
+  diff. Replace with the same hash-short-circuit:
+  ```jac
+  if Serializer._compute_hash(anchor) == anchor.hash { continue; }
+  ```
+  Keep the edge/access/archetype branch logic for the cases that *do* need an update —
+  but now those writes are scoped to the one anchor whose hash changed, not every
+  anchor in the graph.
+
+**What happens on a graph mutation:**
+
+1. Walker runs, mutates `profile.display_name`.
+2. Walker ends → `Jac.get_context().mem.sync()`.
+3. Sync iterates `__mem__`:
+   - Root: hash unchanged (its blob is still `{profile: {$ref: P}, edges: […]}`) →
+     skip.
+   - Profile: hash changed → re-serialize (`storage_mode=True` emits own fields only,
+     plus `{$ref: A}` for avatar) → single-row write.
+   - Avatar: hash unchanged → skip.
+4. One row written, proportional to Profile's own field count.
+
+### Layer 3 — HTTP / walker partial updates
+
+PR 5554 already types walker / `@restspec` body parameters as real Jac archetypes via
+`_build_pydantic_model` and reconstructs archetype instances via `_pydantic_to_jac`.
+Partial updates at the HTTP boundary need two small pieces on top:
+
+1. **All-optional body model for PATCH verbs.** New
+   `_build_pydantic_patch_model(jac_cls)` in the same jac-scale parameters module that
+   owns `_build_pydantic_model`. Mirrors the existing builder but wraps every field in
+   `Optional[T]` with a sentinel default so "field absent in body" is distinguishable
+   from "field explicitly sent as null".
+
+2. **Apply only explicitly-sent fields.** After Pydantic validation, `body.model_fields_set`
+   gives the set of fields the caller actually sent. Instead of calling
+   `_pydantic_to_jac` to build a fresh archetype and assign it wholesale, iterate
+   `model_fields_set` and assign each field onto the *existing loaded archetype*:
+
+   ```python
+   target = Jac.get_context().mem.get(target_id).archetype
+   for fname in body.model_fields_set:
+       setattr(target, fname, _pydantic_value_to_jac(getattr(body, fname), hints[fname]))
+   ```
+
+   `setattr` on a nested archetype field just rebinds that field on `target`; if the
+   new value is itself an archetype with a `__jac__`, it participates in Layer 1's
+   always-ref dance on next serialize.
+
+3. **Nested PATCH (follow-up).** For `PATCH /user/{id} {"profile": {"display_name": "X"}}`
+   we want to recurse: find the existing `target.profile`, `setattr` only
+   `display_name` on it, don't touch `avatar`. Requires the patch model builder to be
+   recursive and `_pydantic_value_to_jac` to locate-then-mutate instead of construct
+   fresh. Ship after Layer 3.1 / 3.2.
+
+### Layer 4 — concurrency (edges race, #5451)
+
+Layer 3 shrinks the write surface per mutation but does not serialize concurrent writes
+to *the same* archetype row. The repro in
+[#5451](https://github.com/jaseci-labs/jaseci/issues/5451) — two walkers both appending
+an edge to Root — is a concurrent write to `Root.edges`, which is a single field on a
+single row. Layers 1–3 do not fix this.
+
+Two narrow mechanisms — neither requires field-level dirty tracking, neither requires a
+walker-level transaction manager:
+
+**4.1 Mongo `$addToSet` / `$pull` for edges.**
+
+The `edges` field on NodeAnchor is semantically a set of EdgeAnchor UUIDs. Swap the
+full `$set: {data.edges: [...]}` write for an atomic element-level operator:
 
 ```jac
-impl SqliteMemory.patch(anchor: Anchor, fields: (set[str] | None) = None) -> None {
-    if anchor is None or not anchor.persistent { return; }
-    dirty = fields if fields is not None else (
-        anchor.archetype._jac_dirty if anchor.archetype else None
-    );
-    if not dirty {
-        self.put(anchor);  # fallback: full rewrite (e.g. new anchor)
-        return;
-    }
-    self._ensure_connection();
-    delta = Serializer._serialize_delta(
-        anchor.archetype, dirty, include_type=True
-    );
-    # Build a single json_set() call with alternating (path, value) pairs.
-    path_value_pairs = [];
-    for name in dirty {
-        path_value_pairs.append(f"$.archetype.{name}");
-        path_value_pairs.append(json.dumps(delta[name]));
-    }
-    # Edge-set / access changes hit top-level paths instead.
-    ...
-    self.__conn__.execute(
-        "UPDATE anchors SET data = json_set(data, " + placeholders + "), "
-        "updated_at = ? WHERE id = ?",
-        tuple(path_value_pairs) + (now, str(anchor.id))
-    );
-    self.__conn__.commit();
-    anchor.hash = Serializer._compute_hash(anchor);
-    anchor.archetype._jac_dirty = set();
+# jac-scale/jac_scale/impl/memory_hierarchy.mongo.impl.jac
+#
+# When the only change on this anchor is additions/removals to edges,
+# emit targeted array ops instead of a full $set.
+impl MongoBackend._put_edges_delta(anchor: NodeAnchor, added: set, removed: set) {
+    ops = {};
+    if added   { ops['$addToSet'] = {'data.edges': {'$each': list(added)}}; }
+    if removed { ops['$pull']     = {'data.edges': {'$in': list(removed)}}; }
+    self.collection.update_one({'_id': str(anchor.id)}, ops);
 }
 ```
 
-Row is rewritten on disk (SQLite MVCC cannot avoid that), but the serialization /
-JSON-encode / IPC surface is proportional to dirty-field count. That is the measurable
-win on large anchors.
-
-**Schema drift.** If `fingerprint` changed (archetype schema bump), fall back to full
-`put` — partial update cannot be reasoned about across drifts. Reuse the existing
-quarantine path on deserialize errors.
-
-#### 2c. Mongo backend — native `$set` on subpaths
-
-Mongo is the bigger win: subdocument `$set` genuinely writes only the affected subtree.
-
-```jac
-impl MongoBackend.patch(anchor: Anchor, fields: (set[str] | None) = None) -> None {
-    dirty = fields if fields is not None else (
-        anchor.archetype._jac_dirty if anchor.archetype else None
-    );
-    if not dirty { self.put(anchor); return; }
-    delta = Serializer._serialize_delta(
-        anchor.archetype, dirty, include_type=True
-    );
-    set_doc = {f"data.archetype.{k}": v for (k, v) in delta.items()};
-    set_doc["updated_at"] = datetime.now(timezone.utc).isoformat();
-    self.collection.update_one({'_id': str(anchor.id)}, {'$set': set_doc});
-    anchor.hash = Serializer._compute_hash(anchor);
-    anchor.archetype._jac_dirty = set();
-}
-```
-
-For edge / access / topology mutations, map to `data.edges`, `data.access`,
-`data.topology_index_data` respectively.
-
-#### 2d. Sync integration
-
-Rewrite [SqliteMemory.sync](jac/jaclang/runtimelib/impl/memory.impl.jac#L681) and
-[MongoBackend.sync](jac-scale/jac_scale/impl/memory_hierarchy.mongo.impl.jac#L343) to call
-`patch(anchor)` instead of the full `put(anchor)` when
-`anchor.archetype._jac_dirty` is a non-empty set. Fall back to `put` when:
-- anchor row doesn't yet exist in backend (new anchor — full insert),
-- `anchor.hash == 0` (first-time persist),
-- serializer delta raises / schema fingerprint mismatches,
-- `_jac_dirty is None` but `_compute_hash(anchor) != anchor.hash` (unknown dirty set —
-  diff stored vs. current, treat that diff as the dirty set; see Layer 1 option A).
-
-### Layer 3 — PATCH semantics at the HTTP / walker boundary
-
-Goal: a REST call `PATCH /walker/UpdateUser {name: "new"}` updates *only* `name`, not
-`age`, on the target node.
-
-#### 3a. New `@restspec` verb: `patch` (or `partial=True`)
-
-- Extend the existing registration path in jac-scale so `@restspec(method="PATCH", ...)`
-  (or an equivalent marker) produces a walker whose body model is the **all-optional**
-  variant of the archetype's Pydantic model.
-
-#### 3b. Optional-model builder
-
-Add to jac-scale (same module as `_build_pydantic_model`):
-
-```python
-def _build_pydantic_patch_model(jac_cls):
-    """Mirror of _build_pydantic_model but wraps every field in Optional[T] with
-    default=UNSET so '`missing` != explicit null'."""
-```
-
-Use Pydantic v2's `model.model_fields_set` on the parsed body to know exactly which
-fields the caller *explicitly sent*. That set becomes the initial dirty set.
-
-#### 3c. Apply to the live anchor
-
-Instead of constructing a fresh archetype via `_pydantic_to_jac` and replacing
-`anchor.archetype`, iterate `model.model_fields_set` and assign each field onto the
-already-loaded anchor:
-
-```python
-for fname in body.model_fields_set:
-    val = getattr(body, fname)
-    # _pydantic_to_jac already handles nested archetype → Jac conversion per value.
-    setattr(anchor.archetype, fname, _pydantic_value_to_jac(val, type_hint[fname]))
-```
-
-`Archetype.__setattr__` from Layer 1 populates `_jac_dirty` automatically. Walker flush
-→ `patch(anchor)` from Layer 2 → backend-level partial write.
-
-#### 3d. Nested partial updates (follow-up)
-
-For a nested archetype field like `user.address`, a caller sending
-`{"address": {"city": "X"}}` should patch only `city`, not clobber `address.street`.
-Requires the patch model to be recursive: each nested `_build_pydantic_patch_model`
-itself produces a patch model, and `_pydantic_to_jac` recurses similarly. Land this as a
-follow-up once Layer 3a/b/c ship.
-
-### Layer 4 — concurrency control (optimistic CAS + unit-of-work)
-
-Goal: eliminate lost-update races like [#5451](https://github.com/jaseci-labs/jaseci/issues/5451) and address the broader concurrent-correctness concerns CAS alone does not: retry correctness, cross-anchor transactions, L2 coherence, livelock, semantic conflicts, idempotency.
-
-Layer 4 extends Layers 1–2 rather than replacing them. Field-level dirty tracking from Layer 1 keeps CAS cheap (version check per anchor, delta scoped per field); the op log from §4b is a strict superset of Layer 1's `_jac_dirty` set.
-
-#### 4a. Anchor version column / field
-
-Add `version: int` to every anchor row/document. Monotonically increments on each successful write. Default 0 for new anchors.
-
-- **SQLite:** `ALTER TABLE anchors ADD COLUMN version INTEGER NOT NULL DEFAULT 0` (idempotent, run from `_ensure_connection`).
-- **Mongo:** new field `version`; treat missing as 0 during rollout.
-
-All `put`/`patch` paths read current `anchor.version`, write with `version = N+1`, and condition the UPDATE on `version = N`:
-
-```sql
-UPDATE anchors
-   SET data = json_set(data, …), version = ?, updated_at = ?
- WHERE id = ? AND version = ?
-```
-
-```python
-collection.update_one(
-    {'_id': str(anchor_id), 'version': N},
-    {'$set': delta, '$inc': {'version': 1}}
-)
-```
-
-Success = `rowcount == 1` / `matched_count == 1`. Anything else routes to §4d. Access-control checks (`Jac.check_write_access`) stay in their current position, *before* the CAS attempt.
-
-#### 4b. Op log — "replay the intent, not the state"
-
-Blind retry of a stale in-memory anchor reintroduces the lost-update bug. Retry must re-apply *what the walker intended to do*, not *what the walker currently holds*.
-
-Replace Layer 1's `_jac_dirty: set[str] | None` with a richer `_jac_ops: list[Op] | None`, where `Op` is a tagged variant:
-
-| Variant                        | Captured by                                   | Idempotent on replay? |
-|--------------------------------|-----------------------------------------------|-----------------------|
-| `SetField(name, value)`        | `__setattr__` on a `has` field                | yes (LWW within window) |
-| `ListAppend(field, value)`     | proxied `list.append`                         | yes (skip if equal element exists) |
-| `ListExtend(field, values)`    | proxied `list.extend` / `+=`                  | per-element |
-| `ListRemove(field, value)`     | proxied `list.remove`                         | yes (skip if absent) |
-| `ListSetAt(field, idx, value)` | proxied `list.__setitem__`                    | no (position-dependent — see §8) |
-| `DictSet(field, key, value)`   | proxied `dict.__setitem__`                    | yes (LWW per key) |
-| `DictDel(field, key)`          | proxied `dict.__delitem__`                    | yes (skip if absent) |
-| `SetAdd(field, value)`         | proxied `set.add`                             | yes |
-| `SetDiscard(field, value)`     | proxied `set.discard`                         | yes |
-| `ReadField(name, snapshot)`    | explicit `jac.observed(expr)` in walker       | read-set (§4e) |
-
-Collection values on loaded archetypes are wrapped in thin proxy classes (`_JacTrackedList`, `_JacTrackedDict`, `_JacTrackedSet`) on first access; mutations record ops on the owning archetype. `NodeAnchor.edges` in particular becomes a `_JacTrackedList`.
-
-- `SetField` for whole-collection assignment (`self.items = [...]`) emits a replace op, *not* per-element appends — opt-out for last-writer-wins semantics.
-- Equality for `ListAppend`/`ListRemove` on archetype references is by UUID, not by `__eq__` on the archetype (which would recurse through `$ref` graphs).
-
-#### 4c. Unit-of-work per walker execution
-
-Today each `mem.put` / `mem.sync` call runs independently. Layer 4 introduces a per-walker-execution commit boundary.
-
-- `ExecutionContext` tracks every anchor touched during the current walker run (populated as `_jac_ops` accumulates).
-- At walker completion (or explicit `Jac.commit()`):
-  1. Open a backend transaction — SQLite `BEGIN IMMEDIATE`; Mongo `session.with_transaction(...)`.
-  2. For each touched anchor: produce delta from `_jac_ops`, issue version-checked UPDATE.
-  3. All UPDATEs match → commit. Clear op logs; bump in-memory `anchor.version`.
-  4. Any UPDATE fails on version → abort, proceed to §4d.
-
-Per-anchor CAS without a transaction can land anchor A but fail anchor B, leaving partial state. SQLite transactions are cheap; Mongo transactions require a replica set and have modest overhead — acceptable at walker-flush granularity. Standalone Mongo falls back to per-anchor CAS with a startup warning (see §8).
-
-#### 4d. Retry policy
-
-On conflict, retry at *persistence* level first — not walker level:
-
-1. Reload conflicting anchors from L3 (bypass L1/L2).
-2. Re-apply each anchor's `_jac_ops` against the reloaded archetype (idempotent per §4b).
-3. Recompute delta; re-open transaction; re-issue version-checked UPDATEs.
-4. On repeated conflict: exponential backoff with jitter — `base_ms * 2^attempt + random(0, base_ms)`, `base_ms = 5`, capped at `max_delay_ms = 500`.
-5. Bounded to `max_retries` (default `5`, via `jac.cas_max_retries`).
-6. On exhaustion: raise `ConcurrentWriteExhausted(anchor_ids, attempts)`. The default `@restspec` error handler maps this to HTTP 409.
-
-For walkers whose control flow branches on observed values (not just blind mutations), persistence-level replay is insufficient — the walker body must re-run:
-
-```jac
-@walker:pub(transactional=True, max_retries=3)
-walker UpdateCounter { ... }
-```
-
-Transactional walkers re-execute their body on conflict, within the same retry budget. Non-idempotent side effects inside transactional walkers (external API calls, log emits, message sends) are the caller's responsibility; a linter check (§8) flags suspected cases at `jac check` time.
-
-#### 4e. Semantic conflicts — read-set tracking
-
-CAS prevents overwrites but not logic races: "I deleted e2 because I read that e2 existed" can still fire after someone else also deleted e2, rendering the precondition vacuous.
-
-Two mechanisms:
-
-1. **Explicit observation (available at all layers):** `jac.observed(expr)` records a `ReadField(name, snapshot)` op. On retry, each read op is re-checked against the reloaded anchor. If the snapshot has changed, escalate persistence-retry to walker-retry. If already at walker-retry, surface `ReadSetConflict` (409).
-2. **Automatic read-set (opt-in via `@transactional`):** instrument attribute reads inside transactional walker bodies to auto-record `ReadField`. This is snapshot isolation. More overhead; opt-in for correctness-critical walkers only.
-
-#### 4f. L2 (Redis) cache coherence
-
-On successful transaction commit, publish `{id, new_version}` on the Redis pub/sub channel `jac:anchor:invalidate`. Every process subscribes on startup; on receipt:
-
-- Drop the UUID from L1 (`VolatileMemory.__mem__`) if `cached.version < new_version`.
-- Drop from L2 distributed cache.
-- Do not pre-populate — lazy reload on next access.
-
-Reads that populate caches carry `version` with the serialized anchor. Writers can *fast-fail* before opening a transaction: if `anchor.version < L1[id].version`, the local copy is known stale; force reload, re-replay ops, then commit. Fewer futile CAS attempts under high-read/low-write workloads.
-
-For single-node deployments (SQLite, no Redis), the in-process dict is the only cache; invalidation is a direct `pop`. No pub/sub needed.
-
-#### 4g. Hot-node livelock mitigation
-
-Sustained concurrent writes on anchors like Root can livelock the optimistic loop. Mitigations:
-
-- **Metrics:** retry-count histogram per anchor UUID + counter for `ConcurrentWriteExhausted`, exposed via the existing jac-scale Prometheus path. Hot spots surface as a heavy histogram tail.
-- **Per-anchor pessimistic lock (opt-in):** `@jac.hot_path(lambda: Root, lock_ms=200)` acquires a Redis distributed lock keyed on the resolved anchor UUID before entering the CAS section. Serializes contenders on that specific anchor. Lock timeout → `ConcurrentWriteExhausted`.
-- **Adaptive fallback:** if a given anchor UUID exceeds `jac.cas_hot_threshold_per_sec` conflicts (default 10/sec), auto-escalate subsequent writers on that UUID to the pessimistic path for `jac.cas_hot_cooldown_sec` (default 5s). Logged at `warning`.
-
-Pessimistic lock is strictly the fallback; optimistic remains the default.
-
-#### 4h. Edge-specific fast path (Mongo)
-
-Even with Layer 4, every edge append on a hot Root incurs a CAS round-trip. For edges specifically — the exact case in #5451 — Mongo's array operators eliminate the race server-side:
-
-- `ListAppend` on `NodeAnchor.edges` → `{'$addToSet': {'data.edges': edge_uuid}, '$inc': {'version': 1}}`
-- `ListRemove` on edges → `{'$pull': {'data.edges': edge_uuid}, '$inc': {'version': 1}}`
-
-`$addToSet` / `$pull` are atomic server-side — two concurrent edge appends both land, no retry. `$inc: {version: 1}` preserves the CAS invariant for other fields on the same anchor. Gated by the field having set-like semantics (declared via `@jac.set_semantics` on the `has` field, or inferred for `NodeAnchor.edges`).
-
-SQLite has no atomic-array operator; falls through to the general CAS + op-replay path. This is a Mongo-only optimization.
-
-#### 4i. Configuration summary
-
-| Setting                            | Default | Purpose                                           |
-|------------------------------------|---------|---------------------------------------------------|
-| `jac.optimistic_cas`               | `True`  | Master switch for Layer 4                         |
-| `jac.cas_max_retries`              | `5`     | Persistence-level retry bound                     |
-| `jac.cas_base_delay_ms`            | `5`     | Backoff base                                      |
-| `jac.cas_max_delay_ms`             | `500`   | Backoff cap                                       |
-| `jac.cas_hot_threshold_per_sec`    | `10`    | Conflict-rate trigger for pessimistic fallback    |
-| `jac.cas_hot_cooldown_sec`         | `5`     | Pessimistic cooldown window                       |
-| `jac.walker_unit_of_work`          | `True`  | Wrap walker flush in backend transaction          |
-
-All overridable via `jac.toml`.
-
-#### 4j. How Layer 4 answers each concern from §CAS review
-
-| Concern                                    | Covered by                                                  |
-|--------------------------------------------|-------------------------------------------------------------|
-| Retry correctness (replay intent)          | §4b op log + §4d step 2 (op-replay, not state-replay)       |
-| Cross-anchor transactions                  | §4c backend transactions around multi-anchor delta          |
-| L2 / Redis coherence                       | §4f pub/sub invalidation + version-tagged cache entries     |
-| Hot-node livelock                          | §4g bounded retry + backoff + adaptive pessimistic fallback |
-| Semantic conflicts (logic races)           | §4e `jac.observed` + `@transactional` snapshot isolation    |
-| Idempotency on retry                       | §4b idempotent op variants + documented non-idempotent edge |
-
-## 4. Public API summary
-
-| Surface                                           | New / changed                                          |
-|---------------------------------------------------|--------------------------------------------------------|
-| `Serializer._serialize_delta(obj, fields, …)`     | new static helper                                      |
-| `Archetype._jac_dirty: set[str] \| None`          | new non-persistent attribute                           |
-| `Archetype.__setattr__`                           | updated to track dirty fields                          |
-| `Memory.patch(anchor, fields=None)`               | new abstract method                                    |
-| `SqliteMemory.patch` / `MongoBackend.patch`       | new concrete implementations                           |
-| `SqliteMemory.sync` / `MongoBackend.sync`         | route dirty anchors through `patch` instead of `put`   |
-| `@restspec(method="PATCH", …)` in jac-scale       | new verb, all-optional body model                      |
-| `_build_pydantic_patch_model(cls)`                | new builder (jac-scale `parameters` module)            |
-| `Archetype._jac_ops: list[Op] \| None`            | supersedes `_jac_dirty` once Layer 4 lands             |
-| `_JacTrackedList` / `_JacTrackedDict` / `_JacTrackedSet` | collection proxies that capture mutation ops     |
-| `anchor.version: int`                             | new CAS version field; persisted                       |
-| `Memory.patch(anchor, fields, expected_version)`  | signature gains `expected_version`; returns `bool`     |
-| `Jac.commit()`                                    | explicit end-of-unit-of-work flush                     |
-| `jac.observed(expr)`                              | read-set annotation for snapshot isolation             |
-| `@walker:pub(transactional=True, max_retries=N)`  | opt-in whole-walker retry                              |
-| `@jac.hot_path(anchor_fn, lock_ms)`               | opt-in pessimistic lock for known-hot anchors          |
-| `@jac.set_semantics` on a `has` field             | enables Mongo `$addToSet` / `$pull` fast path          |
-| `ConcurrentWriteExhausted`, `ReadSetConflict`     | new exception types                                    |
-
-SQLite anchors table gains a `version INTEGER NOT NULL DEFAULT 0` column; Mongo
-documents gain a `version` field. Existing `data` JSON blobs remain readable; the patch
-path mutates them in place via `json_set` / dotted-`$set`. Existing rows without
-`version` are treated as `version = 0` on first access.
-
-## 5. Testing
-
-### Unit (jaclang runtime)
-1. `test_dirty_tracking` — assign a field, assert name appears in `_jac_dirty`; flush,
-   assert cleared.
-2. `test_serialize_delta` — given dirty set `{"name"}`, assert output keys are
-   exactly `{"name"}` and shape matches `_serialize_attrs`' corresponding entry.
-3. `test_setattr_ignored_fields` — assignments to `__jac__`, dunder names, and
-   non-`has` attributes must NOT mark dirty.
-4. `test_list_mutation_detected` — `self.items.append(x)` path: hash mismatch → sync
-   derives dirty field via stored-vs-current diff (Layer 1 option A). Confirms
-   correctness when `__setattr__` is bypassed.
-
-### SQLite integration
-5. `test_sqlite_patch_single_field` — persist anchor with 5 fields, patch 1, assert
-   backend row's JSON has only that key changed, others byte-identical to prior
-   serialization.
-6. `test_sqlite_patch_edges` — patch `$.edges` independently of archetype fields.
-7. `test_sqlite_patch_fingerprint_drift` — schema bump falls back to full `put`,
-   logs at `info`.
-
-### Mongo integration (jac-scale)
-8. `test_mongo_partial_set` — watch the driver command log, assert
-   `{$set: {"data.archetype.name": "x"}}` is issued (one key, not a wholesale doc
-   replacement).
-9. `test_mongo_patch_concurrent_disjoint_fields` — two clients patch disjoint fields of
-   the same anchor concurrently; both writes survive (previously last-writer-wins).
-
-### HTTP / walker (jac-scale)
-10. `test_restspec_patch_omits_unspecified` — PATCH body `{name: "b"}` against node with
-    `{name: "a", age: 30}` → `age == 30` after flush.
-11. `test_restspec_patch_explicit_null` — body `{name: null}` actually writes `null`
-    (present in `model_fields_set`), distinct from omission.
-12. `test_restspec_patch_nested_obj_field` (Layer 3d, follow-up) — nested partial does
-    not clobber sibling fields on the nested archetype.
+Detecting "only edges changed" is cheap: compare `anchor.edges` vs. the previously
+flushed snapshot (store `anchor._edges_flushed_snapshot` on every successful put — one
+allocation per flush). If the archetype itself is unchanged and only edges differ, use
+the delta path. Otherwise, fall through to the full-row `put`.
+
+Two concurrent walkers each doing `root._jac_.edges.append(e)` both land via
+`$addToSet` — no race, no retry, no CAS. This directly closes #5451.
+
+**4.2 Optimistic version check for non-edges writes (opt-in).**
+
+Edges cover #5451. For the general case of two walkers racing on the same scalar or
+nested-object field, add a version column and a CAS:
+
+- `anchors` gets `version INTEGER NOT NULL DEFAULT 0` (SQLite) / `version` field
+  (Mongo).
+- `put` writes `UPDATE ... SET data=?, version=? WHERE id=? AND version=?` (SQLite) or
+  `update_one({_id, version: N}, {$set: {data, …}, $inc: {version: 1}})` (Mongo).
+- On version mismatch: reload, re-serialize (still per-archetype), retry up to
+  `jac.cas_max_retries` (default 3). On exhaustion raise `ConcurrentWriteExhausted`.
+
+This is NOT needed to close #5451 — 4.1 alone closes it — and is NOT required for
+partial updates to work. Ship it behind `jac.optimistic_cas` as a follow-up. Keep the
+naive last-writer-wins behavior for scalar fields as the default; most deployments are
+fine with it once the big-blob-overwrite problem is gone.
+
+## 5. Public API summary
+
+| Surface                                                 | New / changed                                              |
+|---------------------------------------------------------|------------------------------------------------------------|
+| `Serializer.serialize(..., storage_mode: bool = False)` | new flag, always-ref for nested archetypes                 |
+| `_serialize_value` Archetype branch                     | emits `$ref` under `storage_mode` instead of inlining      |
+| `_anchor_to_row` / `_anchor_to_doc`                     | pass `storage_mode=True`                                   |
+| `SqliteMemory.sync`                                     | hash-diff short-circuit (align with Mongo)                 |
+| `_build_pydantic_patch_model(jac_cls)`                  | new, mirrors `_build_pydantic_model` with optional fields  |
+| `@restspec(method="PATCH", …)` / PATCH verb on walkers  | new verb, uses patch body model                            |
+| `MongoBackend._put_edges_delta`                         | `$addToSet` / `$pull` fast path (Layer 4.1)                |
+| `anchor.version: int` (optional, Layer 4.2)             | CAS column/field, opt-in via `jac.optimistic_cas`          |
+| `ConcurrentWriteExhausted` (optional, Layer 4.2)        | new exception                                              |
+
+No on-disk schema changes required for Layers 1–3. Existing rows — inlined blobs from
+before this change — remain loadable: deserialization of an inlined nested archetype
+still works (the old code path). Rows rewritten after the switch carry the `$ref` shape.
+Deserializer accepts both. Layer 4.2 adds a nullable `version` column as an idempotent
+`ALTER` / lazy-default field.
+
+## 6. Testing
+
+### Serializer (Layer 1)
+1. `test_storage_mode_emits_ref_for_nested_archetype` — parent archetype with a Jac
+   object field; assert parent's serialization contains `{"$ref": …, "$type": "object"}`
+   for that field, not an inlined dict.
+2. `test_storage_mode_registers_nested_anchor` — after serializing a parent,
+   `mem.get(nested_uuid)` returns the nested archetype's anchor.
+3. `test_storage_mode_roundtrip` — serialize with `storage_mode=True`, then deserialize;
+   reconstructed archetype `==` original; lazy stubs populate on first access.
+4. `test_storage_mode_collections` — `list[Profile]`, `dict[str, Profile]`,
+   `set[Profile]` all emit per-element `$ref`.
+5. `test_storage_mode_cycle` — `self.parent = self`: emits one `$ref` back to self,
+   deserializes to an identity cycle.
+
+### Persistence (Layer 2)
+6. `test_only_dirty_archetype_rewritten_sqlite` — build a 3-deep graph (Root → Profile
+   → Avatar); mutate `avatar.url`; assert Avatar row's `updated_at` advanced; Root
+   and Profile rows' `updated_at` unchanged.
+7. Same as (6) for `test_only_dirty_archetype_rewritten_mongo` — inspect the command
+   log, assert exactly one `update_one` fired for Avatar.
+8. `test_inlined_legacy_row_still_loadable` — seed DB with an old-style inlined blob,
+   load, mutate, flush, assert next load returns the `$ref`-shaped row.
+
+### HTTP (Layer 3)
+9. `test_restspec_patch_omits_unspecified` — PATCH `{name: "b"}` against node with
+   `{name: "a", age: 30}`; `age == 30` post-flush; backend write touched only the
+   affected archetype row.
+10. `test_restspec_patch_explicit_null` — body `{name: null}` writes null (present in
+    `model_fields_set`), distinct from omission.
+11. `test_restspec_patch_nested_obj_field` (follow-up after Layer 3.3) — nested
+    partial doesn't clobber sibling fields.
 
 ### Concurrency (Layer 4)
-13. `test_cas_issue_5451_repro` — N concurrent walkers append one distinct edge each to
-    the same Root anchor (Mongo + SQLite variants). Assert all N edges present after
-    flush, zero losses. This is the direct repro of
-    [#5451](https://github.com/jaseci-labs/jaseci/issues/5451).
-14. `test_op_replay_on_conflict` — artificial conflict: winner writes field `name`;
-    loser's retry must re-apply its own `counter += 1` op against the reloaded state
-    (not re-submit its pre-winner snapshot). Assert `name == winner_value` and
-    `counter == original + 1`.
-15. `test_cas_transactional_walker_multi_anchor` — walker mutates anchors A and B;
-    inject conflict on B only; assert A's write was rolled back (transactional
-    atomicity), then both succeed on retry.
-16. `test_cas_max_retries_exhausted` — force sustained conflict beyond `max_retries`;
-    assert `ConcurrentWriteExhausted` raised and no partial write committed.
-17. `test_cas_backoff_bounded` — monkeypatch clock; assert retry delays follow
-    `base * 2^n + jitter` up to `max_delay_ms`.
-18. `test_mongo_addtoset_edges_fast_path` — assert that `ListAppend` on
-    `NodeAnchor.edges` emits `$addToSet` (not `$set`) by inspecting the Mongo command
-    log. Concurrent append test: no CAS retries logged.
-19. `test_l2_invalidation_cross_process` — two processes sharing Redis; P1 commits a
-    write, P2 reads (cache-hit becomes miss), assert P2 sees P1's version.
-20. `test_read_set_conflict_escalation` — walker with `jac.observed(node.status)`;
-    concurrent write changes `status`; assert retry sees mismatch and either re-runs
-    walker (transactional) or raises `ReadSetConflict`.
-21. `test_hot_path_pessimistic_fallback` — drive conflict rate above
-    `cas_hot_threshold_per_sec`; assert subsequent writers on that UUID take the
-    pessimistic lock path, logged at `warning`.
-22. `test_idempotent_append_on_replay` — partial-apply + retry scenario: ensure that
-    re-replaying `ListAppend(edge_uuid)` against a state where the edge already exists
-    does NOT produce a duplicate entry.
+12. `test_5451_concurrent_edge_appends_mongo` — N concurrent walkers each append a
+    distinct edge to Root; assert all N edges present after flush. With 4.1's
+    `$addToSet` path, passes without any retry. Direct repro of #5451.
+13. `test_5451_concurrent_edge_appends_sqlite` — same with SQLite; relies on 4.2 CAS.
+    Under `jac.optimistic_cas = False`, documents the known last-writer-wins behavior.
+14. `test_cas_version_mismatch_retries` (Layer 4.2) — artificial conflict; assert
+    bounded retry and correct final state.
 
-## 6. Migration / compatibility
+## 7. Migration / compatibility
 
-- No schema migration. `patch` paths coexist with `put` for new-anchor and
-  fingerprint-drift cases.
-- `ref_mode` from PR 5387 remains an opt-in serialize flag. Partial updates do not
-  require `ref_mode=True`; however, the `$ref` discipline in `_serialize_value` (register
-  archetype → `mem.put`) composes cleanly with per-field patches when a dirty field's
-  value is itself a Jac archetype.
-- Old clients calling `put` still get full-row rewrites — behavior unchanged for them.
-- Pre-ref_mode anchors persisted as monolithic blobs remain loadable; partial updates
-  apply to them directly (the JSON path targets exist in every blob shape we emit).
-- **Layer 4 schema changes** are additive and idempotent:
-  - SQLite: `_ensure_connection` runs `ALTER TABLE anchors ADD COLUMN version INTEGER
-    NOT NULL DEFAULT 0` wrapped in a try/except `OperationalError` (already-exists is a
-    no-op). Existing rows get `version = 0`.
-  - Mongo: rollout treats absent `version` as 0. A background `$set: {version: 0}` on
-    `{version: {$exists: false}}` normalizes the collection over time; not required for
-    correctness.
-- CAS can be disabled globally via `jac.optimistic_cas = false` in `jac.toml` — falls
-  back to Layer 2's direct `patch()` without version check. Useful for single-writer
-  dev loops and for deployments willing to accept last-writer-wins.
-- Standalone Mongo (no replica set) cannot use multi-statement transactions — Layer 4
-  degrades to per-anchor CAS with a startup warning. Cross-anchor atomicity is lost
-  in this mode; `transactional=True` walkers log a warning on every invocation.
+- **Layers 1–3: zero schema change.** The storage columns/fields are the same. The
+  `data` blob shape for nested archetypes changes from inlined to `$ref`, but
+  deserialization handles both. Old rows are migrated opportunistically: next time
+  an old-shape row is loaded and re-persisted, it re-emits in the new shape.
+- **Dependent ordering.** When sync writes multiple rows in one pass (Root changed +
+  Avatar changed), order is irrelevant because each row carries `$ref`s that resolve
+  lazily at load time via `mem.get`. No foreign-key constraints.
+- **Fingerprint drift.** Orthogonal. Each archetype carries its own
+  `__jac_fingerprint__`, and the existing quarantine path at
+  [memory.impl.jac#L730](jac/jaclang/runtimelib/impl/memory.impl.jac#L730) handles a
+  row whose class no longer resolves — unchanged.
+- **`api_mode` / `ref_mode`.** Preserved as today. `storage_mode` is a third,
+  independent flag; callers choose based on audience (wire vs. API vs. storage).
+  The three are composable (though only `storage_mode` + `include_type` is used by
+  the persistence layer).
+- **Layer 4.2 schema.** `version INTEGER NOT NULL DEFAULT 0` added idempotently by
+  `_ensure_connection`; Mongo treats absent `version` as 0. Disable via
+  `jac.optimistic_cas = false` in `jac.toml` for single-writer dev loops.
 
-## 7. Phasing
+## 8. Phasing
 
-1. **Phase 1 (prereq):** Layer 1 — `__setattr__` dirty tracking + serializer delta +
-   unit tests 1–4. Low risk, no behavior change at the persistence layer.
-2. **Phase 2:** Layer 2 — `patch()` on SQLite + Mongo; wire `sync` to prefer `patch`.
-   Tests 5–9. Guarded by a runtime config flag (`jac.partial_updates = True`) so we can
-   disable without reverting.
-3. **Phase 3:** Layer 3 — `@restspec(method="PATCH")` + all-optional body models +
-   `model_fields_set`-driven application. Tests 10–11.
-4. **Phase 4 (follow-up):** recursive nested partial updates. Test 12.
-5. **Phase 5 (Layer 4 core):** version column, op log + collection proxies, unit-of-work
-   commit, persistence-level retry, Redis invalidation. Tests 13–19, 22. Ships
-   alongside Phase 2 at minimum — partial updates without CAS is an anti-pattern
-   (it narrows the race window but doesn't close it).
-6. **Phase 6 (Layer 4 extensions):** Mongo `$addToSet` / `$pull` fast path,
-   `jac.observed` + `@transactional` walker-retry, `@jac.hot_path` pessimistic opt-in,
-   adaptive hot-path fallback. Tests 18, 20, 21. Each lands independently after
-   Phase 5.
+1. **Phase 1 (Layer 1).** Add `storage_mode` to the serializer. Tests 1–5. No callers
+   opt in yet — behavior unchanged for all existing paths.
+2. **Phase 2 (Layer 2).** Flip `_anchor_to_row` and `_anchor_to_doc` to
+   `storage_mode=True`. Add SQLite hash-diff short-circuit. Tests 6–8. This is where
+   partial updates ship end-to-end.
+3. **Phase 3 (Layer 3.1–3.2).** PATCH verb + all-optional body model + `model_fields_set`
+   application. Tests 9–10.
+4. **Phase 4 (Layer 4.1).** Mongo `$addToSet` / `$pull` edges fast path. Test 12.
+   Closes #5451 on the deployment target that actually hits it (the reported incident
+   was Mongo-backed).
+5. **Phase 5 (Layer 4.2, follow-up).** Version column + CAS + retry. Tests 13–14.
+   Opt-in, ships only when a concrete use-case outside of edges motivates it.
+6. **Phase 6 (Layer 3.3, follow-up).** Recursive nested PATCH. Test 11.
 
-## 8. Open questions
+## 9. Open questions
 
-1. Do we want a user-facing `with jac.patch(node) as p: p.name = "x"` context manager as
-   a first-class API, distinct from the implicit-via-`__setattr__` flow? Nice for
-   auditability; adds API surface. Defer unless requested.
-2. For L2 cache (`LocalCacheMemory`, Redis), do we also teach `patch` to do a
-   subdocument update, or continue to invalidate-and-refetch on every write? Redis
-   `JSON.SET` supports it; decide alongside Phase 2 once we see real cache hit patterns.
-3. Access control granularity: today `check_write_access(anchor)` is per-anchor. Do we
-   want per-field access lists? Out of scope here — if we ever do, the op log from
-   Layer 4 is the natural hook point (iterate ops, authorize each).
-4. **Ordering guarantees under op-replay.** When walker A's `ListAppend(e4)` and
-   walker B's `ListAppend(e5)` retry-interleave, is the final order `[…, e4, e5]` or
-   `[…, e5, e4]`? For set-semantics fields (edges), order is irrelevant. For true
-   list fields where order matters, document that op-replay provides no cross-retry
-   ordering guarantee; callers who need order should use `SetField` (replace) or
-   serialize via `@jac.hot_path`.
-5. **`ListSetAt(idx, value)` under retry.** Position-dependent ops are inherently
-   non-idempotent after a concurrent insert/remove shifts indices. Default: `ListSetAt`
-   during replay raises `OpReplayConflict` and escalates to walker-retry. Alternative:
-   translate position-based ops to id-based where possible (e.g., "set element with
-   UUID=X to Y") — requires type information we may not have.
-6. **Transactional-walker side-effect policy.** The docstring warning is informational
-   only. Worth adding a `jac check` warning that flags calls to known non-idempotent
-   APIs (`requests.*`, `boto3.*`, etc.) inside `transactional=True` walker bodies?
-7. **Mongo standalone vs. replica set.** We degrade gracefully (per-anchor CAS only),
-   but should jac-scale refuse to start in `transactional=True`-heavy deployments
-   without a replica set, or merely warn? Decide before Phase 5.
+1. **Auto-`$ref` for Archetype values that happen to lack `__jac__`.** Every user
+   archetype has `__jac__` via `Archetype.__init_subclass__`, so "missing `__jac__`"
+   only happens for mid-construction / transient instances. Treat as bug / fall back
+   to inline? Inline seems safer — a transient archetype without identity shouldn't
+   force the caller to think about persistence.
+2. **"Seen in this call" still useful?** The existing `_seen` dedupe inside a single
+   `serialize()` call becomes redundant when `storage_mode=True` (every nested
+   archetype is always `$ref`, whether seen or not). Keep `_seen` for `ref_mode=True`
+   (wire format), drop for `storage_mode=True` (no behavior change, cleaner code).
+3. **List-field ordering under concurrent writes (non-edges).** If two walkers append
+   to a non-edges list on the same archetype, 4.1's set operators don't apply (list
+   may have duplicates / care about order). Without 4.2 CAS, behavior is
+   last-writer-wins on the list field. Document; offer CAS as the fix.
+4. **Access control on refs.** `Jac.check_write_access(anchor)` runs per anchor. When
+   a parent `$ref`s a child the caller lacks write access to, and the child is
+   independently writable, today's per-anchor check handles this correctly. Confirm
+   with an explicit test in Phase 2.
