@@ -26,6 +26,7 @@ with the entire archetype (and all nested archetypes) inlined under `data.archet
   rewrite the whole row on every change.
 
 Consequences:
+
 1. Mutating `root.profile.display_name` rewrites Root's full blob — including every
    edge, access entry, topology index, and every other inlined archetype.
 2. A nested archetype has *two* representations on disk: inlined inside its parent's
@@ -91,12 +92,14 @@ anchors table
 ```
 
 Mutating `profile.display_name`:
+
 - Profile's archetype hash changes → Profile row (P) rewritten.
 - Root's blob still says `{ $ref: P }` — byte-identical — so Root's hash does not
   change → Root row not touched. Same for Avatar.
 
 This is the partial update. It is *per-archetype*, which is the right granularity for
 this codebase because:
+
 - `(type, jid)` is already the unit of identity at load time (`mem.get(uuid)`), access
   control (`anchor.access`), and drift detection (per-class `__jac_fingerprint__`).
 - Existing dirty detection — `_compute_hash(anchor) == anchor.hash` in
@@ -146,6 +149,7 @@ Semantics of `storage_mode=True` (in
    `__dict__` objects: unchanged from today's `_serialize_value`.
 6. **`set` / `frozenset`:** today's serializer lacks a `set` branch and falls through
    to the stringify fallback. Add a branch alongside `list`/`tuple`:
+
    ```jac
    if isinstance(val, (set, frozenset)) {
        items = [Serializer._serialize_value(v, ...) for v in val];
@@ -153,6 +157,7 @@ Semantics of `storage_mode=True` (in
        return {'__type__': 'set', 'items': items};
    }
    ```
+
    Deserializer dispatches `__type__: 'set'` back to `set(...)`. Uniform with
    `storage_mode=True`: a `set[Profile]` field becomes
    `{"__type__": "set", "items": [{"$ref": P1, …}, {"$ref": P2, …}]}`. Stable sort is
@@ -200,9 +205,11 @@ Then tighten the sync loops to lean on the hash diff we already compute:
   [memory.impl.jac#L681](jac/jaclang/runtimelib/impl/memory.impl.jac#L681) currently
   does a more expensive `_canonical_json(stored.archetype) != _canonical_json(anchor.archetype)`
   diff. Replace with the same hash-short-circuit:
+
   ```jac
   if Serializer._compute_hash(anchor) == anchor.hash { continue; }
   ```
+
   Keep the edge/access/archetype branch logic for the cases that *do* need an update —
   but now those writes are scoped to the one anchor whose hash changed, not every
   anchor in the graph.
@@ -493,6 +500,7 @@ idempotent `ALTER` / lazy-default field.
 ## 6. Testing
 
 ### Serializer (Layer 1)
+
 1. `test_storage_mode_emits_ref_for_nested_archetype` — parent archetype with a Jac
    object field; assert parent's serialization contains `{"$ref": …, "$type": "object"}`
    for that field, not an inlined dict.
@@ -506,56 +514,60 @@ idempotent `ALTER` / lazy-default field.
    deserializes to an identity cycle.
 
 ### Persistence (Layer 2)
+
 6. `test_only_dirty_archetype_rewritten_sqlite` — build a 3-deep graph (Root → Profile
    → Avatar); mutate `avatar.url`; assert Avatar row's `updated_at` advanced; Root
    and Profile rows' `updated_at` unchanged.
-7. Same as (6) for `test_only_dirty_archetype_rewritten_mongo` — inspect the command
+2. Same as (6) for `test_only_dirty_archetype_rewritten_mongo` — inspect the command
    log, assert exactly one `update_one` fired for Avatar.
-8. `test_inlined_legacy_row_still_loadable` — seed DB with an old-style inlined blob,
+3. `test_inlined_legacy_row_still_loadable` — seed DB with an old-style inlined blob,
    load, mutate, flush, assert next load returns the `$ref`-shaped row.
 
 ### HTTP (Layer 3)
+
 9. `test_restspec_patch_omits_unspecified` — PATCH `{name: "b"}` against node with
    `{name: "a", age: 30}`; `age == 30` post-flush; backend write touched only the
    affected archetype row.
-10. `test_restspec_patch_explicit_null` — body `{name: null}` writes null (present in
+2. `test_restspec_patch_explicit_null` — body `{name: null}` writes null (present in
     `model_fields_set`), distinct from omission.
-11. `test_restspec_patch_nested_obj_field` (follow-up after Layer 3.3) — nested
+3. `test_restspec_patch_nested_obj_field` (follow-up after Layer 3.3) — nested
     partial doesn't clobber sibling fields.
 
 ### Concurrency (Layer 4)
+
 12. `test_5451_concurrent_edge_appends_mongo` — N concurrent walkers each append a
     distinct edge to Root; assert all N edges present after flush. Relies on 4.2
     `$addToSet`. Direct repro of #5451.
-13. `test_5451_concurrent_edge_appends_sqlite` — N concurrent walkers append edges
+2. `test_5451_concurrent_edge_appends_sqlite` — N concurrent walkers append edges
     to Root via 4.3's `json_insert` set-semantics path; assert all N present.
-14. `test_concurrent_list_append_user_field_mongo` — two walkers both do
+3. `test_concurrent_list_append_user_field_mongo` — two walkers both do
     `self.tags.append(…)` on the same User; assert both appends land (plain-list
     `$push` path).
-15. `test_concurrent_set_add_mongo` — `set[T]` field; two walkers add distinct values;
+4. `test_concurrent_set_add_mongo` — `set[T]` field; two walkers add distinct values;
     assert both present. Same value from two walkers → idempotent.
-16. `test_concurrent_dict_set_disjoint_keys` — walker A sets `counts["a"]=1`, walker B
+5. `test_concurrent_dict_set_disjoint_keys` — walker A sets `counts["a"]=1`, walker B
     sets `counts["b"]=2`; assert both keys survive (disjoint `$set` paths).
-17. `test_snapshot_delta_detection` — unit test for Layer 4.1: given before/after
+6. `test_snapshot_delta_detection` — unit test for Layer 4.1: given before/after
     field values, compute `added`/`removed` correctly for list/set/dict.
-18. `test_full_blob_fallback_on_scalar_change` — if any scalar field changed alongside
+7. `test_full_blob_fallback_on_scalar_change` — if any scalar field changed alongside
     collection ops, backend falls back to full-row `put` rather than emitting partial
     element ops.
-19. `test_cas_version_mismatch_retries` (Layer 4.4) — artificial conflict on a
+8. `test_cas_version_mismatch_retries` (Layer 4.4) — artificial conflict on a
     positional list write (`list[i] = v`); assert bounded retry and correct final
     state.
-20. `test_cas_exhaustion_raises` (Layer 4.4) — sustained conflict beyond
+9. `test_cas_exhaustion_raises` (Layer 4.4) — sustained conflict beyond
     `cas_max_retries`; assert `ConcurrentWriteExhausted`.
 
 ### Ownership (Layer 5)
+
 21. `test_owned_field_destroys_on_remove` — `by owned` field; remove an element from
     the collection; assert `mem.delete` was called on that archetype's jid after the
     parent's delta commit.
-22. `test_reference_field_keeps_row_on_remove` — default (non-owned) field; remove an
+2. `test_reference_field_keeps_row_on_remove` — default (non-owned) field; remove an
     element; assert the archetype's row still exists and is loadable.
-23. `test_owned_field_reassignment_destroys_prior` — `post.comments = new_list`;
+3. `test_owned_field_reassignment_destroys_prior` — `post.comments = new_list`;
     assert elements in old list but not new list are destroyed.
-24. `test_owned_delete_honors_access_control` — walker lacks write access to owned
+4. `test_owned_delete_honors_access_control` — walker lacks write access to owned
     child; assert parent delta still lands, child delete is skipped + logged, no
     exception.
 
