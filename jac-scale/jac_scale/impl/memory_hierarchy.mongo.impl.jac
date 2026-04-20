@@ -46,7 +46,7 @@ def _mongo_a_collection(backend: MongoBackend) -> Any {
 and Layer 1 archetype identity fields. Parallels _anchor_to_row in
 SqliteMemory; kept here so schema evolution stays per-backend."""
 def _anchor_to_doc(anchor: Anchor) -> dict {
-    data = Serializer.serialize(anchor, include_type=True);
+    data = Serializer.serialize(anchor, include_type=True, storage_mode=True);
     anchor_type = type(anchor).__name__;
     arch_module: (str | None) = None;
     arch_type: (str | None) = None;

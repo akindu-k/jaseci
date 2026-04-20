@@ -19,9 +19,14 @@ glob logger = logging.getLogger(__name__),
      # schema migration. Kept in the `schema_meta` table.
      SQLITE_DB_FORMAT_VERSION: int = 1;
 
-"""Serialize an anchor to the tuple of columns stored in the anchors table."""
+"""Serialize an anchor to the tuple of columns stored in the anchors table.
+
+Uses `storage_mode=True` so nested archetypes emit $ref rather than inlining.
+Mutating a child archetype rewrites only its own row; the parent's blob still
+references it as {"$ref": child_uuid} and its hash is unchanged.
+"""
 def _anchor_to_row(anchor: Anchor) -> tuple {
-    data = Serializer.serialize(anchor, include_type=True);
+    data = Serializer.serialize(anchor, include_type=True, storage_mode=True);
     data_json = json.dumps(data);
     anchor_type = type(anchor).__name__;
     arch_module: (str | None) = None;
@@ -703,6 +708,10 @@ impl SqliteMemory.sync -> None {
         if not anchor.is_populated() {
             continue;
         }
+        current_hash = Serializer._compute_hash(anchor);
+        if current_hash == anchor.hash {
+            continue;
+        }
 
         key = str(id);
         try {
@@ -794,6 +803,7 @@ impl SqliteMemory.sync -> None {
                         """,
                         (key, ) + merged_row
                     );
+                    anchor.hash = current_hash;
                 }
             } else {
                 # No stored or stored is a stub - save anchor if valid
@@ -813,6 +823,7 @@ impl SqliteMemory.sync -> None {
                         """,
                         (key, ) + new_row
                     );
+                    anchor.hash = current_hash;
                 }
             }
         } except (AttributeError, ModuleNotFoundError) {
