@@ -280,6 +280,160 @@ Requires the patch model to be recursive: each nested `_build_pydantic_patch_mod
 itself produces a patch model, and `_pydantic_to_jac` recurses similarly. Land this as a
 follow-up once Layer 3a/b/c ship.
 
+### Layer 4 — concurrency control (optimistic CAS + unit-of-work)
+
+Goal: eliminate lost-update races like [#5451](https://github.com/jaseci-labs/jaseci/issues/5451) and address the broader concurrent-correctness concerns CAS alone does not: retry correctness, cross-anchor transactions, L2 coherence, livelock, semantic conflicts, idempotency.
+
+Layer 4 extends Layers 1–2 rather than replacing them. Field-level dirty tracking from Layer 1 keeps CAS cheap (version check per anchor, delta scoped per field); the op log from §4b is a strict superset of Layer 1's `_jac_dirty` set.
+
+#### 4a. Anchor version column / field
+
+Add `version: int` to every anchor row/document. Monotonically increments on each successful write. Default 0 for new anchors.
+
+- **SQLite:** `ALTER TABLE anchors ADD COLUMN version INTEGER NOT NULL DEFAULT 0` (idempotent, run from `_ensure_connection`).
+- **Mongo:** new field `version`; treat missing as 0 during rollout.
+
+All `put`/`patch` paths read current `anchor.version`, write with `version = N+1`, and condition the UPDATE on `version = N`:
+
+```sql
+UPDATE anchors
+   SET data = json_set(data, …), version = ?, updated_at = ?
+ WHERE id = ? AND version = ?
+```
+
+```python
+collection.update_one(
+    {'_id': str(anchor_id), 'version': N},
+    {'$set': delta, '$inc': {'version': 1}}
+)
+```
+
+Success = `rowcount == 1` / `matched_count == 1`. Anything else routes to §4d. Access-control checks (`Jac.check_write_access`) stay in their current position, *before* the CAS attempt.
+
+#### 4b. Op log — "replay the intent, not the state"
+
+Blind retry of a stale in-memory anchor reintroduces the lost-update bug. Retry must re-apply *what the walker intended to do*, not *what the walker currently holds*.
+
+Replace Layer 1's `_jac_dirty: set[str] | None` with a richer `_jac_ops: list[Op] | None`, where `Op` is a tagged variant:
+
+| Variant                        | Captured by                                   | Idempotent on replay? |
+|--------------------------------|-----------------------------------------------|-----------------------|
+| `SetField(name, value)`        | `__setattr__` on a `has` field                | yes (LWW within window) |
+| `ListAppend(field, value)`     | proxied `list.append`                         | yes (skip if equal element exists) |
+| `ListExtend(field, values)`    | proxied `list.extend` / `+=`                  | per-element |
+| `ListRemove(field, value)`     | proxied `list.remove`                         | yes (skip if absent) |
+| `ListSetAt(field, idx, value)` | proxied `list.__setitem__`                    | no (position-dependent — see §8) |
+| `DictSet(field, key, value)`   | proxied `dict.__setitem__`                    | yes (LWW per key) |
+| `DictDel(field, key)`          | proxied `dict.__delitem__`                    | yes (skip if absent) |
+| `SetAdd(field, value)`         | proxied `set.add`                             | yes |
+| `SetDiscard(field, value)`     | proxied `set.discard`                         | yes |
+| `ReadField(name, snapshot)`    | explicit `jac.observed(expr)` in walker       | read-set (§4e) |
+
+Collection values on loaded archetypes are wrapped in thin proxy classes (`_JacTrackedList`, `_JacTrackedDict`, `_JacTrackedSet`) on first access; mutations record ops on the owning archetype. `NodeAnchor.edges` in particular becomes a `_JacTrackedList`.
+
+- `SetField` for whole-collection assignment (`self.items = [...]`) emits a replace op, *not* per-element appends — opt-out for last-writer-wins semantics.
+- Equality for `ListAppend`/`ListRemove` on archetype references is by UUID, not by `__eq__` on the archetype (which would recurse through `$ref` graphs).
+
+#### 4c. Unit-of-work per walker execution
+
+Today each `mem.put` / `mem.sync` call runs independently. Layer 4 introduces a per-walker-execution commit boundary.
+
+- `ExecutionContext` tracks every anchor touched during the current walker run (populated as `_jac_ops` accumulates).
+- At walker completion (or explicit `Jac.commit()`):
+  1. Open a backend transaction — SQLite `BEGIN IMMEDIATE`; Mongo `session.with_transaction(...)`.
+  2. For each touched anchor: produce delta from `_jac_ops`, issue version-checked UPDATE.
+  3. All UPDATEs match → commit. Clear op logs; bump in-memory `anchor.version`.
+  4. Any UPDATE fails on version → abort, proceed to §4d.
+
+Per-anchor CAS without a transaction can land anchor A but fail anchor B, leaving partial state. SQLite transactions are cheap; Mongo transactions require a replica set and have modest overhead — acceptable at walker-flush granularity. Standalone Mongo falls back to per-anchor CAS with a startup warning (see §8).
+
+#### 4d. Retry policy
+
+On conflict, retry at *persistence* level first — not walker level:
+
+1. Reload conflicting anchors from L3 (bypass L1/L2).
+2. Re-apply each anchor's `_jac_ops` against the reloaded archetype (idempotent per §4b).
+3. Recompute delta; re-open transaction; re-issue version-checked UPDATEs.
+4. On repeated conflict: exponential backoff with jitter — `base_ms * 2^attempt + random(0, base_ms)`, `base_ms = 5`, capped at `max_delay_ms = 500`.
+5. Bounded to `max_retries` (default `5`, via `jac.cas_max_retries`).
+6. On exhaustion: raise `ConcurrentWriteExhausted(anchor_ids, attempts)`. The default `@restspec` error handler maps this to HTTP 409.
+
+For walkers whose control flow branches on observed values (not just blind mutations), persistence-level replay is insufficient — the walker body must re-run:
+
+```jac
+@walker:pub(transactional=True, max_retries=3)
+walker UpdateCounter { ... }
+```
+
+Transactional walkers re-execute their body on conflict, within the same retry budget. Non-idempotent side effects inside transactional walkers (external API calls, log emits, message sends) are the caller's responsibility; a linter check (§8) flags suspected cases at `jac check` time.
+
+#### 4e. Semantic conflicts — read-set tracking
+
+CAS prevents overwrites but not logic races: "I deleted e2 because I read that e2 existed" can still fire after someone else also deleted e2, rendering the precondition vacuous.
+
+Two mechanisms:
+
+1. **Explicit observation (available at all layers):** `jac.observed(expr)` records a `ReadField(name, snapshot)` op. On retry, each read op is re-checked against the reloaded anchor. If the snapshot has changed, escalate persistence-retry to walker-retry. If already at walker-retry, surface `ReadSetConflict` (409).
+2. **Automatic read-set (opt-in via `@transactional`):** instrument attribute reads inside transactional walker bodies to auto-record `ReadField`. This is snapshot isolation. More overhead; opt-in for correctness-critical walkers only.
+
+#### 4f. L2 (Redis) cache coherence
+
+On successful transaction commit, publish `{id, new_version}` on the Redis pub/sub channel `jac:anchor:invalidate`. Every process subscribes on startup; on receipt:
+
+- Drop the UUID from L1 (`VolatileMemory.__mem__`) if `cached.version < new_version`.
+- Drop from L2 distributed cache.
+- Do not pre-populate — lazy reload on next access.
+
+Reads that populate caches carry `version` with the serialized anchor. Writers can *fast-fail* before opening a transaction: if `anchor.version < L1[id].version`, the local copy is known stale; force reload, re-replay ops, then commit. Fewer futile CAS attempts under high-read/low-write workloads.
+
+For single-node deployments (SQLite, no Redis), the in-process dict is the only cache; invalidation is a direct `pop`. No pub/sub needed.
+
+#### 4g. Hot-node livelock mitigation
+
+Sustained concurrent writes on anchors like Root can livelock the optimistic loop. Mitigations:
+
+- **Metrics:** retry-count histogram per anchor UUID + counter for `ConcurrentWriteExhausted`, exposed via the existing jac-scale Prometheus path. Hot spots surface as a heavy histogram tail.
+- **Per-anchor pessimistic lock (opt-in):** `@jac.hot_path(lambda: Root, lock_ms=200)` acquires a Redis distributed lock keyed on the resolved anchor UUID before entering the CAS section. Serializes contenders on that specific anchor. Lock timeout → `ConcurrentWriteExhausted`.
+- **Adaptive fallback:** if a given anchor UUID exceeds `jac.cas_hot_threshold_per_sec` conflicts (default 10/sec), auto-escalate subsequent writers on that UUID to the pessimistic path for `jac.cas_hot_cooldown_sec` (default 5s). Logged at `warning`.
+
+Pessimistic lock is strictly the fallback; optimistic remains the default.
+
+#### 4h. Edge-specific fast path (Mongo)
+
+Even with Layer 4, every edge append on a hot Root incurs a CAS round-trip. For edges specifically — the exact case in #5451 — Mongo's array operators eliminate the race server-side:
+
+- `ListAppend` on `NodeAnchor.edges` → `{'$addToSet': {'data.edges': edge_uuid}, '$inc': {'version': 1}}`
+- `ListRemove` on edges → `{'$pull': {'data.edges': edge_uuid}, '$inc': {'version': 1}}`
+
+`$addToSet` / `$pull` are atomic server-side — two concurrent edge appends both land, no retry. `$inc: {version: 1}` preserves the CAS invariant for other fields on the same anchor. Gated by the field having set-like semantics (declared via `@jac.set_semantics` on the `has` field, or inferred for `NodeAnchor.edges`).
+
+SQLite has no atomic-array operator; falls through to the general CAS + op-replay path. This is a Mongo-only optimization.
+
+#### 4i. Configuration summary
+
+| Setting                            | Default | Purpose                                           |
+|------------------------------------|---------|---------------------------------------------------|
+| `jac.optimistic_cas`               | `True`  | Master switch for Layer 4                         |
+| `jac.cas_max_retries`              | `5`     | Persistence-level retry bound                     |
+| `jac.cas_base_delay_ms`            | `5`     | Backoff base                                      |
+| `jac.cas_max_delay_ms`             | `500`   | Backoff cap                                       |
+| `jac.cas_hot_threshold_per_sec`    | `10`    | Conflict-rate trigger for pessimistic fallback    |
+| `jac.cas_hot_cooldown_sec`         | `5`     | Pessimistic cooldown window                       |
+| `jac.walker_unit_of_work`          | `True`  | Wrap walker flush in backend transaction          |
+
+All overridable via `jac.toml`.
+
+#### 4j. How Layer 4 answers each concern from §CAS review
+
+| Concern                                    | Covered by                                                  |
+|--------------------------------------------|-------------------------------------------------------------|
+| Retry correctness (replay intent)          | §4b op log + §4d step 2 (op-replay, not state-replay)       |
+| Cross-anchor transactions                  | §4c backend transactions around multi-anchor delta          |
+| L2 / Redis coherence                       | §4f pub/sub invalidation + version-tagged cache entries     |
+| Hot-node livelock                          | §4g bounded retry + backoff + adaptive pessimistic fallback |
+| Semantic conflicts (logic races)           | §4e `jac.observed` + `@transactional` snapshot isolation    |
+| Idempotency on retry                       | §4b idempotent op variants + documented non-idempotent edge |
+
 ## 4. Public API summary
 
 | Surface                                           | New / changed                                          |
@@ -292,9 +446,21 @@ follow-up once Layer 3a/b/c ship.
 | `SqliteMemory.sync` / `MongoBackend.sync`         | route dirty anchors through `patch` instead of `put`   |
 | `@restspec(method="PATCH", …)` in jac-scale       | new verb, all-optional body model                      |
 | `_build_pydantic_patch_model(cls)`                | new builder (jac-scale `parameters` module)            |
+| `Archetype._jac_ops: list[Op] \| None`            | supersedes `_jac_dirty` once Layer 4 lands             |
+| `_JacTrackedList` / `_JacTrackedDict` / `_JacTrackedSet` | collection proxies that capture mutation ops     |
+| `anchor.version: int`                             | new CAS version field; persisted                       |
+| `Memory.patch(anchor, fields, expected_version)`  | signature gains `expected_version`; returns `bool`     |
+| `Jac.commit()`                                    | explicit end-of-unit-of-work flush                     |
+| `jac.observed(expr)`                              | read-set annotation for snapshot isolation             |
+| `@walker:pub(transactional=True, max_retries=N)`  | opt-in whole-walker retry                              |
+| `@jac.hot_path(anchor_fn, lock_ms)`               | opt-in pessimistic lock for known-hot anchors          |
+| `@jac.set_semantics` on a `has` field             | enables Mongo `$addToSet` / `$pull` fast path          |
+| `ConcurrentWriteExhausted`, `ReadSetConflict`     | new exception types                                    |
 
-No on-disk schema changes. Existing `data` JSON blobs remain readable; the patch path
-mutates them in place via `json_set` / dotted-`$set`.
+SQLite anchors table gains a `version INTEGER NOT NULL DEFAULT 0` column; Mongo
+documents gain a `version` field. Existing `data` JSON blobs remain readable; the patch
+path mutates them in place via `json_set` / dotted-`$set`. Existing rows without
+`version` are treated as `version = 0` on first access.
 
 ## 5. Testing
 
@@ -332,6 +498,37 @@ mutates them in place via `json_set` / dotted-`$set`.
 12. `test_restspec_patch_nested_obj_field` (Layer 3d, follow-up) — nested partial does
     not clobber sibling fields on the nested archetype.
 
+### Concurrency (Layer 4)
+13. `test_cas_issue_5451_repro` — N concurrent walkers append one distinct edge each to
+    the same Root anchor (Mongo + SQLite variants). Assert all N edges present after
+    flush, zero losses. This is the direct repro of
+    [#5451](https://github.com/jaseci-labs/jaseci/issues/5451).
+14. `test_op_replay_on_conflict` — artificial conflict: winner writes field `name`;
+    loser's retry must re-apply its own `counter += 1` op against the reloaded state
+    (not re-submit its pre-winner snapshot). Assert `name == winner_value` and
+    `counter == original + 1`.
+15. `test_cas_transactional_walker_multi_anchor` — walker mutates anchors A and B;
+    inject conflict on B only; assert A's write was rolled back (transactional
+    atomicity), then both succeed on retry.
+16. `test_cas_max_retries_exhausted` — force sustained conflict beyond `max_retries`;
+    assert `ConcurrentWriteExhausted` raised and no partial write committed.
+17. `test_cas_backoff_bounded` — monkeypatch clock; assert retry delays follow
+    `base * 2^n + jitter` up to `max_delay_ms`.
+18. `test_mongo_addtoset_edges_fast_path` — assert that `ListAppend` on
+    `NodeAnchor.edges` emits `$addToSet` (not `$set`) by inspecting the Mongo command
+    log. Concurrent append test: no CAS retries logged.
+19. `test_l2_invalidation_cross_process` — two processes sharing Redis; P1 commits a
+    write, P2 reads (cache-hit becomes miss), assert P2 sees P1's version.
+20. `test_read_set_conflict_escalation` — walker with `jac.observed(node.status)`;
+    concurrent write changes `status`; assert retry sees mismatch and either re-runs
+    walker (transactional) or raises `ReadSetConflict`.
+21. `test_hot_path_pessimistic_fallback` — drive conflict rate above
+    `cas_hot_threshold_per_sec`; assert subsequent writers on that UUID take the
+    pessimistic lock path, logged at `warning`.
+22. `test_idempotent_append_on_replay` — partial-apply + retry scenario: ensure that
+    re-replaying `ListAppend(edge_uuid)` against a state where the edge already exists
+    does NOT produce a duplicate entry.
+
 ## 6. Migration / compatibility
 
 - No schema migration. `patch` paths coexist with `put` for new-anchor and
@@ -343,6 +540,19 @@ mutates them in place via `json_set` / dotted-`$set`.
 - Old clients calling `put` still get full-row rewrites — behavior unchanged for them.
 - Pre-ref_mode anchors persisted as monolithic blobs remain loadable; partial updates
   apply to them directly (the JSON path targets exist in every blob shape we emit).
+- **Layer 4 schema changes** are additive and idempotent:
+  - SQLite: `_ensure_connection` runs `ALTER TABLE anchors ADD COLUMN version INTEGER
+    NOT NULL DEFAULT 0` wrapped in a try/except `OperationalError` (already-exists is a
+    no-op). Existing rows get `version = 0`.
+  - Mongo: rollout treats absent `version` as 0. A background `$set: {version: 0}` on
+    `{version: {$exists: false}}` normalizes the collection over time; not required for
+    correctness.
+- CAS can be disabled globally via `jac.optimistic_cas = false` in `jac.toml` — falls
+  back to Layer 2's direct `patch()` without version check. Useful for single-writer
+  dev loops and for deployments willing to accept last-writer-wins.
+- Standalone Mongo (no replica set) cannot use multi-statement transactions — Layer 4
+  degrades to per-anchor CAS with a startup warning. Cross-anchor atomicity is lost
+  in this mode; `transactional=True` walkers log a warning on every invocation.
 
 ## 7. Phasing
 
@@ -354,6 +564,14 @@ mutates them in place via `json_set` / dotted-`$set`.
 3. **Phase 3:** Layer 3 — `@restspec(method="PATCH")` + all-optional body models +
    `model_fields_set`-driven application. Tests 10–11.
 4. **Phase 4 (follow-up):** recursive nested partial updates. Test 12.
+5. **Phase 5 (Layer 4 core):** version column, op log + collection proxies, unit-of-work
+   commit, persistence-level retry, Redis invalidation. Tests 13–19, 22. Ships
+   alongside Phase 2 at minimum — partial updates without CAS is an anti-pattern
+   (it narrows the race window but doesn't close it).
+6. **Phase 6 (Layer 4 extensions):** Mongo `$addToSet` / `$pull` fast path,
+   `jac.observed` + `@transactional` walker-retry, `@jac.hot_path` pessimistic opt-in,
+   adaptive hot-path fallback. Tests 18, 20, 21. Each lands independently after
+   Phase 5.
 
 ## 8. Open questions
 
@@ -364,5 +582,22 @@ mutates them in place via `json_set` / dotted-`$set`.
    subdocument update, or continue to invalidate-and-refetch on every write? Redis
    `JSON.SET` supports it; decide alongside Phase 2 once we see real cache hit patterns.
 3. Access control granularity: today `check_write_access(anchor)` is per-anchor. Do we
-   want per-field access lists? Out of scope here — if we ever do, the dirty set is the
-   natural hook point.
+   want per-field access lists? Out of scope here — if we ever do, the op log from
+   Layer 4 is the natural hook point (iterate ops, authorize each).
+4. **Ordering guarantees under op-replay.** When walker A's `ListAppend(e4)` and
+   walker B's `ListAppend(e5)` retry-interleave, is the final order `[…, e4, e5]` or
+   `[…, e5, e4]`? For set-semantics fields (edges), order is irrelevant. For true
+   list fields where order matters, document that op-replay provides no cross-retry
+   ordering guarantee; callers who need order should use `SetField` (replace) or
+   serialize via `@jac.hot_path`.
+5. **`ListSetAt(idx, value)` under retry.** Position-dependent ops are inherently
+   non-idempotent after a concurrent insert/remove shifts indices. Default: `ListSetAt`
+   during replay raises `OpReplayConflict` and escalates to walker-retry. Alternative:
+   translate position-based ops to id-based where possible (e.g., "set element with
+   UUID=X to Y") — requires type information we may not have.
+6. **Transactional-walker side-effect policy.** The docstring warning is informational
+   only. Worth adding a `jac check` warning that flags calls to known non-idempotent
+   APIs (`requests.*`, `boto3.*`, etc.) inside `transactional=True` walker bodies?
+7. **Mongo standalone vs. replica set.** We degrade gracefully (per-anchor CAS only),
+   but should jac-scale refuse to start in `transactional=True`-heavy deployments
+   without a replica set, or merely warn? Decide before Phase 5.
