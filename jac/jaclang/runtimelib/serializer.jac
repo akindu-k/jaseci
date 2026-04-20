@@ -99,12 +99,18 @@ obj Serializer {
     and infinite recursion). Note: ref_mode registers discovered Jac objects
     in the runtime memory store so that $ref placeholders can be resolved back
     to live archetypes during deserialization.
+    Set storage_mode=True (persistence backends) to ALWAYS emit $ref for any
+    nested archetype that has a `__jac__` anchor, so each archetype is stored
+    in exactly one authoritative row and sibling mutations don't rewrite the
+    parent blob. Also registers the nested anchor via `mem.put` and emits sets
+    as {"__type__": "set", "items": [...sorted...]} for deterministic hashes.
     """
     static def serialize(
         `obj: object,
         include_type: bool = False,
         api_mode: bool = False,
-        ref_mode: bool = False
+        ref_mode: bool = False,
+        storage_mode: bool = False
     ) -> object;
 
     """Reconstruct object from serialized data."""
@@ -116,6 +122,7 @@ obj Serializer {
         include_type: bool,
         api_mode: bool = False,
         ref_mode: bool = False,
+        storage_mode: bool = False,
         _seen: (tuple[set, set] | None) = None
     ) -> object;
 
@@ -125,6 +132,7 @@ obj Serializer {
         include_type: bool,
         api_mode: bool,
         ref_mode: bool = False,
+        storage_mode: bool = False,
         _seen: (tuple[set, set] | None) = None
     ) -> dict[str, object];
 

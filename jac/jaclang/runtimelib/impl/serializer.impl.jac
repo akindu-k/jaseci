@@ -11,11 +11,12 @@ impl Serializer._serialize_attrs(
     include_type: bool,
     api_mode: bool,
     ref_mode: bool = False,
+    storage_mode: bool = False,
     _seen: (tuple[set, set] | None) = None
 ) -> dict[str, object] {
     return {
         a: Serializer._serialize_value(
-            getattr(`obj, a), include_type, api_mode, ref_mode, _seen
+            getattr(`obj, a), include_type, api_mode, ref_mode, storage_mode, _seen
         )
         for a in dir(`obj)
         if not a.startswith('_') and not callable(getattr(`obj, a, None))
@@ -27,10 +28,13 @@ impl Serializer.serialize(
     `obj: object,
     include_type: bool = False,
     api_mode: bool = False,
-    ref_mode: bool = False
+    ref_mode: bool = False,
+    storage_mode: bool = False
 ) -> object {
     _seen = (set(), set()) if ref_mode else None;
-    return Serializer._serialize_value(`obj, include_type, api_mode, ref_mode, _seen);
+    return Serializer._serialize_value(
+        `obj, include_type, api_mode, ref_mode, storage_mode, _seen
+    );
 }
 
 """Serialize a value recursively."""
@@ -39,6 +43,7 @@ impl Serializer._serialize_value(
     include_type: bool,
     api_mode: bool = False,
     ref_mode: bool = False,
+    storage_mode: bool = False,
     _seen: (tuple[set, set] | None) = None
 ) -> object {
     # Primitives & UUID & Enum
@@ -54,14 +59,29 @@ impl Serializer._serialize_value(
     # Collections
     if isinstance(val, (list, tuple)) {
         return [
-            Serializer._serialize_value(v, include_type, api_mode, ref_mode, _seen)
+            Serializer._serialize_value(
+                v, include_type, api_mode, ref_mode, storage_mode, _seen
+            )
             for v in val
         ];
+    }
+    if isinstance(val, (set, frozenset)) {
+        items = [
+            Serializer._serialize_value(
+                v, include_type, api_mode, ref_mode, storage_mode, _seen
+            )
+            for v in val
+        ];
+        items.sort(
+            key=lambda v: object :
+                _json_dumps(v, sort_keys=True, default=lambda o: object : str(o))
+        );
+        return {'__type__': 'set', 'items': items};
     }
     if isinstance(val, dict) {
         return {
             str(k): Serializer._serialize_value(
-                v, include_type, api_mode, ref_mode, _seen
+                v, include_type, api_mode, ref_mode, storage_mode, _seen
             ) for (k, v) in val.items()
         };
     }
@@ -73,7 +93,7 @@ impl Serializer._serialize_value(
         return {
             'all': val.all.value,
             'roots': Serializer._serialize_value(
-                val.roots, include_type, api_mode, ref_mode, _seen
+                val.roots, include_type, api_mode, ref_mode, storage_mode, _seen
             )
         };
     }
@@ -85,13 +105,13 @@ impl Serializer._serialize_value(
             'root': str(val.root) if val.root else None,
             'persistent': val.persistent,
             'access': Serializer._serialize_value(
-                val.access, include_type, api_mode, ref_mode, _seen
+                val.access, include_type, api_mode, ref_mode, storage_mode, _seen
             )
         };
         if val.is_populated() {
             arch = val.archetype;
             result['archetype'] = Serializer._type_info(arch, include_type) | Serializer._serialize_attrs(
-                arch, include_type, api_mode, ref_mode, _seen
+                arch, include_type, api_mode, ref_mode, storage_mode, _seen
             );
         }
         if isinstance(val, NodeAnchor) {
@@ -118,6 +138,30 @@ impl Serializer._serialize_value(
     }
     # Archetype (standalone)
     if isinstance(val, Archetype) {
+        if storage_mode {
+            jac_anchor = val?.__jac__;
+            if jac_anchor {
+                ref_type = (
+                    'node'
+                        if isinstance(jac_anchor, NodeAnchor)
+                        else 'edge'
+                            if isinstance(jac_anchor, EdgeAnchor)
+                            else 'walker'
+                                if isinstance(jac_anchor, WalkerAnchor)
+                                else 'object'
+                );
+                try {
+                    import from jaclang { JacRuntimeInterface as Jac }
+                    Jac.get_context().mem.put(jac_anchor);
+                } except Exception as e {
+                    logger.warning(
+                        f"storage_mode: failed to register {jac_anchor.id.hex}"
+                        f" in memory: {e}"
+                    );
+                }
+                return {'$ref': jac_anchor.id.hex, '$type': ref_type};
+            }
+        }
         if _seen is not None {
             jac_anchor = val?.__jac__;
             if jac_anchor {
@@ -159,7 +203,7 @@ impl Serializer._serialize_value(
             };
         }
         return result | Serializer._serialize_attrs(
-            val, include_type, api_mode, ref_mode, _seen
+            val, include_type, api_mode, ref_mode, storage_mode, _seen
         );
     }
     # Generic object with __dict__
@@ -181,7 +225,7 @@ impl Serializer._serialize_value(
         for (k, v) in val.__dict__.items() {
             if not k.startswith('_') {
                 result[k] = Serializer._serialize_value(
-                    v, include_type, api_mode, ref_mode, _seen
+                    v, include_type, api_mode, ref_mode, storage_mode, _seen
                 );
             }
         }
@@ -241,6 +285,14 @@ impl Serializer.deserialize(data: dict[str, object]) -> (object | None) {
     type_name = data.get('__type__');
     if not type_name {
         return {k: Serializer._deserialize_value(v) for (k, v) in data.items()};
+    }
+    if type_name == 'set' {
+        items_raw = data.get('items') or [];
+        return set([Serializer._deserialize_value(v) for v in items_raw]);
+    }
+    if type_name == 'frozenset' {
+        items_raw = data.get('items') or [];
+        return frozenset([Serializer._deserialize_value(v) for v in items_raw]);
     }
     dispatch = {
         'Anchor': Serializer._deserialize_anchor,
@@ -692,11 +744,17 @@ impl Serializer._deserialize_archetype(
     }
 }
 
-"""Compute a hash of the anchor's serialized state for dirty checking."""
+"""Compute a hash of the anchor's serialized state for dirty checking.
+
+Uses `storage_mode=True` so nested archetypes emit $ref rather than inlining
+their contents. The result is that a parent's hash only changes when the
+parent's OWN fields change — sibling / child mutations no longer cascade
+into parent rewrites.
+"""
 impl Serializer._compute_hash(anchor: Anchor) -> int {
     import from json { dumps }
     try {
-        data = Serializer.serialize(anchor, include_type=True);
+        data = Serializer.serialize(anchor, include_type=True, storage_mode=True);
         # Exclude topology_index_data from hash — it's a derived cache,
         # not user-mutable state. Including it would double the cost of
         # every serialize round-trip for large graphs.
