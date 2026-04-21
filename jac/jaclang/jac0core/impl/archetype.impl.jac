@@ -299,7 +299,7 @@ impl Archetype.__setattr__(name: str, value: Any) -> None {
 }
 
 """Mark archetype as initialized so subsequent field changes are tracked as dirty."""
-impl Archetype.__post_init__ -> None {
+impl Archetype.postinit -> None {
     object.__setattr__(self, '__jac_initialized__', True);
 }
 

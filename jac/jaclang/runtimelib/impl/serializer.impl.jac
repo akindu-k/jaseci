@@ -696,6 +696,31 @@ impl Serializer._deserialize_archetype(
     }
 }
 
+"""Serialize only specified archetype fields of an anchor.
+
+Intersects `field_names` with the archetype's declared fields so only
+valid, known names are included. Uses _serialize_value for each field
+so nested archetypes, UUIDs, enums, and collections are handled correctly.
+"""
+impl Serializer.serialize_fields(
+    anchor: object, field_names: set[str]
+) -> dict[str, object] {
+    if not hasattr(anchor, 'is_populated') or not anchor.is_populated() {
+        return {};
+    }
+    arch = anchor.archetype;
+    if arch is None {
+        return {};
+    }
+    known = set(Serializer._get_field_types(type(arch)).keys());
+    result: dict[str, object] = {};
+    for name in field_names & known {
+        val = getattr(arch, name, None);
+        result[name] = Serializer._serialize_value(val, include_type=True);
+    }
+    return result;
+}
+
 """Compute a hash of the anchor's serialized state for dirty checking."""
 impl Serializer._compute_hash(anchor: Anchor) -> int {
     import from json { dumps }
