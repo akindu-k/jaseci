@@ -698,9 +698,11 @@ impl Serializer._deserialize_archetype(
 
 """Serialize only specified archetype fields of an anchor.
 
-Intersects `field_names` with the archetype's declared fields so only
-valid, known names are included. Uses _serialize_value for each field
-so nested archetypes, UUIDs, enums, and collections are handled correctly.
+Intersects `field_names` with the archetype's declared fields (via
+_get_field_types, PR #5561) so only valid, known names are included.
+A shared _seen set is passed to every _serialize_value call (PR #5387)
+so circular field values emit $ref placeholders instead of recursing
+infinitely.
 """
 impl Serializer.serialize_fields(
     anchor: object, field_names: set[str]
@@ -713,10 +715,11 @@ impl Serializer.serialize_fields(
         return {};
     }
     known = set(Serializer._get_field_types(type(arch)).keys());
+    _seen: tuple[set, set] = (set(), set());
     result: dict[str, object] = {};
     for name in field_names & known {
         val = getattr(arch, name, None);
-        result[name] = Serializer._serialize_value(val, include_type=True);
+        result[name] = Serializer._serialize_value(val, include_type=True, _seen=_seen);
     }
     return result;
 }
