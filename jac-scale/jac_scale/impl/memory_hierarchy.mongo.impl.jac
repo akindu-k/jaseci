@@ -236,6 +236,37 @@ impl MongoBackend.put(anchor: Anchor) -> None {
     }
 }
 
+"""Persist only the specified archetype fields without replacing the full document.
+
+Builds dot-notation $set paths of the form `data.archetype.<field>` so only
+those keys are touched in MongoDB, leaving type, arch_module, edges, access,
+and all other outer-document fields intact.
+"""
+impl MongoBackend.put_partial(anchor: Anchor, field_names: set[str]) -> None {
+    if self.client is None or not anchor.persistent or not field_names {
+        return;
+    }
+    _id = to_uuid(anchor.id);
+    try {
+        partial_data = Serializer.serialize_fields(anchor, field_names);
+        if not partial_data {
+            return;
+        }
+        update: dict[str, object] = {
+            f"data.archetype.{k}": v for (k, v) in partial_data.items()
+        };
+        update['updated_at'] = datetime.now(timezone.utc).isoformat();
+        self.collection.update_one({'_id': str(_id)}, {'$set': update});
+        anchor.hash = Serializer._compute_hash(anchor);
+        arch = anchor.archetype if anchor.is_populated() else None;
+        if arch is not None {
+            arch.__dict__.pop('__jac_dirty_fields__', None);
+        }
+    } except Exception as e {
+        logger.error(f"MongoDB put_partial failed: {e}");
+    }
+}
+
 """Delete anchor from MongoDB."""
 impl MongoBackend.delete(id: UUID) -> None {
     if self.client is None {
