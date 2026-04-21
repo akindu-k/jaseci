@@ -515,7 +515,7 @@ idempotent `ALTER` / lazy-default field.
 
 ### Persistence (Layer 2)
 
-6. `test_only_dirty_archetype_rewritten_sqlite` — build a 3-deep graph (Root → Profile
+1. `test_only_dirty_archetype_rewritten_sqlite` — build a 3-deep graph (Root → Profile
    → Avatar); mutate `avatar.url`; assert Avatar row's `updated_at` advanced; Root
    and Profile rows' `updated_at` unchanged.
 2. Same as (6) for `test_only_dirty_archetype_rewritten_mongo` — inspect the command
@@ -525,7 +525,7 @@ idempotent `ALTER` / lazy-default field.
 
 ### HTTP (Layer 3)
 
-9. `test_restspec_patch_omits_unspecified` — PATCH `{name: "b"}` against node with
+1. `test_restspec_patch_omits_unspecified` — PATCH `{name: "b"}` against node with
    `{name: "a", age: 30}`; `age == 30` post-flush; backend write touched only the
    affected archetype row.
 2. `test_restspec_patch_explicit_null` — body `{name: null}` writes null (present in
@@ -535,7 +535,7 @@ idempotent `ALTER` / lazy-default field.
 
 ### Concurrency (Layer 4)
 
-12. `test_5451_concurrent_edge_appends_mongo` — N concurrent walkers each append a
+1. `test_5451_concurrent_edge_appends_mongo` — N concurrent walkers each append a
     distinct edge to Root; assert all N edges present after flush. Relies on 4.2
     `$addToSet`. Direct repro of #5451.
 2. `test_5451_concurrent_edge_appends_sqlite` — N concurrent walkers append edges
@@ -560,7 +560,7 @@ idempotent `ALTER` / lazy-default field.
 
 ### Ownership (Layer 5)
 
-21. `test_owned_field_destroys_on_remove` — `by owned` field; remove an element from
+1. `test_owned_field_destroys_on_remove` — `by owned` field; remove an element from
     the collection; assert `mem.delete` was called on that archetype's jid after the
     parent's delta commit.
 2. `test_reference_field_keeps_row_on_remove` — default (non-owned) field; remove an
