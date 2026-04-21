@@ -50,6 +50,201 @@ def _anchor_to_row(anchor: Anchor) -> tuple {
     );
 }
 
+# ---------------------------------------------------------------------------
+# Phase 4.1 — Snapshot-based collection delta detection (shared primitive).
+# Used by both SqliteMemory (Phase 5) and MongoBackend (Phase 4).
+# ---------------------------------------------------------------------------
+
+"""Stable JSON string key for comparing two serialized values by content."""
+def _json_key(val: object) -> str {
+    return json.dumps(val, sort_keys=True, default=str);
+}
+
+"""Return {field_name: kind} for all collection-typed `has` fields on `arch_cls`.
+
+`kind` is 'list', 'set', or 'dict'. Only top-level container origins are
+inspected so nested containers (e.g. `list[list[int]]`) are classified by
+their outermost type.
+"""
+def _get_collection_fields(arch_cls: type) -> dict[str, str] {
+    import dataclasses;
+    import from typing { get_type_hints, get_origin }
+    if not dataclasses.is_dataclass(arch_cls) {
+        return {};
+    }
+    try {
+        hints = get_type_hints(arch_cls);
+    } except Exception {
+        hints = getattr(arch_cls, '__annotations__', {}) or {};
+    }
+    result: dict[str, str] = {};
+    for f in dataclasses.fields(arch_cls) {
+        ann = hints.get(f.name);
+        if ann is None {
+            continue;
+        }
+        origin = get_origin(ann);
+        if origin is list {
+            result[f.name] = 'list';
+        } elif origin is set or origin is frozenset {
+            result[f.name] = 'set';
+        } elif origin is dict {
+            result[f.name] = 'dict';
+        }
+    }
+    return result;
+}
+
+"""Record a shallow snapshot of all collection-typed fields on `anchor`.
+
+Stores the serialized form of each collection field (via storage_mode=True)
+plus the edge list for NodeAnchors in `anchor._field_snapshots`. Call after
+every successful load or flush so `_compute_anchor_deltas` can diff later.
+"""
+def _snapshot_anchor_collections(anchor: Anchor) -> None {
+    snaps: dict[str, object] = {};
+    if isinstance(anchor, NodeAnchor) {
+        snaps['__edges__'] = [str(e.id) for e in anchor.edges];
+    }
+    if anchor.is_populated() and anchor.archetype is not None {
+        snaps['__arch__'] = Serializer._serialize_attrs(
+            anchor.archetype,
+            include_type=False,
+            api_mode=False,
+            storage_mode=True
+        );
+    }
+    anchor._field_snapshots = snaps;
+}
+
+"""Compute per-field collection deltas between the live anchor and its last snapshot.
+
+Returns `(field_deltas, scalars_unchanged)`.
+
+`field_deltas` maps field names (plus '__edges__' for NodeAnchor) to delta
+dicts. `scalars_unchanged` is True when no non-collection field changed since
+the last snapshot — only in that case can element-level ops be used instead
+of a full-row replace.
+"""
+def _compute_anchor_deltas(anchor: Anchor) -> tuple {
+    snaps: dict = getattr(anchor, '_field_snapshots', None) or {};
+    if not snaps {
+        return ({}, False);
+    }
+    field_deltas: dict[str, object] = {};
+    scalars_unchanged: bool = True;
+
+    # NodeAnchor.edges — always set semantics
+    if isinstance(anchor, NodeAnchor) {
+        current_edges = [str(e.id) for e in anchor.edges];
+        snap_edges: list = cast(list, snaps.get('__edges__', []));
+        snap_edge_set = set(snap_edges);
+        curr_edge_set = set(current_edges);
+        if snap_edge_set != curr_edge_set {
+            added   = [e for e in current_edges if e not in snap_edge_set];
+            removed = [e for e in snap_edges   if e not in curr_edge_set];
+            if added or removed {
+                field_deltas['__edges__'] = {
+                    'kind': 'list',
+                    'set_semantics': True,
+                    'added': added,
+                    'removed': removed,
+                    'json_path': '$.edges',
+                    'mongo_path': 'data.edges'
+                };
+            }
+        }
+    }
+
+    # Archetype fields
+    snap_arch: dict = cast(dict, snaps.get('__arch__', {}));
+    if anchor.is_populated() and anchor.archetype is not None {
+        arch = anchor.archetype;
+        coll_kinds = _get_collection_fields(type(arch));
+        curr_arch: dict = Serializer._serialize_attrs(
+            arch, include_type=False, api_mode=False, storage_mode=True
+        );
+
+        for (fname, curr_val) in curr_arch.items() {
+            snap_val = snap_arch.get(fname);
+            if curr_val == snap_val {
+                continue;
+            }
+            kind: (str | None) = coll_kinds.get(fname);
+            if kind is None {
+                scalars_unchanged = False;
+                continue;
+            }
+            json_path  = f'$.archetype.{fname}';
+            mongo_path = f'data.archetype.{fname}';
+            if kind == 'list' {
+                snap_list: list = snap_val if isinstance(snap_val, list) else [];
+                curr_list: list = curr_val if isinstance(curr_val, list) else [];
+                snap_keys = set(_json_key(x) for x in snap_list);
+                curr_keys = set(_json_key(x) for x in curr_list);
+                added   = [x for x in curr_list if _json_key(x) not in snap_keys];
+                removed = [x for x in snap_list if _json_key(x) not in curr_keys];
+                if added or removed {
+                    field_deltas[fname] = {
+                        'kind': 'list',
+                        'set_semantics': False,
+                        'added': added,
+                        'removed': removed,
+                        'json_path': json_path,
+                        'mongo_path': mongo_path
+                    };
+                }
+            } elif kind == 'set' {
+                snap_items: list = (
+                    cast(dict, snap_val).get('items', []) if isinstance(snap_val, dict) else []
+                );
+                curr_items: list = (
+                    cast(dict, curr_val).get('items', []) if isinstance(curr_val, dict) else []
+                );
+                snap_keys = set(_json_key(x) for x in snap_items);
+                curr_keys = set(_json_key(x) for x in curr_items);
+                added   = [x for x in curr_items if _json_key(x) not in snap_keys];
+                removed = [x for x in snap_items if _json_key(x) not in curr_keys];
+                if added or removed {
+                    field_deltas[fname] = {
+                        'kind': 'set',
+                        'set_semantics': True,
+                        'added': added,
+                        'removed': removed,
+                        'json_path': json_path,
+                        'mongo_path': mongo_path
+                    };
+                }
+            } elif kind == 'dict' {
+                snap_dict: dict = snap_val if isinstance(snap_val, dict) else {};
+                curr_dict: dict = curr_val if isinstance(curr_val, dict) else {};
+                added_or_changed = {
+                    k: v for (k, v) in curr_dict.items() if snap_dict.get(k) != v
+                };
+                removed = [k for k in snap_dict if k not in curr_dict];
+                if added_or_changed or removed {
+                    field_deltas[fname] = {
+                        'kind': 'dict',
+                        'added_or_changed': added_or_changed,
+                        'removed': removed,
+                        'json_path': json_path,
+                        'mongo_path': mongo_path
+                    };
+                }
+            }
+        }
+
+        for fname in snap_arch {
+            if fname not in curr_arch and coll_kinds.get(fname) is None {
+                scalars_unchanged = False;
+                break;
+            }
+        }
+    }
+
+    return (field_deltas, scalars_unchanged);
+}
+
 """Return True if the provided sqlite connection has the new anchors schema."""
 def _is_new_schema(conn: sqlite3.Connection) -> bool {
     cursor = conn.execute("PRAGMA table_info(anchors)");
@@ -547,8 +742,10 @@ impl SqliteMemory.get(id: UUID) -> (Anchor | None) {
         );
         return None;
     }
-    self.__mem__[id] = cast(Anchor, anchor);
-    return cast(Anchor, anchor);
+    loaded = cast(Anchor, anchor);
+    _snapshot_anchor_collections(loaded);
+    self.__mem__[id] = loaded;
+    return loaded;
 }
 
 """Store an anchor. Writes to memory and immediately persists to database."""
@@ -569,6 +766,7 @@ impl SqliteMemory.put(anchor: Anchor) -> None {
             );
             self.__conn__.commit();
             anchor.hash = Serializer._compute_hash(anchor);
+            _snapshot_anchor_collections(anchor);
         } except Exception as e {
             logger.warning(f"SqliteMemory.put immediate persist failed: {e}");
         }
@@ -678,6 +876,133 @@ def _canonical_json(val: object) -> str {
 
 """Sync memory to database with access control checks.
 
+"""Apply element-level JSON1 operators for a set of collection field deltas.
+
+Issues one or more `UPDATE anchors SET data = json_*(...) WHERE id = ?`
+statements inside a single implicit SQLite write-lock window, so concurrent
+writers serialize naturally and no Python-side read-modify-write race is
+possible.
+
+Routing per field kind (same semantics as MongoBackend._put_collection_delta):
+  list (set_semantics=True)  → json_insert + CASE guard / remove-by-value
+  list (set_semantics=False) → json_insert[#] append / remove-by-value
+  set field                  → json_insert + CASE guard / remove-by-value
+  dict field                 → json_set per key / json_remove per key
+
+All values are passed through json(?) so both plain scalars and embedded
+JSON objects (e.g. {$ref: …}) survive the round-trip correctly.
+Requires SQLite 3.38+ (json_* built-ins); guaranteed on Python 3.11+.
+"""
+impl SqliteMemory._put_collection_delta(anchor: Anchor, field_deltas: dict) -> None {
+    if not field_deltas {
+        return;
+    }
+    self._ensure_connection();
+    conn = cast(sqlite3.Connection, self.__conn__);
+    anchor_id = str(anchor.id);
+    ts = datetime.now(timezone.utc).isoformat();
+
+    for (fname, delta) in field_deltas.items() {
+        json_path = cast(str, delta['json_path']);
+        kind      = cast(str, delta.get('kind', ''));
+
+        if kind in ('list', 'set') {
+            added     = cast(list, delta.get('added', []));
+            removed   = cast(list, delta.get('removed', []));
+            set_sem   = cast(bool, delta.get('set_semantics', False));
+
+            # Add elements
+            for elem in added {
+                elem_json = json.dumps(elem);
+                if set_sem {
+                    # Insert only when not already present (set semantics)
+                    conn.execute(
+                        f"""
+                        UPDATE anchors
+                           SET data = CASE
+                                   WHEN NOT EXISTS (
+                                       SELECT 1 FROM json_each(data, ?)
+                                        WHERE json(value) = json(?)
+                                   )
+                                   THEN json_insert(data, ? || '[#]', json(?))
+                                   ELSE data
+                               END,
+                               updated_at = ?
+                         WHERE id = ?
+                        """,
+                        (json_path, elem_json, json_path, elem_json, ts, anchor_id)
+                    );
+                } else {
+                    # Unconditional append (list/push semantics)
+                    conn.execute(
+                        f"""
+                        UPDATE anchors
+                           SET data = json_insert(data, ? || '[#]', json(?)),
+                               updated_at = ?
+                         WHERE id = ?
+                        """,
+                        (json_path, elem_json, ts, anchor_id)
+                    );
+                }
+            }
+
+            # Remove elements (drop all exact matches)
+            for elem in removed {
+                elem_json = json.dumps(elem);
+                conn.execute(
+                    f"""
+                    UPDATE anchors
+                       SET data = json_set(
+                               data,
+                               ?,
+                               (SELECT COALESCE(json_group_array(json(value)), '[]')
+                                  FROM json_each(data, ?)
+                                 WHERE json(value) != json(?))
+                           ),
+                           updated_at = ?
+                     WHERE id = ?
+                    """,
+                    (json_path, json_path, elem_json, ts, anchor_id)
+                );
+            }
+
+        } elif kind == 'dict' {
+            added_or_changed = cast(dict, delta.get('added_or_changed', {}));
+            removed_keys     = cast(list, delta.get('removed', []));
+
+            for (k, v) in added_or_changed.items() {
+                key_path = f'{json_path}.{k}';
+                conn.execute(
+                    f"""
+                    UPDATE anchors
+                       SET data = json_set(data, ?, json(?)),
+                           updated_at = ?
+                     WHERE id = ?
+                    """,
+                    (key_path, json.dumps(v), ts, anchor_id)
+                );
+            }
+
+            for k in removed_keys {
+                key_path = f'{json_path}.{k}';
+                conn.execute(
+                    f"""
+                    UPDATE anchors
+                       SET data = json_remove(data, ?),
+                           updated_at = ?
+                     WHERE id = ?
+                    """,
+                    (key_path, ts, anchor_id)
+                );
+            }
+        }
+    }
+
+    conn.commit();
+    anchor.hash = Serializer._compute_hash(anchor);
+}
+
+"""
 Preserves the field-level merge semantics from the legacy pickle path:
 edges merge requires CONNECT access, archetype/access merge require
 WRITE access. Equality comparisons use JSON-serialized forms instead of
@@ -714,6 +1039,37 @@ impl SqliteMemory.sync -> None {
         }
 
         key = str(id);
+        # --- Phase 5 (Layer 4.3): element-level JSON1 path ---
+        # Try targeted json_* ops when only collection fields changed and
+        # we have a snapshot to diff against. Falls back to the full merge
+        # path below on any failure.
+        delta_result = _compute_anchor_deltas(anchor);
+        field_deltas    = cast(dict, delta_result[0]);
+        scalars_unchanged = cast(bool, delta_result[1]);
+        if scalars_unchanged and field_deltas {
+            try {
+                # Edge delta requires CONNECT access; archetype field deltas
+                # require WRITE access. Use the most permissive check that
+                # covers what actually changed.
+                edges_only = list(field_deltas.keys()) == ['__edges__'];
+                has_access = (
+                    Jac.check_connect_access(anchor)
+                        if edges_only
+                        else Jac.check_write_access(anchor)
+                );
+                if has_access {
+                    self._put_collection_delta(anchor, field_deltas);
+                    _snapshot_anchor_collections(anchor);
+                    continue;
+                }
+            } except Exception as e {
+                logger.warning(
+                    f"SqliteMemory.sync: collection delta failed for {key}, "
+                    f"falling back to full merge: {e}"
+                );
+            }
+        }
+
         try {
             cursor = conn.execute(
                 """
@@ -804,6 +1160,7 @@ impl SqliteMemory.sync -> None {
                         (key, ) + merged_row
                     );
                     anchor.hash = current_hash;
+                    _snapshot_anchor_collections(anchor);
                 }
             } else {
                 # No stored or stored is a stub - save anchor if valid
@@ -824,6 +1181,7 @@ impl SqliteMemory.sync -> None {
                         (key, ) + new_row
                     );
                     anchor.hash = current_hash;
+                    _snapshot_anchor_collections(anchor);
                 }
             }
         } except (AttributeError, ModuleNotFoundError) {

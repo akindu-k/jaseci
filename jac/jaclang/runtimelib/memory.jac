@@ -255,6 +255,8 @@ obj SqliteMemory(PersistentMemory) {
     def get_gc -> list[Anchor];
     def remove_from_gc(anchor: Anchor) -> None;
     def get_mem -> dict[UUID, Anchor];
+    # Phase 5 (Layer 4.3) — element-level JSON1 collection delta writes
+    def _put_collection_delta(anchor: Anchor, field_deltas: dict) -> None;
 }
 
 """Tiered Memory - Extends VolatileMemory with L2 cache + L3 persistent tiers.
