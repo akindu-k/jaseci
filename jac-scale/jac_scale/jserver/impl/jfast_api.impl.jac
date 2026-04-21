@@ -271,6 +271,79 @@ def _pydantic_to_jac(data: Any, jac_cls: Any) -> Any {
     return data;
 }
 
+"""Convert a validated Pydantic patch model to a Jac archetype with only explicitly-set fields.
+
+Similar to _pydantic_to_jac but only sets fields that were explicitly provided
+in the patch request (tracked via model_fields_set).
+"""
+def _pydantic_patch_to_jac(patch_data: Any, jac_cls: Any) -> Any {
+    import from typing { get_type_hints }
+    import inspect;
+    import from pydantic import BaseModel
+    if not isinstance(patch_data, BaseModel) {
+        return patch_data;
+    }
+    # Get fields that were explicitly set in the request
+    fields_set = patch_data.model_fields_set;
+    hints = get_type_hints(jac_cls.init);
+    sig = inspect.signature(jac_cls.init);
+    # Build kwargs with only explicitly-set fields
+    kwargs: dict[str, Any] = {};
+    for field_name in fields_set {
+        if (field_name not in sig.parameters) {
+            continue;
+        }
+        field_value = getattr(patch_data, field_name, None);
+        field_type = hints.get(field_name);
+        # Convert Pydantic data to Jac instances recursively
+        kwargs[field_name] = _pydantic_to_jac(field_value, field_type);
+    }
+    # Create new archetype instance with only the set fields
+    return jac_cls(**kwargs);
+}
+
+"""Apply a validated Pydantic patch model to an existing archetype.
+
+This function implements partial updates by only modifying fields that were
+explicitly sent in the request body, leaving others untouched. Uses model_fields_set
+to distinguish between "field absent" and "field explicitly sent as null".
+
+Args:
+    target: The existing archetype instance to patch
+    patch_data: The Pydantic patch model instance with explicitly-set fields
+    jac_cls: The archetype class for type hints
+
+Returns:
+    The modified target archetype
+"""
+def _apply_pydantic_patch(target: Any, patch_data: Any, jac_cls: Any) -> Any {
+    import from typing { get_type_hints }
+    import inspect;
+    import from pydantic import BaseModel
+    if not isinstance(patch_data, BaseModel) {
+        return target;
+    }
+    # Get the fields that were explicitly set in the request
+    fields_set = patch_data.model_fields_set;
+    if not fields_set {
+        return target;
+    }
+    hints = get_type_hints(jac_cls.init);
+    sig = inspect.signature(jac_cls.init);
+    # Apply only the explicitly-set fields
+    for field_name in fields_set {
+        if (field_name not in sig.parameters) {
+            continue;
+        }
+        field_value = getattr(patch_data, field_name, None);
+        field_type = hints.get(field_name);
+        # Convert Pydantic data to Jac instances if needed
+        converted_value = _pydantic_to_jac(field_value, field_type);
+        setattr(target, field_name, converted_value);
+    }
+    return target;
+}
+
 """Resolve a parameter type to a Pydantic-compatible Python type.
 
 Uses the actual type object (type_obj) when available to handle custom Jac
@@ -378,6 +451,61 @@ impl JFastApiServer._build_pydantic_model(
     # Resolve any ForwardRefs now that every referenced model is built.
     # Only pass fully-built models to the namespace (ForwardRef values in
     # the cache belong to models still in the middle of building).
+    namespace = {
+        k: v
+        for (k, v) in self._models.items()
+        if isinstance(v, type)
+    };
+    try {
+        model.model_rebuild(force=True, _types_namespace=namespace);
+    } except Exception {
+        ;
+    }
+    return model;
+}
+
+"""Build (and cache) a Pydantic model for PATCH operations with all-optional fields.
+
+Similar to _build_pydantic_model but wraps every field in Optional with a
+sentinel default (Undefined from pydantic.fields). This allows distinguishing
+between "field absent in request" vs "field explicitly sent as null".
+"""
+impl JFastApiServer._build_pydantic_patch_model(
+    self: JFastApiServer, jac_cls: Any
+) -> type[BaseModel] {
+    import from typing { get_type_hints, ForwardRef }
+    import from pydantic import Undefined
+    model_name = f"{jac_cls.__name__}Patch";
+    cached = self._models.get(model_name);
+    if cached is not None {
+        return cached;
+    }
+    # Register a ForwardRef before recursing for self-referential types
+    self._models[model_name] = ForwardRef(model_name);
+    sig = inspect.signature(jac_cls.init);
+    try {
+        hints = get_type_hints(jac_cls.init);
+    } except Exception {
+        hints = {};
+    }
+    import dataclasses;
+    dc_fields: dict[(str, Any)] = getattr(jac_cls, '__dataclass_fields__', {});
+    fields: dict[str, Any] = {};
+    for (name, param) in sig.parameters.items() {
+        if (name in ('self', 'args', 'kwargs')) {
+            continue;
+        }
+        field_type_obj = hints.get(name, str);
+        resolved = self._resolve_type(
+            getattr(field_type_obj, '__name__', str(field_type_obj)), field_type_obj
+        );
+        # All fields are Optional with Undefined as sentinel default
+        optional_type = (resolved | None);
+        fields[name] = (optional_type, Field(default=Undefined));
+    }
+    model = create_model(model_name, **fields);
+    self._models[model_name] = model;
+    # Resolve any ForwardRefs
     namespace = {
         k: v
         for (k, v) in self._models.items()
@@ -746,6 +874,10 @@ impl JFastApiServer._create_endpoint_function(
     }
     callback_args_lines: list[str] = [];
     if body_model {
+        # Check if this is a patch model (name ends with "Patch")
+        is_patch_model = (
+            hasattr(body_model, '__name__') and 'Patch' in body_model.__name__
+        );
         if use_request_model {
             # Pass the whole Pydantic model to the callback as body_data
             callback_args_lines.append(
@@ -756,9 +888,16 @@ impl JFastApiServer._create_endpoint_function(
                 param_name = param.name;
                 if param_name {
                     if (param_name in body_type_map) {
-                        callback_args_lines.append(
-                            f"        callback_args['{param_name}'] = _pydantic_to_jac(body_data.{param_name}, _body_types['{param_name}'])"
-                        );
+                        # Use patch conversion for patch models
+                        if is_patch_model {
+                            callback_args_lines.append(
+                                f"        callback_args['{param_name}'] = _pydantic_patch_to_jac(body_data.{param_name}, _body_types['{param_name}'])"
+                            );
+                        } else {
+                            callback_args_lines.append(
+                                f"        callback_args['{param_name}'] = _pydantic_to_jac(body_data.{param_name}, _body_types['{param_name}'])"
+                            );
+                        }
                     } else {
                         callback_args_lines.append(
                             f"        callback_args['{param_name}'] = body_data.{param_name}"
@@ -853,6 +992,8 @@ def endpoint_wrapper({params}):
         'TransportResponse': TransportResponse,
         '_convert_transport_response_to_json_response': _convert_transport_response_to_json_response,
         '_pydantic_to_jac': _pydantic_to_jac,
+        '_pydantic_patch_to_jac': _pydantic_patch_to_jac,
+        '_apply_pydantic_patch': _apply_pydantic_patch,
         '_body_types': body_type_map,
         'isinstance': isinstance
     };
@@ -886,11 +1027,31 @@ endpoint (JEndPoint): The endpoint configuration
 impl JFastApiServer._create_fastapi_route(
     self: JFastApiServer, method: HTTPMethod, endpoint: JEndPoint
 ) -> None {
+    # For PATCH requests with body parameters that are Jac archetypes,
+    # use the patch model instead of the regular model
+    request_model_to_use = endpoint.request_model;
+    if (method == HTTPMethod.PATCH) and endpoint.parameters {
+        body_params = [
+            p for p in endpoint.parameters if p.type == ParameterType.BODY
+        ];
+        if body_params and not request_model_to_use {
+            # Check if any body parameter is a Jac archetype
+            for param in body_params {
+                if param.type_obj and _is_jac_archetype(param.type_obj) {
+                    # Generate patch model for this archetype
+                    request_model_to_use = self._build_pydantic_patch_model(
+                        param.type_obj
+                    );
+                    break;
+                }
+            }
+        }
+    }
     endpoint_func = self._create_endpoint_function(
         endpoint.callback,
         (endpoint.parameters or []),
         [],
-        request_model=endpoint.request_model
+        request_model=request_model_to_use
     );
     route_kwargs: dict[(str, Any)] = {
         'response_model': endpoint.response_model,

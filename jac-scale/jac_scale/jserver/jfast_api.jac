@@ -162,6 +162,9 @@ class JFastApiServer(JServer[FastAPI]) {
     ) -> Any;
 
     def _build_pydantic_model(self: JFastApiServer, jac_cls: Any) -> type[BaseModel];
+    def _build_pydantic_patch_model(
+        self: JFastApiServer, jac_cls: Any
+    ) -> type[BaseModel];
     def _create_response_model(
         self: JFastApiServer, response_config: (dict[(str, Any)] | None) = None
     ) -> (type[BaseModel] | None);
