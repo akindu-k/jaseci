@@ -69,6 +69,218 @@ def _anchor_to_doc(anchor: Anchor) -> dict {
     };
 }
 
+"""Stable JSON string key for comparing two serialized values.
+
+Used to check membership in a list/set snapshot without relying on
+Python object identity — two separately-serialized `{$ref: uuid}` dicts
+that are equal by value will hash to the same key here.
+"""
+def _json_key(val: object) -> str {
+    import from json { dumps }
+    return dumps(val, sort_keys=True, default=str);
+}
+
+"""Return {field_name: kind} for all collection-typed `has` fields on `arch_cls`.
+
+`kind` is one of 'list', 'set', 'dict'. Only top-level collection origins
+are inspected; nested generics (e.g. `list[list[int]]`) are classified by
+their outermost container.
+"""
+def _get_collection_fields(arch_cls: type) -> dict[str, str] {
+    import dataclasses;
+    import from typing { get_type_hints, get_origin }
+    if not dataclasses.is_dataclass(arch_cls) {
+        return {};
+    }
+    try {
+        hints = get_type_hints(arch_cls);
+    } except Exception {
+        hints = getattr(arch_cls, '__annotations__', {}) or {};
+    }
+    result: dict[str, str] = {};
+    for f in dataclasses.fields(arch_cls) {
+        ann = hints.get(f.name);
+        if ann is None {
+            continue;
+        }
+        origin = get_origin(ann);
+        if origin is list {
+            result[f.name] = 'list';
+        } elif origin is set or origin is frozenset {
+            result[f.name] = 'set';
+        } elif origin is dict {
+            result[f.name] = 'dict';
+        }
+    }
+    return result;
+}
+
+"""Record a shallow snapshot of all collection-typed fields on `anchor`.
+
+The snapshot uses `Serializer._serialize_attrs` with `storage_mode=True`
+so archetype-valued elements are stored as `{$ref: …}` pointers — the
+same representation used on disk. This means delta comparison is stable:
+we compare serialized forms, not live Python objects.
+
+Stored in `anchor._field_snapshots` as:
+  {
+    '__arch__':  full serialized archetype attrs dict  (for scalar diff),
+    '__edges__': [uuid_str, …]  (NodeAnchor only),
+  }
+"""
+def _snapshot_anchor_collections(anchor: Anchor) -> None {
+    import from jaclang.jac0core.archetype { NodeAnchor }
+    import from jaclang.runtimelib.serializer { Serializer }
+    snaps: dict[str, object] = {};
+    if isinstance(anchor, NodeAnchor) {
+        snaps['__edges__'] = [str(e.id) for e in anchor.edges];
+    }
+    if anchor.is_populated() and anchor.archetype is not None {
+        snaps['__arch__'] = Serializer._serialize_attrs(
+            anchor.archetype,
+            include_type=False,
+            api_mode=False,
+            storage_mode=True
+        );
+    }
+    anchor._field_snapshots = snaps;
+}
+
+"""Compute per-field collection deltas between the live anchor and its last snapshot.
+
+Returns `(field_deltas, scalars_unchanged)`.
+
+`field_deltas` maps field names to delta dicts:
+  list/set field:  {'kind': 'list'|'set', 'set_semantics': bool,
+                    'added': [...], 'removed': [...], 'mongo_path': str}
+  dict field:      {'kind': 'dict',
+                    'added_or_changed': {k: v}, 'removed': [k],
+                    'mongo_path': str}
+
+`scalars_unchanged` is True when no non-collection field changed since the
+last snapshot. Only when this is True (and `field_deltas` is non-empty) can
+we use element-level Mongo ops instead of a full-row replace.
+
+Special key '__edges__' covers NodeAnchor.edges with set semantics.
+"""
+def _compute_anchor_deltas(anchor: Anchor) -> tuple {
+    import from jaclang.jac0core.archetype { NodeAnchor }
+    import from jaclang.runtimelib.serializer { Serializer }
+    snaps: dict = getattr(anchor, '_field_snapshots', None) or {};
+    if not snaps {
+        return ({}, False);
+    }
+    field_deltas: dict[str, object] = {};
+    scalars_unchanged: bool = True;
+
+    # --- NodeAnchor.edges ---
+    if isinstance(anchor, NodeAnchor) {
+        current_edges = [str(e.id) for e in anchor.edges];
+        snap_edges: list = snaps.get('__edges__', []);
+        snap_edge_set = set(snap_edges);
+        curr_edge_set = set(current_edges);
+        if snap_edge_set != curr_edge_set {
+            added   = [e for e in current_edges if e not in snap_edge_set];
+            removed = [e for e in snap_edges   if e not in curr_edge_set];
+            if added or removed {
+                field_deltas['__edges__'] = {
+                    'kind': 'list',
+                    'set_semantics': True,
+                    'added': added,
+                    'removed': removed,
+                    'mongo_path': 'data.edges'
+                };
+            }
+        }
+    }
+
+    # --- Archetype fields ---
+    snap_arch: dict = snaps.get('__arch__', {});
+    if anchor.is_populated() and anchor.archetype is not None {
+        arch = anchor.archetype;
+        coll_kinds = _get_collection_fields(type(arch));
+        curr_arch: dict = Serializer._serialize_attrs(
+            arch, include_type=False, api_mode=False, storage_mode=True
+        );
+
+        # Fields present in current serialization
+        for (fname, curr_val) in curr_arch.items() {
+            snap_val = snap_arch.get(fname);
+            if curr_val == snap_val {
+                continue;
+            }
+            kind: (str | None) = coll_kinds.get(fname);
+            if kind is None {
+                scalars_unchanged = False;
+                continue;
+            }
+            mongo_path = f'data.archetype.{fname}';
+            if kind == 'list' {
+                snap_list: list = snap_val if isinstance(snap_val, list) else [];
+                curr_list: list = curr_val if isinstance(curr_val, list) else [];
+                snap_keys = set(_json_key(x) for x in snap_list);
+                curr_keys = set(_json_key(x) for x in curr_list);
+                added   = [x for x in curr_list if _json_key(x) not in snap_keys];
+                removed = [x for x in snap_list if _json_key(x) not in curr_keys];
+                if added or removed {
+                    field_deltas[fname] = {
+                        'kind': 'list',
+                        'set_semantics': False,
+                        'added': added,
+                        'removed': removed,
+                        'mongo_path': mongo_path
+                    };
+                }
+            } elif kind == 'set' {
+                snap_items: list = (
+                    snap_val.get('items', []) if isinstance(snap_val, dict) else []
+                );
+                curr_items: list = (
+                    curr_val.get('items', []) if isinstance(curr_val, dict) else []
+                );
+                snap_keys = set(_json_key(x) for x in snap_items);
+                curr_keys = set(_json_key(x) for x in curr_items);
+                added   = [x for x in curr_items if _json_key(x) not in snap_keys];
+                removed = [x for x in snap_items if _json_key(x) not in curr_keys];
+                if added or removed {
+                    field_deltas[fname] = {
+                        'kind': 'set',
+                        'set_semantics': True,
+                        'added': added,
+                        'removed': removed,
+                        'mongo_path': mongo_path
+                    };
+                }
+            } elif kind == 'dict' {
+                snap_dict: dict = snap_val if isinstance(snap_val, dict) else {};
+                curr_dict: dict = curr_val if isinstance(curr_val, dict) else {};
+                added_or_changed = {
+                    k: v for (k, v) in curr_dict.items() if snap_dict.get(k) != v
+                };
+                removed = [k for k in snap_dict if k not in curr_dict];
+                if added_or_changed or removed {
+                    field_deltas[fname] = {
+                        'kind': 'dict',
+                        'added_or_changed': added_or_changed,
+                        'removed': removed,
+                        'mongo_path': mongo_path
+                    };
+                }
+            }
+        }
+
+        # Fields present in snapshot but removed from current → scalar check
+        for fname in snap_arch {
+            if fname not in curr_arch and coll_kinds.get(fname) is None {
+                scalars_unchanged = False;
+                break;
+            }
+        }
+    }
+
+    return (field_deltas, scalars_unchanged);
+}
+
 """Move an unreadable document into the quarantine collection.
 
 Never raises: we'd rather fail loud on load (caller quarantines + None)
@@ -231,6 +443,7 @@ impl MongoBackend.put(anchor: Anchor) -> None {
         doc = _anchor_to_doc(anchor);
         self.collection.update_one({'_id': str(_id)}, {'$set': doc}, upsert=True);
         anchor.hash = Serializer._compute_hash(anchor);
+        _snapshot_anchor_collections(anchor);
     } except Exception as e {
         logger.error(f"MongoDB put failed: {e}");
     }
@@ -339,7 +552,14 @@ impl MongoBackend.commit(anchor: (Anchor | None) = None) -> None {
 }
 
 # PersistentMemory-specific methods
-"""Sync - flush L1 memory to MongoDB (only changed anchors)."""
+"""Sync - flush L1 memory to MongoDB (only changed anchors).
+
+For each changed anchor, tries the element-level collection-delta path
+(Layer 4.2) first: if only collection fields changed since the last
+snapshot, issue targeted $addToSet / $push / $pullAll / $set / $unset
+operators instead of rewriting the whole row.  Falls back to a full-row
+put whenever scalar fields also changed or the delta write fails.
+"""
 impl MongoBackend.sync -> None {
     import from jaclang { JacRuntimeInterface as Jac }
     if not self._mem_ref or not self.client {
@@ -349,7 +569,6 @@ impl MongoBackend.sync -> None {
         if not anchor.persistent {
             continue;
         }
-        # Check hash first — skip unchanged anchors without access check
         current_hash = Serializer._compute_hash(anchor);
         if current_hash == anchor.hash {
             continue;
@@ -358,7 +577,23 @@ impl MongoBackend.sync -> None {
             continue;
         }
         try {
-            self.put(anchor);
+            delta_result = _compute_anchor_deltas(anchor);
+            field_deltas    = cast(dict, delta_result[0]);
+            scalars_unchanged = cast(bool, delta_result[1]);
+            if scalars_unchanged and field_deltas {
+                try {
+                    self._put_collection_delta(anchor, field_deltas);
+                    _snapshot_anchor_collections(anchor);
+                } except Exception as e {
+                    logger.warning(
+                        f"MongoDB collection delta failed for {anchor.id}, "
+                        f"falling back to full put: {e}"
+                    );
+                    self.put(anchor);
+                }
+            } else {
+                self.put(anchor);
+            }
         } except Exception as e {
             logger.warning(f"MongoDB sync failed for anchor {anchor.id}: {e}");
         }
@@ -463,7 +698,9 @@ impl MongoBackend._load_anchor(raw: dict[(str, Any)]) -> (Anchor | None) {
         );
         return None;
     }
-    return cast(Anchor, anchor);
+    loaded = cast(Anchor, anchor);
+    _snapshot_anchor_collections(loaded);
+    return loaded;
 }
 
 
@@ -515,6 +752,61 @@ def _format_q_doc(d: dict) -> dict {
     };
 }
 
+
+"""Apply element-level Mongo operators for a set of collection field deltas.
+
+Translates the `field_deltas` dict produced by `_compute_anchor_deltas`
+into a single `update_one` call:
+
+  list (set_semantics=True)  → $addToSet / $pullAll
+  list (set_semantics=False) → $push    / $pullAll
+  set field                  → $addToSet / $pullAll
+  dict field                 → $set per key / $unset per key
+
+Multiple fields are coalesced into one round-trip by merging operator
+dicts. Path collisions within a single operator are impossible here
+because each field maps to a unique `data.archetype.<name>` path.
+"""
+impl MongoBackend._put_collection_delta(anchor: Anchor, field_deltas: dict) -> None {
+    if not field_deltas {
+        return;
+    }
+    ops: dict[str, dict] = {};
+    for (fname, delta) in field_deltas.items() {
+        mongo_path = cast(str, delta['mongo_path']);
+        kind = cast(str, delta.get('kind', ''));
+        if kind in ('list', 'set') {
+            added   = cast(list, delta.get('added', []));
+            removed = cast(list, delta.get('removed', []));
+            set_sem = cast(bool, delta.get('set_semantics', False));
+            if added {
+                if set_sem {
+                    ops.setdefault('$addToSet', {})[mongo_path] = {'$each': added};
+                } else {
+                    ops.setdefault('$push', {})[mongo_path] = {'$each': added};
+                }
+            }
+            if removed {
+                ops.setdefault('$pullAll', {})[mongo_path] = removed;
+            }
+        } elif kind == 'dict' {
+            added_or_changed = cast(dict, delta.get('added_or_changed', {}));
+            removed_keys     = cast(list, delta.get('removed', []));
+            for (k, v) in added_or_changed.items() {
+                ops.setdefault('$set', {})[f'{mongo_path}.{k}'] = v;
+            }
+            for k in removed_keys {
+                ops.setdefault('$unset', {})[f'{mongo_path}.{k}'] = '';
+            }
+        }
+    }
+    if not ops {
+        return;
+    }
+    ops.setdefault('$set', {})['updated_at'] = datetime.now(timezone.utc).isoformat();
+    self.collection.update_one({'_id': str(anchor.id)}, ops);
+    anchor.hash = Serializer._compute_hash(anchor);
+}
 
 """Summary for `jac db inspect`."""
 impl MongoBackend.inspect_summary -> dict {

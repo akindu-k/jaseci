@@ -126,6 +126,8 @@ obj MongoBackend(PersistentMemory) {
     # Internal
     def _load_anchor(raw: dict[(str, Any)]) -> (Anchor | None);
     def _load_db_aliases -> int;
+    # Phase 4.2 — element-level collection delta writes
+    def _put_collection_delta(anchor: Anchor, field_deltas: dict) -> None;
 }
 
 """
