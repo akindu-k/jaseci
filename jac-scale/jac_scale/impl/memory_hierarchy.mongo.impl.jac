@@ -42,6 +42,17 @@ def _mongo_a_collection(backend: MongoBackend) -> Any {
     return backend.db[backend.collection_name + '_aliases'];
 }
 
+"""Return True when the anchor's outer document must be fully rewritten.
+
+Conservative heuristic: hash == 0 means the anchor has never been persisted,
+so a full upsert (with arch_module, arch_type, fingerprint, edges, access…)
+is always needed. Future phases can extend this to cover edge mutations,
+access changes, persistent-flag toggles, etc.
+"""
+def _anchor_has_structural_change(anchor: Anchor) -> bool {
+    return anchor.hash == 0;
+}
+
 """Build a stored document for an anchor, including Layer 2 fingerprint
 and Layer 1 archetype identity fields. Parallels _anchor_to_row in
 SqliteMemory; kept here so schema evolution stays per-backend."""
@@ -221,16 +232,33 @@ impl MongoBackend.get(id: UUID) -> (Anchor | None) {
     return cast(Anchor, anchor);
 }
 
-"""Store anchor in MongoDB with fingerprint and archetype identity fields."""
+"""Store anchor in MongoDB, routing to put_partial when only archetype fields changed.
+
+Fast path: dirty field set is non-empty AND anchor.hash != 0 (already persisted)
+AND no structural change → put_partial updates only the changed fields.
+Slow path: first insert (hash == 0), empty dirty set, or structural change →
+full document replacement with upsert.
+"""
 impl MongoBackend.put(anchor: Anchor) -> None {
     if self.client is None or not anchor.persistent {
         return;
     }
+    # Fast path: only archetype data fields changed
+    arch = anchor.archetype if anchor.is_populated() else None;
+    dirty = arch.__dict__.get('__jac_dirty_fields__') if arch is not None else None;
+    if dirty and anchor.hash != 0 and not _anchor_has_structural_change(anchor) {
+        self.put_partial(anchor, dirty.copy());
+        return;
+    }
+    # Slow path: full document replacement
     _id = to_uuid(anchor.id);
     try {
         doc = _anchor_to_doc(anchor);
         self.collection.update_one({'_id': str(_id)}, {'$set': doc}, upsert=True);
         anchor.hash = Serializer._compute_hash(anchor);
+        if arch is not None {
+            arch.__dict__.pop('__jac_dirty_fields__', None);
+        }
     } except Exception as e {
         logger.error(f"MongoDB put failed: {e}");
     }
