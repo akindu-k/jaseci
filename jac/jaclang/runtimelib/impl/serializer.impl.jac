@@ -684,6 +684,10 @@ impl Serializer._deserialize_archetype(
                 f"{type_name}: {sorted(dropped)}"
             );
         }
+        # Enable dirty-field tracking now that all fields are populated.
+        # cls.__new__ bypasses __init__ so __post_init__ never ran; set the
+        # flag directly so subsequent __setattr__ calls are tracked.
+        arch.__dict__['__jac_initialized__'] = True;
         setattr(arch, '__jac__', anchor);
         return arch;
     } except Exception as e {
