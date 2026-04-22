@@ -53,6 +53,57 @@ def _anchor_has_structural_change(anchor: Anchor) -> bool {
     return anchor.hash == 0;
 }
 
+"""Stable hash of any serialized field value (dict, list, or scalar)."""
+def _field_hash(val: object) -> int {
+    import from json { dumps }
+    try {
+        return hash(dumps(val, sort_keys=True, default=str));
+    } except Exception {
+        return hash(str(val));
+    }
+}
+
+"""Snapshot per-field hashes onto the archetype after a successful save or load.
+Stored as `__jac_field_hashes__` (double-underscore → excluded from serialization).
+This baseline lets _derive_dirty_from_field_hashes detect in-place mutations."""
+def _snapshot_field_hashes(anchor: Anchor) -> None {
+    if not anchor.is_populated() or anchor.archetype is None {
+        return;
+    }
+    arch = anchor.archetype;
+    known = Serializer._get_field_types(type(arch)).keys();
+    _seen: tuple[set, set] = (set(), set());
+    hashes: dict[str, int] = {};
+    for name in known {
+        val = getattr(arch, name, None);
+        serialized = Serializer._serialize_value(val, include_type=True, _seen=_seen);
+        hashes[name] = _field_hash(serialized);
+    }
+    object.__setattr__(arch, '__jac_field_hashes__', hashes);
+}
+
+"""Derive the dirty field set by comparing current field hashes to the stored snapshot.
+Called only when anchor hash changed but __jac_dirty_fields__ is empty — i.e. an
+in-place mutation (list.append, dict[k]=v) happened without triggering __setattr__."""
+def _derive_dirty_from_field_hashes(anchor: Anchor) -> set[str] {
+    if not anchor.is_populated() or anchor.archetype is None {
+        return set();
+    }
+    arch = anchor.archetype;
+    stored: dict[str, int] = arch.__dict__.get('__jac_field_hashes__', {});
+    known = Serializer._get_field_types(type(arch)).keys();
+    dirty: set[str] = set();
+    _seen: tuple[set, set] = (set(), set());
+    for name in known {
+        val = getattr(arch, name, None);
+        serialized = Serializer._serialize_value(val, include_type=True, _seen=_seen);
+        if _field_hash(serialized) != stored.get(name) {
+            dirty.add(name);
+        }
+    }
+    return dirty;
+}
+
 """Build a stored document for an anchor, including Layer 2 fingerprint
 and Layer 1 archetype identity fields. Parallels _anchor_to_row in
 SqliteMemory; kept here so schema evolution stays per-backend."""
@@ -229,6 +280,7 @@ impl MongoBackend.get(id: UUID) -> (Anchor | None) {
         );
         return None;
     }
+    _snapshot_field_hashes(cast(Anchor, anchor));
     return cast(Anchor, anchor);
 }
 
@@ -250,6 +302,7 @@ impl MongoBackend._write_to_db(anchor: Anchor) -> None {
         if arch is not None {
             arch.__dict__.pop('__jac_dirty_fields__', None);
         }
+        _snapshot_field_hashes(anchor);
     } except Exception as e {
         logger.error(f"MongoDB _write_to_db failed: {e}");
     }
@@ -281,6 +334,7 @@ impl MongoBackend.put_partial(anchor: Anchor, field_names: set[str]) -> None {
         if arch is not None {
             arch.__dict__.pop('__jac_dirty_fields__', None);
         }
+        _snapshot_field_hashes(anchor);
     } except Exception as e {
         logger.error(f"MongoDB put_partial failed: {e}");
     }
@@ -425,7 +479,7 @@ impl MongoBackend.sync -> None {
                     continue;
                 }
             }
-            # Fast path: only archetype data fields changed (partial update).
+            # Fast path: fields tracked via __setattr__ (direct assignment).
             arch = anchor.archetype if anchor.is_populated() else None;
             dirty = arch.__dict__.get('__jac_dirty_fields__')
                 if arch is not None
@@ -433,6 +487,16 @@ impl MongoBackend.sync -> None {
             if dirty and anchor.hash != 0 {
                 self.put_partial(anchor, dirty.copy());
                 continue;
+            }
+            # Fallback: in-place mutation (list.append, dict[k]=v, etc.) —
+            # __setattr__ produced no signal, so derive dirty set from per-field
+            # hash comparison. Only pays serialization cost when this branch is hit.
+            if anchor.hash != 0 {
+                derived = _derive_dirty_from_field_hashes(anchor);
+                if derived {
+                    self.put_partial(anchor, derived);
+                    continue;
+                }
             }
             # Slow path: first insert or structural change — full document upsert.
             self._write_to_db(anchor);
@@ -490,6 +554,7 @@ impl MongoBackend._put_node_atomic(
             upsert=True
         );
         anchor.hash = Serializer._compute_hash(anchor);
+        _snapshot_field_hashes(anchor);
     } except Exception as e {
         logger.error(f"MongoDB _put_node_atomic failed: {e}");
     }
@@ -593,6 +658,7 @@ impl MongoBackend._load_anchor(raw: dict[(str, Any)]) -> (Anchor | None) {
         );
         return None;
     }
+    _snapshot_field_hashes(cast(Anchor, anchor));
     return cast(Anchor, anchor);
 }
 
