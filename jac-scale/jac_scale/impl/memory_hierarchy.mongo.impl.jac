@@ -427,7 +427,9 @@ impl MongoBackend.sync -> None {
             }
             # Fast path: only archetype data fields changed (partial update).
             arch = anchor.archetype if anchor.is_populated() else None;
-            dirty = arch.__dict__.get('__jac_dirty_fields__') if arch is not None else None;
+            dirty = arch.__dict__.get('__jac_dirty_fields__')
+                if arch is not None
+                else None;
             if dirty and anchor.hash != 0 {
                 self.put_partial(anchor, dirty.copy());
                 continue;
