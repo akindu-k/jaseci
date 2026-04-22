@@ -232,26 +232,17 @@ impl MongoBackend.get(id: UUID) -> (Anchor | None) {
     return cast(Anchor, anchor);
 }
 
-"""Store anchor in MongoDB, routing to put_partial when only archetype fields changed.
+"""Stage anchor for persistence — all writes are deferred to sync()."""
+impl MongoBackend.put(anchor: Anchor) -> None { }
 
-Fast path: dirty field set is non-empty AND anchor.hash != 0 (already persisted)
-AND no structural change → put_partial updates only the changed fields.
-Slow path: first insert (hash == 0), empty dirty set, or structural change →
-full document replacement with upsert.
-"""
-impl MongoBackend.put(anchor: Anchor) -> None {
+"""Full document upsert for an anchor. Used by sync() when no partial or
+atomic-edge path applies (first insert, or non-NodeAnchor full rewrite)."""
+impl MongoBackend._write_to_db(anchor: Anchor) -> None {
     if self.client is None or not anchor.persistent {
         return;
     }
-    # Fast path: only archetype data fields changed
-    arch = anchor.archetype if anchor.is_populated() else None;
-    dirty = arch.__dict__.get('__jac_dirty_fields__') if arch is not None else None;
-    if dirty and anchor.hash != 0 and not _anchor_has_structural_change(anchor) {
-        self.put_partial(anchor, dirty.copy());
-        return;
-    }
-    # Slow path: full document replacement
     _id = to_uuid(anchor.id);
+    arch = anchor.archetype if anchor.is_populated() else None;
     try {
         doc = _anchor_to_doc(anchor);
         self.collection.update_one({'_id': str(_id)}, {'$set': doc}, upsert=True);
@@ -260,7 +251,7 @@ impl MongoBackend.put(anchor: Anchor) -> None {
             arch.__dict__.pop('__jac_dirty_fields__', None);
         }
     } except Exception as e {
-        logger.error(f"MongoDB put failed: {e}");
+        logger.error(f"MongoDB _write_to_db failed: {e}");
     }
 }
 
@@ -308,8 +299,14 @@ impl MongoBackend.delete(id: UUID) -> None {
     }
 }
 
-"""Close MongoDB connection."""
+"""Flush pending writes and close MongoDB connection."""
 impl MongoBackend.close -> None {
+    # Persist any pending L1 changes before closing
+    try {
+        self.sync();
+    } except Exception as e {
+        logger.warning(f"MongoBackend.close sync failed: {e}");
+    }
     if self.client {
         try {
             self.client.close();
@@ -417,10 +414,82 @@ impl MongoBackend.sync -> None {
             continue;
         }
         try {
-            self.put(anchor);
+            # NodeAnchors with a load snapshot: atomic edge-merge pipeline
+            # preserves edge changes from sibling walkers.
+            if isinstance(anchor, NodeAnchor) {
+                delta = anchor.edge_delta();
+                if delta is not None {
+                    added = [str(eid) for eid in delta[0]];
+                    removed = [str(eid) for eid in delta[1]];
+                    self._put_node_atomic(anchor, added, removed);
+                    continue;
+                }
+            }
+            # Fast path: only archetype data fields changed (partial update).
+            arch = anchor.archetype if anchor.is_populated() else None;
+            dirty = arch.__dict__.get('__jac_dirty_fields__') if arch is not None else None;
+            if dirty and anchor.hash != 0 {
+                self.put_partial(anchor, dirty.copy());
+                continue;
+            }
+            # Slow path: first insert or structural change — full document upsert.
+            self._write_to_db(anchor);
         } except Exception as e {
             logger.warning(f"MongoDB sync failed for anchor {anchor.id}: {e}");
         }
+    }
+}
+
+"""Atomically update a NodeAnchor, merging edge changes with DB state."""
+impl MongoBackend._put_node_atomic(
+    anchor: NodeAnchor, edges_added: list[str], edges_removed: list[str]
+) -> None {
+    if self.client is None {
+        return;
+    }
+    _id = str(to_uuid(anchor.id));
+    try {
+        data: dict[str, object] = dict(Serializer.serialize(anchor, include_type=True));
+        # Separate edge list from the rest of the serialized data
+        data_no_edges = {
+            k: v
+            for (k, v) in data.items()
+            if k != 'edges'
+        };
+        # Single atomic operation: merge non-edge fields + apply edge delta
+        self.collection.update_one(
+            {'_id': _id},
+            [
+                {
+                    '$set': {
+                        'data': {
+                            '$mergeObjects': [
+                                '$data',
+                                data_no_edges,
+                                {
+                                    'edges': {
+                                        '$setUnion': [
+                                            {
+                                                '$setDifference': [
+                                                    {'$ifNull': ['$data.edges', []]},
+                                                    edges_removed
+                                                ]
+                                            },
+                                            edges_added
+                                        ]
+                                    }
+                                }
+                            ]
+                        },
+                        'type': 'NodeAnchor'
+                    }
+                }
+            ],
+            upsert=True
+        );
+        anchor.hash = Serializer._compute_hash(anchor);
+    } except Exception as e {
+        logger.error(f"MongoDB _put_node_atomic failed: {e}");
     }
 }
 
