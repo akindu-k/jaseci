@@ -42,13 +42,7 @@ def _mongo_a_collection(backend: MongoBackend) -> Any {
     return backend.db[backend.collection_name + '_aliases'];
 }
 
-"""Return True when the anchor's outer document must be fully rewritten.
-
-Conservative heuristic: hash == 0 means the anchor has never been persisted,
-so a full upsert (with arch_module, arch_type, fingerprint, edges, access…)
-is always needed. Future phases can extend this to cover edge mutations,
-access changes, persistent-flag toggles, etc.
-"""
+"""Return True when the anchor's outer document must be fully rewritten."""
 def _anchor_has_structural_change(anchor: Anchor) -> bool {
     return anchor.hash == 0;
 }
@@ -63,9 +57,7 @@ def _field_hash(val: object) -> int {
     }
 }
 
-"""Snapshot per-field hashes onto the archetype after a successful save or load.
-Stored as `__jac_field_hashes__` (double-underscore → excluded from serialization).
-This baseline lets _derive_dirty_from_field_hashes detect in-place mutations."""
+"""Snapshot per-field hashes onto the archetype after a successful save or load."""
 def _snapshot_field_hashes(anchor: Anchor) -> None {
     if not anchor.is_populated() or anchor.archetype is None {
         return;
@@ -82,9 +74,7 @@ def _snapshot_field_hashes(anchor: Anchor) -> None {
     object.__setattr__(arch, '__jac_field_hashes__', hashes);
 }
 
-"""Derive the dirty field set by comparing current field hashes to the stored snapshot.
-Called only when anchor hash changed but __jac_dirty_fields__ is empty — i.e. an
-in-place mutation (list.append, dict[k]=v) happened without triggering __setattr__."""
+"""Derive the dirty field set by comparing current field hashes to the stored snapshot."""
 def _derive_dirty_from_field_hashes(anchor: Anchor) -> set[str] {
     if not anchor.is_populated() or anchor.archetype is None {
         return set();
@@ -308,12 +298,7 @@ impl MongoBackend._write_to_db(anchor: Anchor) -> None {
     }
 }
 
-"""Persist only the specified archetype fields without replacing the full document.
-
-Builds dot-notation $set paths of the form `data.archetype.<field>` so only
-those keys are touched in MongoDB, leaving type, arch_module, edges, access,
-and all other outer-document fields intact.
-"""
+"""Persist only the specified archetype fields without replacing the full document."""
 impl MongoBackend.put_partial(anchor: Anchor, field_names: set[str]) -> None {
     if self.client is None or not anchor.persistent or not field_names {
         return;
@@ -479,26 +464,25 @@ impl MongoBackend.sync -> None {
                     continue;
                 }
             }
-            # Fast path: fields tracked via __setattr__ (direct assignment).
-            arch = anchor.archetype if anchor.is_populated() else None;
-            dirty = arch.__dict__.get('__jac_dirty_fields__')
-                if arch is not None
-                else None;
-            if dirty and anchor.hash != 0 {
-                self.put_partial(anchor, dirty.copy());
-                continue;
-            }
-            # Fallback: in-place mutation (list.append, dict[k]=v, etc.) —
-            # __setattr__ produced no signal, so derive dirty set from per-field
-            # hash comparison. Only pays serialization cost when this branch is hit.
+            # Union __setattr__-tracked fields (direct assignments) with
+            # field-hash-derived fields (in-place mutations) to get the complete
+            # dirty set. Both must be combined — running only one silently drops
+            # the other category (e.g. direct + in-place in the same request).
             if anchor.hash != 0 {
+                arch = anchor.archetype if anchor.is_populated() else None;
+                setattr_dirty: set[str] = (
+                    arch.__dict__.get('__jac_dirty_fields__') or set()
+                ).copy()
+                    if arch is not None
+                    else set();
                 derived = _derive_dirty_from_field_hashes(anchor);
-                if derived {
-                    self.put_partial(anchor, derived);
+                dirty = setattr_dirty | derived;
+                if dirty {
+                    self.put_partial(anchor, dirty);
                     continue;
                 }
             }
-            # Slow path: first insert or structural change — full document upsert.
+            # First insert (hash == 0) or no field changes found — full upsert.
             self._write_to_db(anchor);
         } except Exception as e {
             logger.warning(f"MongoDB sync failed for anchor {anchor.id}: {e}");

@@ -140,13 +140,6 @@ obj Serializer {
     ) -> (object | None);
 
     static def _compute_hash(anchor: object) -> int;
-    """Serialize only the requested archetype fields of an anchor.
-
-    Returns a {field_name: serialized_value} dict containing only fields
-    present in both `field_names` and the archetype's declared field set.
-    Unknown or private names are silently ignored. Returns an empty dict
-    if the anchor is not populated or has no archetype.
-    """
     static def serialize_fields(
         anchor: object, field_names: set[str]
     ) -> dict[str, object];
