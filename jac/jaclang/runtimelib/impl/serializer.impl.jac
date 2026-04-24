@@ -312,11 +312,7 @@ impl Serializer.register_alias(old_name: str, cls: type) -> None {
 
 """Return {field_name: resolved_annotation} for a dataclass (empty otherwise)."""
 impl Serializer._get_field_types(cls: type) -> dict[str, object] {
-    if cls in _field_types_cache {
-        return _field_types_cache[cls];
-    }
     if not is_dataclass(cls) {
-        _field_types_cache[cls] = {};
         return {};
     }
     # Prefer resolved hints (unwraps string forward-refs); fall back to raw.
@@ -331,7 +327,6 @@ impl Serializer._get_field_types(cls: type) -> dict[str, object] {
             out[f.name] = hints[f.name];
         }
     }
-    _field_types_cache[cls] = out;
     return out;
 }
 

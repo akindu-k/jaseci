@@ -32,8 +32,7 @@ import from jaclang.jac0core.constructs {
 glob logger = logging.getLogger(__name__),
      # Number of hex chars kept from the SHA-256 of the archetype schema.
      # 16 hex chars = 64 bits, plenty for drift detection.
-     FINGERPRINT_LENGTH: int = 16,
-     _field_types_cache: dict[type, dict[str, object]] = {};
+     FINGERPRINT_LENGTH: int = 16;
 
 """Converts Jac objects to/from JSON-compatible dicts.
 
