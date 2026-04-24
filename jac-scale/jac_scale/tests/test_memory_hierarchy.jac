@@ -3,7 +3,6 @@
 import atexit;
 import contextlib;
 import concurrent.futures;
-import gc;
 import os;
 import socket;
 import subprocess;
