@@ -1067,11 +1067,15 @@ test "in-place mutations on list and dict are persisted via hash-based dirty che
 
 """Verify that put_partial touches only the mutated field's dot-path in MongoDB."""
 test "partial update only writes mutated fields — unmodified fields survive in MongoDB" {
-    mongo_container = MongoDbContainer("mongo:latest");
-    mongo_container.start();
-    mongo_uri = mongo_container.get_connection_url();
+    data_dir = FIXTURES_DIR / ".jac" / "data";
+    if data_dir.exists() {
+        import shutil;
+        shutil.rmtree(data_dir);
+    }
+
+    _reset_mongo();
+    (mongo_client, mongo_uri) = _get_mongo();
     os.environ["MONGODB_URI"] = mongo_uri;
-    mongo_client = MongoClient(mongo_uri);
 
     env_backup = {};
     if "REDIS_URL" in os.environ {
@@ -1082,7 +1086,6 @@ test "partial update only writes mutated fields — unmodified fields survive in
     port = get_free_port();
     base_url = f"http://localhost:{port}";
     server: subprocess.Popen = start_server(FIXTURES_DIR, MUTATION_JAC_FILE, port);
-    data_dir = FIXTURES_DIR / ".jac" / "data";
 
     try {
         token = register_user(base_url, "sentinel_tester");
@@ -1122,13 +1125,9 @@ test "partial update only writes mutated fields — unmodified fields survive in
         with contextlib.suppress(Exception) {
             server.wait(timeout=2);
         }
-        mongo_client.close();
-        mongo_container.stop();
         for (key, value) in env_backup.items() {
             os.environ[key] = value;
         }
-        time.sleep(0.5);
-        gc.collect();
         if data_dir.exists() {
             import shutil;
             shutil.rmtree(data_dir);
@@ -1138,9 +1137,15 @@ test "partial update only writes mutated fields — unmodified fields survive in
 
 
 test "mixed direct and in-place mutations in one request both persist after restart" {
-    mongo_container = MongoDbContainer("mongo:latest");
-    mongo_container.start();
-    os.environ["MONGODB_URI"] = mongo_container.get_connection_url();
+    data_dir = FIXTURES_DIR / ".jac" / "data";
+    if data_dir.exists() {
+        import shutil;
+        shutil.rmtree(data_dir);
+    }
+
+    _reset_mongo();
+    (_, mongo_uri) = _get_mongo();
+    os.environ["MONGODB_URI"] = mongo_uri;
 
     env_backup = {};
     if "REDIS_URL" in os.environ {
@@ -1151,7 +1156,6 @@ test "mixed direct and in-place mutations in one request both persist after rest
     port = get_free_port();
     base_url = f"http://localhost:{port}";
     server: subprocess.Popen = start_server(FIXTURES_DIR, MUTATION_JAC_FILE, port);
-    data_dir = FIXTURES_DIR / ".jac" / "data";
 
     try {
         token = register_user(base_url, "mixed_tester");
@@ -1189,12 +1193,9 @@ test "mixed direct and in-place mutations in one request both persist after rest
         with contextlib.suppress(Exception) {
             server.wait(timeout=2);
         }
-        mongo_container.stop();
         for (key, value) in env_backup.items() {
             os.environ[key] = value;
         }
-        time.sleep(0.5);
-        gc.collect();
         if data_dir.exists() {
             import shutil;
             shutil.rmtree(data_dir);
