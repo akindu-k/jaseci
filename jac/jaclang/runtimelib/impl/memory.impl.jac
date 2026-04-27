@@ -883,34 +883,38 @@ impl SqliteMemory.sync -> None {
                     access_changed = _canonical_json(stored_anchor.access) != _canonical_json(
                         anchor.access
                     );
-                    if Jac.check_write_access(anchor) {
+                    arch = anchor.archetype;
+                    setattr_dirty: set[str] = set(
+                        arch.__dict__.get('__jac_dirty_fields__') or set()
+                    )
+                        if arch is not None
+                        else set();
+                    hash_dirty: set[str] = _sqlite_derive_dirty_from_field_hashes(
+                        anchor
+                    )
+                        if arch is not None
+                        else set();
+                    dirty = setattr_dirty | hash_dirty;
+                    if (access_changed or dirty) and Jac.check_write_access(anchor) {
                         if access_changed {
                             stored_anchor.access = anchor.access;
                             changed = True;
                         }
-                        if stored_anchor.archetype is not None
-                        and anchor.archetype is not None {
-                            arch = anchor.archetype;
-                            setattr_dirty: set[str] = set(
-                                arch.__dict__.get('__jac_dirty_fields__') or set()
-                            );
-                            dirty = setattr_dirty | _sqlite_derive_dirty_from_field_hashes(
-                                anchor
-                            );
-                            if dirty {
-                                for field in dirty {
-                                    try {
-                                        setattr(
-                                            stored_anchor.archetype,
-                                            field,
-                                            getattr(arch, field)
-                                        );
-                                    } except AttributeError {
-                                        continue;
-                                    }
+                        if dirty
+                        and stored_anchor.archetype is not None
+                        and arch is not None {
+                            for field in dirty {
+                                try {
+                                    setattr(
+                                        stored_anchor.archetype,
+                                        field,
+                                        getattr(arch, field)
+                                    );
+                                } except AttributeError {
+                                    continue;
                                 }
-                                changed = True;
                             }
+                            changed = True;
                         }
                     }
                     # Only write to database if something actually changed
