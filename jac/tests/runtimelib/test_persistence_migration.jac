@@ -235,7 +235,7 @@ test "field hashes are snapshotted on DB load" {
 }
 
 
-test "read-only walker sync does not clobber a concurrent write (issue #5696)" {
+test "read-only walker sync does not clobber a concurrent write" {
     with TemporaryDirectory() as raw_tmpdir {
         tmpdir = str(raw_tmpdir);
         db_path = os.path.join(tmpdir, "test.db");
