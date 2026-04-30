@@ -68,7 +68,7 @@ test "client_only requires base_url" {
         with open(str(target_file), "r", encoding="utf-8") as f {
             content = f.read();
         }
-        assert "client_only = true requires" in content,
+        assert "client_only mode requires" in content,
             "client_only mode should validate base_url is set";
     }
 }
