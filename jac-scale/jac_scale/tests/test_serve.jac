@@ -2119,10 +2119,17 @@ test "jwt middleware: per-user isolation and token rejection" {
         # should succeed as guest rather than returning 401.
         for (hdrs, label) in bad_token_cases {
             r = client.post("/walker/PublicInfo", json={}, headers=hdrs);
-            assert r.status_code == 200 , f"{label} on public endpoint: expected 200 (guest), got {r.status_code}";
+            assert r.status_code == 200 , f"{label} on pub walker: expected 200 (guest), got {r.status_code}";
         }
         # No token on a public endpoint must still work (anonymous access).
-        assert client.post("/walker/PublicInfo", json={}).status_code == 200 , "public endpoint broken for anonymous requests";
+        assert client.post("/walker/PublicInfo", json={}).status_code == 200 , "pub walker broken for anonymous requests";
+
+        # Same check for pub functions — bad tokens must be ignored.
+        for (hdrs, label) in bad_token_cases {
+            r = client.post("/function/public_status", json={}, headers=hdrs);
+            assert r.status_code == 200 , f"{label} on pub function: expected 200 (guest), got {r.status_code}";
+        }
+        assert client.post("/function/public_status", json={}).status_code == 200 , "pub function broken for anonymous requests";
     } finally {
         client.close();
     }
