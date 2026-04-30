@@ -18,7 +18,7 @@ import from .test_helpers {
 
 # ---- Helper functions (replacing fixtures) ----
 """Fill username and password fields."""
-def _fill_auth_form(page: Page, username: str, password: str) -> None {
+def _fill_auth_form(page: Page, username: str, password: str) {
     page.locator('input[type="text"], input[placeholder="Username" i]').first.fill(
         username
     );
@@ -26,13 +26,13 @@ def _fill_auth_form(page: Page, username: str, password: str) -> None {
 }
 
 """Click submit button and wait for navigation."""
-def _submit_form(page: Page) -> None {
+def _submit_form(page: Page) {
     page.locator('button[type="submit"]').first.click();
     page.wait_for_timeout(2000);
 }
 
 """Navigate to signup, fill form, and submit."""
-def _signup(page: Page, base_url: str, username: str, password: str) -> None {
+def _signup(page: Page, base_url: str, username: str, password: str) {
     page.goto(f"{base_url}/signup", wait_until="load", timeout=60000);
     page.wait_for_selector('input[type="text"]', timeout=30000);
     _fill_auth_form(page, username, password);
@@ -40,7 +40,7 @@ def _signup(page: Page, base_url: str, username: str, password: str) -> None {
 }
 
 """Navigate to login, fill form, and submit."""
-def _login(page: Page, base_url: str, username: str, password: str) -> None {
+def _login(page: Page, base_url: str, username: str, password: str) {
     page.goto(f"{base_url}/login", wait_until="load", timeout=60000);
     page.wait_for_selector('input[type="text"]', timeout=30000);
     _fill_auth_form(page, username, password);
@@ -48,7 +48,7 @@ def _login(page: Page, base_url: str, username: str, password: str) -> None {
 }
 
 """Click logout button if visible."""
-def _logout(page: Page) -> None {
+def _logout(page: Page) {
     logout_btn = page.locator('button:has-text("Logout")').first;
     if logout_btn.is_visible() {
         logout_btn.click();
@@ -116,7 +116,7 @@ def _start_running_server -> tuple {
 }
 
 """Stop the running server and clean up."""
-def _stop_running_server(server: Popen, temp_dir: str, original_cwd: str) -> None {
+def _stop_running_server(server: Popen, temp_dir: str, original_cwd: str) {
     server.terminate();
     try {
         server.wait(timeout=15);
@@ -297,7 +297,7 @@ test "auto cache prevents duplicate reader requests and invalidates on write" {
                 # ---- Track walker HTTP requests ----
                 walker_requests: list = [];
 
-                def _track_request(request: Any) -> None {
+                def _track_request(request: Any) {
                     if "/walker/" in request.url {
                         walker_requests.append(request.url);
                     }

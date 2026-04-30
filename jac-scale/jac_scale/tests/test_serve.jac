@@ -32,7 +32,6 @@ import from jac_scale.tests.scale_test_client {
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
-
 """Build identity-based register payload."""
 def register_payload(username: str, password: str) -> dict[str, Any] {
     return {
@@ -526,65 +525,74 @@ test "email identity register and login" {
 
         # Username-only identity
         uname = f"u_{suffix}";
-        r = client.post("/user/register", json={
-            "identities": [{"type": "username", "value": uname}],
-            "credential": cred
-        });
+        r = client.post(
+            "/user/register",
+            json={
+                "identities": [{"type": "username", "value": uname}],
+                "credential": cred
+            }
+        );
         assert r.status_code == 201;
-        r = client.post("/user/login", json={
-            "identity": {"type": "username", "value": uname},
-            "credential": cred
-        });
+        r = client.post(
+            "/user/login",
+            json={"identity": {"type": "username", "value": uname}, "credential": cred}
+        );
         assert r.status_code == 200;
         assert "token" in extract_data(r.json());
 
         # Email-only identity
         email = f"e_{suffix}@example.com";
-        r = client.post("/user/register", json={
-            "identities": [{"type": "email", "value": email}],
-            "credential": cred
-        });
+        r = client.post(
+            "/user/register",
+            json={"identities": [{"type": "email", "value": email}], "credential": cred}
+        );
         assert r.status_code == 201;
-        r = client.post("/user/login", json={
-            "identity": {"type": "email", "value": email},
-            "credential": cred
-        });
+        r = client.post(
+            "/user/login",
+            json={"identity": {"type": "email", "value": email}, "credential": cred}
+        );
         assert r.status_code == 200;
         assert "token" in extract_data(r.json());
 
         # Both username + email: login works via either identity
         both_u = f"both_{suffix}";
         both_e = f"both_{suffix}@example.com";
-        r = client.post("/user/register", json={
-            "identities": [
-                {"type": "username", "value": both_u},
-                {"type": "email", "value": both_e}
-            ],
-            "credential": cred
-        });
+        r = client.post(
+            "/user/register",
+            json={
+                "identities": [
+                    {"type": "username", "value": both_u},
+                    {"type": "email", "value": both_e}
+                ],
+                "credential": cred
+            }
+        );
         assert r.status_code == 201;
-        r = client.post("/user/login", json={
-            "identity": {"type": "username", "value": both_u},
-            "credential": cred
-        });
+        r = client.post(
+            "/user/login",
+            json={"identity": {"type": "username", "value": both_u}, "credential": cred}
+        );
         assert r.status_code == 200;
-        r = client.post("/user/login", json={
-            "identity": {"type": "email", "value": both_e},
-            "credential": cred
-        });
+        r = client.post(
+            "/user/login",
+            json={"identity": {"type": "email", "value": both_e}, "credential": cred}
+        );
         assert r.status_code == 200;
 
         # Invalid email strings are rejected by validation
         for bad in ["notanemail", "bad@", "@bad.com", "a b@x.com", ""] {
-            r = client.post("/user/register", json={
-                "identities": [{"type": "email", "value": bad}],
-                "credential": cred
-            });
+            r = client.post(
+                "/user/register",
+                json={
+                    "identities": [{"type": "email", "value": bad}],
+                    "credential": cred
+                }
+            );
             assert r.status_code in (400, 422) , f"bad email '{bad}' accepted on register";
-            r = client.post("/user/login", json={
-                "identity": {"type": "email", "value": bad},
-                "credential": cred
-            });
+            r = client.post(
+                "/user/login",
+                json={"identity": {"type": "email", "value": bad}, "credential": cred}
+            );
             assert r.status_code in (400, 422) , f"bad email '{bad}' accepted on login";
         }
     } finally {
@@ -624,7 +632,9 @@ test "token refresh functionality" {
         # Test: refresh token with invalid/malformed tokens (all return same error)
         invalid_tokens = ["invalid.token.here", "not.a.jwt", "invalid_token_string"];
         for invalid_token in invalid_tokens {
-            response = client.post("/user/refresh-token", json={"token": invalid_token});
+            response = client.post(
+                "/user/refresh-token", json={"token": invalid_token}
+            );
             refresh_result = extract_data(response.json());
             assert "error" in refresh_result;
             assert refresh_result["error"] == "Invalid or expired token";
@@ -638,7 +648,9 @@ test "token refresh functionality" {
 
         # Test: refresh token with bearer prefix
         refresh_bearer_user = f"refresh_bearer_{uuid.uuid4().hex[:8]}";
-        original_token = register_and_get_token(client, refresh_bearer_user, "password123");
+        original_token = register_and_get_token(
+            client, refresh_bearer_user, "password123"
+        );
 
         response = client.post(
             "/user/refresh-token", json={"token": f"Bearer {original_token}"}
@@ -1009,7 +1021,9 @@ test "user management operations" {
         assert "user_id" in login_result;
 
         # Verify login with old password fails
-        response = client.post("/user/login", json=login_payload(username, "oldpass123"));
+        response = client.post(
+            "/user/login", json=login_payload(username, "oldpass123")
+        );
         assert response.status_code == 401;
 
         # Test: update password requires auth
@@ -1458,7 +1472,9 @@ def setup_dev_mode_server -> subprocess.Popen {
         try {
             response = requests.get(f"{dm_base_url}/healthz", timeout=2);
             if response.status_code == 200 {
-                print(f"Dev mode server started successfully on API port {dm_api_port}");
+                print(
+                    f"Dev mode server started successfully on API port {dm_api_port}"
+                );
                 server_ready = True;
                 break;
             }
@@ -2060,9 +2076,7 @@ test "jwt middleware: per-user isolation and token rejection" {
         }
         def task_titles(tok: str) -> set[str] {
             r = client.post(
-                "/walker/ListTasks",
-                json={},
-                headers={"Authorization": f"Bearer {tok}"}
+                "/walker/ListTasks", json={}, headers={"Authorization": f"Bearer {tok}"}
             );
             assert r.status_code == 200;
             raw = extract_data(r.json())["reports"][0];

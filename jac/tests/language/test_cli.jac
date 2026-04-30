@@ -1676,7 +1676,9 @@ test "syntax error pretty print" {
     program = JacProgram();
     program.compile(fixture_path("test_syntax_err.jac"));
     assert len(program.errors_had) == 3 , (
-        f"Expected 3 errors with improved error reporting, got {len(program.errors_had)}"
+        f"Expected 3 errors with improved error reporting, got {len(
+            program.errors_had
+        )}"
     );
     _assert_error_pretty_found(
         """

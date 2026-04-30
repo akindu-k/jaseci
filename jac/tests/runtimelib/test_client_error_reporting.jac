@@ -38,7 +38,7 @@ def capture_log_start(logger: logging.Logger, level: int = logging.DEBUG) -> tup
 """Remove handler and restore logger level."""
 def capture_log_stop(
     logger: logging.Logger, handler: logging.StreamHandler, old_level: int
-) -> None {
+) {
     logger.removeHandler(handler);
     logger.setLevel(old_level);
 }

@@ -27,7 +27,7 @@ obj _DemoArchV1(Root) {
 
 
 test "fingerprint is present on archetypes and stable across instances" {
-    fp = getattr(_DemoArchV1, '__jac_fingerprint__', None);
+    fp = _DemoArchV1?.__jac_fingerprint__;
     assert isinstance(fp, str) , "archetype must have __jac_fingerprint__";
     assert len(fp) == 16 , f"fingerprint length should be 16 hex chars, got {len(fp)}";
     # Same class => same fingerprint; deterministic.

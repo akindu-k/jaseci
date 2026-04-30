@@ -10,7 +10,9 @@ import from pathlib { Path }
 import jaclang;
 import from jaclang.jac0core.program { JacProgram }
 
-glob EXAMPLES = os.path.join(str(Path(jaclang.__file__).parent.parent), "examples");
+glob EXAMPLES = os.path.join(
+         str(Path(jaclang.__file__).parent.parent), "examples"
+     );
 
 test "double unparse" {
     code_gen_pure = JacProgram().compile(
