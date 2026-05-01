@@ -566,3 +566,28 @@ test "recursive obj body flows" {
         client.close();
     }
 }
+
+test "unknown query params are silently dropped" {
+    client = make_client("restspec_fixtures.jac");
+    try {
+        client.register_user("u_uqp", "p_uqp");
+        token = client.login_user("u_uqp", "p_uqp");
+        auth = {"Authorization": f"Bearer {token}"};
+
+        # Function endpoint: declared param works, unknown extras are ignored
+        r = client.get(
+            "/items", headers=auth, params={"category": "books", "v": "1708012345"}
+        );
+        assert r.status_code == 200 , r.text;
+        d = extract_data(r.json())["result"];
+        assert d["category"] == "books";
+
+        # Walker endpoint: declared param works, unknown extras are ignored (walkers are public)
+        r = client.get("/search", params={"q": "hello", "v": "1708012345"});
+        assert r.status_code == 200 , r.text;
+        d = extract_data(r.json())["reports"][0];
+        assert d["q"] == "hello";
+    } finally {
+        client.close();
+    }
+}

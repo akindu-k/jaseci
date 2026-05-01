@@ -307,6 +307,25 @@ walker:pub CreateTreeWalker {
     }
 }
 
+# ============================================================================
+# Unknown Query Parameter Tests
+# ============================================================================
+"""Function with one declared query param; extra params should be silently dropped."""
+@restspec(method=HTTPMethod.GET, path="/items")
+def get_items(category: str) -> dict {
+    return {"category": category};
+}
+
+"""Walker with one declared query param; extra params should be silently dropped."""
+@restspec(method=HTTPMethod.GET, path="/search")
+walker:pub SearchWalker {
+    has q: str;
+
+    can search with Root entry {
+        report {"q": self.q};
+    }
+}
+
 """Function taking a recursive tree as a body parameter."""
 @restspec(method=HTTPMethod.POST, path="/func/create_tree")
 def create_tree_func(`root: TreeNode) -> dict {

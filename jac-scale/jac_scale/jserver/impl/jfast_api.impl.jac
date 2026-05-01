@@ -798,28 +798,12 @@ impl JFastApiServer._create_endpoint_function(
         ];
     }
     callback_args_str = '\n'.join(callback_args_lines);
-    extra_query_params_code = '';
-    if accepts_kwargs {
-        declared_params = [
-            p.name
-            for p in parameters
-            if p.name
-        ];
-        declared_params_str = repr(declared_params);
-        extra_query_params_code = f"""
-        # Extract additional query parameters not explicitly declared
-        declared_params = set({declared_params_str})
-        for key, value in __jac_request__.query_params.items():
-            if key not in declared_params:
-                callback_args[key] = value
-""";
-    }
     if inspect.iscoroutinefunction(callback) {
         func_code = f"""
 async def endpoint_wrapper({params}):
     try:
         callback_args: Dict[str, Any] = {{}}
-{callback_args_str}{extra_query_params_code}
+{callback_args_str}
         result = await callback(**callback_args)
         # Automatically convert TransportResponse to JSONResponse (like HTTPTransport.send)
         if isinstance(result, TransportResponse):
@@ -833,7 +817,7 @@ async def endpoint_wrapper({params}):
 def endpoint_wrapper({params}):
     try:
         callback_args: Dict[str, Any] = {{}}
-{callback_args_str}{extra_query_params_code}
+{callback_args_str}
         result = callback(**callback_args)
         # Automatically convert TransportResponse to JSONResponse (like HTTPTransport.send)
         if isinstance(result, TransportResponse):
