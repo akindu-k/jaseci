@@ -3061,12 +3061,12 @@ impl PyastGenPass.exit_func_call(nd: uni.FuncCall) -> None {
     } else {
         # Deprecated `root()` form: bare `root` already lowers to Jac.root() in
         # exit_special_var_ref, so wrapping it in another call would produce
-        # `Jac.root()()` (a Root instance called as a function). Emit W0062
-        # and reuse the inner lowering directly.
+        # `Jac.root()()` (a Root instance called as a function). The W0062
+        # diagnostic for this is emitted by the type evaluator; here we just
+        # reuse the inner lowering so codegen stays correct.
         if isinstance(nd.target, uni.SpecialVarRef)
         and nd.target.name == Tok.KW_ROOT
         and (nd.params is None or len(nd.params) == 0) {
-            self.emit(W0062, node_override=nd);
             nd.gen.py_ast = nd.target.gen.py_ast;
             return;
         }
