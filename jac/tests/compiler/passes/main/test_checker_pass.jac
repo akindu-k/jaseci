@@ -2016,6 +2016,32 @@ test "callable_type_annotation" {
     );
 }
 
+"""Shorter callables are assignable to longer ones (TS-style param drop).
+
+A function with fewer parameters is a valid value for a callable type expecting
+more — the extras are simply dropped at the call site. This unblocks the React
+idiom `onClick={handler}` where `handler` takes no MouseEvent arg.
+"""
+test "callable_param_drop" {
+    program = JacProgram();
+    path = os.path.join(CHECKER_FIXTURES, "checker_callable_param_drop.jac");
+    mod = program.compile(path, options=NO_TC);
+    TypeCheckPass(ir_in=mod, prog=program);
+
+    assert len(program.errors_had) == 1 , f"Expected 1 type error, but got {len(
+        program.errors_had
+    )}: " + "\n".join([err.pretty_print() for err in program.errors_had]);
+
+    # The lone error is the long-to-short direction, which must still be rejected.
+    assert_error_pretty_found(
+        """
+        bad: Callable[[], None] = two_ints;  # Error: extra src params have no defaults
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    """,
+        program.errors_had[0].pretty_print()
+    );
+}
+
 """Test unbound method call type checking (ParentClass.init(self, ...))."""
 test "unbound_method_call" {
     program = JacProgram();
