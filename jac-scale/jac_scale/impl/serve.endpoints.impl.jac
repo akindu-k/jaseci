@@ -109,7 +109,34 @@ impl JacAPIServerEndpoints.create_walker_callback(
 ) -> Callable[..., (TransportResponse | StreamingResponse)] {
     import from jaclang.runtimelib.transport { TransportResponse, Meta }
     import from fastapi { Request }
+    import inspect;
     requires_auth = self.introspector.is_auth_required_for_walker(walker_name);
+    # Compute the allowed-key set once at registration time; captured by closure.
+    # _filter_walker_kwargs stays False (permissive) if introspection fails or if
+    # the walker itself declares **kwargs (intentional pass-through).
+    walker_cls = self.get_walkers()[walker_name];
+    _filter_walker_kwargs = False;
+    _walker_allowed_keys = set();
+    try {
+        _wsig = inspect.signature(walker_cls.init);
+        _has_var_kw = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in _wsig.parameters.values()
+        );
+        if not _has_var_kw {
+            _filter_walker_kwargs = True;
+            _walker_allowed_keys = {
+                name
+                for (name, p) in _wsig.parameters.items()
+                if name != 'self'
+                and p.kind not in (
+                    inspect.Parameter.VAR_POSITIONAL,
+                    inspect.Parameter.VAR_KEYWORD
+                )
+            };
+        }
+    } except Exception {
+        _filter_walker_kwargs = False;
+    }
     async def callback(
         request: Request, nd: (str | None) = None, **kwargs: JsonValue
     ) -> (TransportResponse | StreamingResponse) {
@@ -123,6 +150,15 @@ impl JacAPIServerEndpoints.create_walker_callback(
         }
         if nd {
             kwargs['_jac_spawn_node'] = nd;
+        }
+        # Drop unknown query params injected by jfast_api's extra_query_params_code.
+        # Skipped when introspection failed (permissive) or walker declares **kwargs.
+        if _filter_walker_kwargs {
+            kwargs = {
+                k: v
+                for (k, v) in kwargs.items()
+                if k in _walker_allowed_keys or k == '_jac_spawn_node'
+            };
         }
         result = await self.execution_manager.spawn_walker(
             self.get_walkers()[walker_name], kwargs, (username or Con.GUEST.value)
@@ -240,7 +276,33 @@ impl JacAPIServerEndpoints.create_function_callback(
 ) -> Callable[..., (TransportResponse | StreamingResponse)] {
     import from jaclang.runtimelib.transport { TransportResponse, Meta }
     import from fastapi { Request }
+    import inspect;
     requires_auth = self.introspector.is_auth_required_for_function(func_name);
+    # Compute the allowed-key set once at registration time; captured by closure.
+    # _filter_func_kwargs stays False (permissive) if introspection fails or if
+    # the function itself declares **kwargs (intentional pass-through).
+    func_obj = self.get_functions()[func_name];
+    _filter_func_kwargs = False;
+    _func_allowed_keys = set();
+    try {
+        _fsig = inspect.signature(func_obj);
+        _has_var_kw = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in _fsig.parameters.values()
+        );
+        if not _has_var_kw {
+            _filter_func_kwargs = True;
+            _func_allowed_keys = {
+                name
+                for (name, p) in _fsig.parameters.items()
+                if p.kind not in (
+                    inspect.Parameter.VAR_POSITIONAL,
+                    inspect.Parameter.VAR_KEYWORD
+                )
+            };
+        }
+    } except Exception {
+        _filter_func_kwargs = False;
+    }
     async def callback(
         request: Request, **kwargs: JsonValue
     ) -> (TransportResponse | StreamingResponse) {
@@ -251,6 +313,15 @@ impl JacAPIServerEndpoints.create_function_callback(
                 message='Unauthorized',
                 meta=Meta(extra={'http_status': 401})
             );
+        }
+        # Drop unknown query params injected by jfast_api's extra_query_params_code.
+        # Skipped when introspection failed (permissive) or function declares **kwargs.
+        if _filter_func_kwargs {
+            kwargs = {
+                k: v
+                for (k, v) in kwargs.items()
+                if k in _func_allowed_keys
+            };
         }
         console.print(f"Executing function '{func_name}' with params: {kwargs}");
         result = await self.execution_manager.execute_function(
