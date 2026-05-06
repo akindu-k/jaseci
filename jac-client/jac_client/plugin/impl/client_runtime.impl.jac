@@ -376,13 +376,19 @@ impl jacSignup(
         }
     );
     if response.ok {
+        body_text = await response.text();
         user_id = None;
         try {
-            data = JSON.parse(await response.text());
+            data = JSON.parse(body_text);
             if data["data"] and data["data"]["user_id"] {
                 user_id = data["data"]["user_id"];
             }
-        } except Exception { }
+        } except Exception as e {
+            return {
+                "success": False,
+                "error": f"Signup response was not valid JSON: {e}"
+            };
+        }
         return {"success": True, "user_id": user_id};
     } else {
         error_text = await response.text();
@@ -533,7 +539,7 @@ impl ErrorFallback(error: str, resetErrorBoundary: Any) -> JsxElement {
                     {error.error.message}
                 </pre>
                 <button
-                    onClick={lambda { error.resetErrorBoundary();}}
+                    onClick={lambda { error.resetErrorBoundary(); }}
                     style={{
                         backgroundColor: "#2563eb",
                         color: "#fff",
@@ -903,7 +909,7 @@ impl JacForm(props: dict) -> JsxElement {
                                     newState[fieldName] = not isVisible;
                                     return newState;
                                 }
-                            );}}
+                            ); }}
                             style={{cursor: "pointer"}}
                         />
                         <span>Show password</span>
@@ -1082,7 +1088,7 @@ impl __jacInstallErrorHandlers -> None {
             event.error.stack if event.error else "",
             event.filename or "",
             "window.onerror"
-        );}
+        ); }
     );
     # Catch unhandled promise rejections (e.g., failed fetch, async errors)
     window.addEventListener(

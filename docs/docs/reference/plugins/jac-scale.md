@@ -57,8 +57,11 @@ jac plugins enable scale
 
 ### Basic Server
 
+!!! note
+    `main.jac` is the default entry point. If your entry point has a different name (e.g., `app.jac`), pass it explicitly: `jac start app.jac`.
+
 ```bash
-jac start app.jac
+jac start
 ```
 
 ### Server Options
@@ -84,19 +87,19 @@ jac start app.jac
 
 ```bash
 # Custom port
-jac start app.jac --port 3000
+jac start --port 3000
 
 # Development with HMR (requires jac-client)
-jac start app.jac --dev
+jac start --dev
 
 # API only -- skip client bundling
-jac start app.jac --dev --no_client
+jac start --dev --no_client
 
 # Preview generated API endpoints without starting
-jac start app.jac --faux
+jac start --faux
 
 # Production with profile
-jac start app.jac --port 8000 --profile prod
+jac start --port 8000 --profile prod
 ```
 
 ### Default Persistence
@@ -2859,7 +2862,7 @@ type = "local"
 **How it works:**
 
 - Allocates a port pair from a pool (base ports 5180-5200, stride of 2)
-- Runs `jac start main.jac --dev -p {port}` as a child process
+- Runs `jac start --dev -p {port}` as a child process
 - Checks for readiness by scanning process output for `"Server ready"`
 - Returns `http://localhost:{port}` as the preview URL
 
@@ -2895,7 +2898,7 @@ network_isolation = true
 
 - Creates a Docker container from `base_image`
 - Copies project files into `/app` via tarball injection
-- Runs `jac install && jac start main.jac --dev -p 8000`
+- Runs `jac install && jac start --dev -p 8000`
 - Applies resource limits (memory, CPU, storage)
 - Optionally creates an isolated Docker bridge network per sandbox
 - Polls container health via HTTP until ready (120s timeout)
@@ -2936,7 +2939,7 @@ security_context = true
 2. Provisions RBAC (ServiceAccount, Role, RoleBinding) for pod management
 3. Packages project files into a ConfigMap (text files in `data`, binary files in `binaryData` as base64)
 4. Creates a pod with an init container that unpacks the ConfigMap into `/app`
-5. Main container runs `jac install && jac start main.jac --dev -p 8000`
+5. Main container runs `jac install && jac start --dev -p 8000`
 6. Creates a Service and Ingress (unless `proxy_mode = true`)
 7. Polls pod readiness (container ready + "Server ready" in logs, 120s timeout)
 8. Returns the preview URL
