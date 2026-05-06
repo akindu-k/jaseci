@@ -771,7 +771,6 @@ impl SqliteMemory.sync -> None {
     has_persistent = any(a.persistent for a in self.__mem__.values());
     if not self.__gc__ and not has_persistent {
         return;  # Nothing to sync, don't create DB
-
     }
     with self.__lock__ {
         # Lazily create connection now that we have data to persist
@@ -895,7 +894,7 @@ impl SqliteMemory.sync -> None {
                         if arch is not None
                         else set();
                     dirty = setattr_dirty | hash_dirty;
-                    if (access_changed or dirty) and Jac.check_write_access(anchor) {
+                    if (access_changed or dirty) and Jac.check_write_access(anchor, op_hint="field_write") {
                         if access_changed {
                             stored_anchor.access = anchor.access;
                             changed = True;
@@ -941,7 +940,7 @@ impl SqliteMemory.sync -> None {
                         and not isinstance(anchor.archetype, Root)
                         and not anchor.edges
                     )
-                    and Jac.check_write_access(anchor) {
+                    and Jac.check_write_access(anchor, op_hint="field_write") {
                         new_row = _anchor_to_row(anchor);
                         conn.execute(
                             """
@@ -1374,9 +1373,11 @@ impl TieredMemory.put(anchor: Anchor) -> None {
     if self.l2 {
         self.l2.put(anchor);
     }
-    # Write-through to L3 with access control check
+    # Write-through to L3 with access control check.
+    # On denial, _check_access emits a `field_write` PermissionDenied
+    # diagnostic so the caller learns *why* their mutation didn't persist.
     if self.l3 and anchor.persistent {
-        if Jac.check_write_access(anchor) {
+        if Jac.check_write_access(anchor, op_hint="field_write") {
             self.l3.put(anchor);
         }
     }

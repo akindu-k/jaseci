@@ -376,13 +376,19 @@ impl jacSignup(
         }
     );
     if response.ok {
+        body_text = await response.text();
         user_id = None;
         try {
-            data = JSON.parse(await response.text());
+            data = JSON.parse(body_text);
             if data["data"] and data["data"]["user_id"] {
                 user_id = data["data"]["user_id"];
             }
-        } except Exception { }
+        } except Exception as e {
+            return {
+                "success": False,
+                "error": f"Signup response was not valid JSON: {e}"
+            };
+        }
         return {"success": True, "user_id": user_id};
     } else {
         error_text = await response.text();
@@ -484,14 +490,8 @@ impl AuthGuard(redirect: str = "/login") -> JsxElement {
 }
 
 impl ErrorFallback(error: str, resetErrorBoundary: Any) -> JsxElement {
-    # Report error to server for logging
-    try {
-        errMsg = error.error.message if error.error else str(error);
-        errStack = error.error.stack if error.error else "";
-        __jacReportError(errMsg, errStack, "", "ErrorBoundary");
-    } except Exception as e {
-        console.warn("[jac-client] ErrorFallback: failed to report error:", e);
-    }
+    # Reporting happens in __jacReactErrorHandler (the boundary's onError prop)
+    # which is the only place React exposes `info.componentStack`.
     return
         <div
             role="alert"
@@ -539,7 +539,7 @@ impl ErrorFallback(error: str, resetErrorBoundary: Any) -> JsxElement {
                     {error.error.message}
                 </pre>
                 <button
-                    onClick={lambda { error.resetErrorBoundary();}}
+                    onClick={lambda { error.resetErrorBoundary(); }}
                     style={{
                         backgroundColor: "#2563eb",
                         color: "#fff",
@@ -909,7 +909,7 @@ impl JacForm(props: dict) -> JsxElement {
                                     newState[fieldName] = not isVisible;
                                     return newState;
                                 }
-                            );}}
+                            ); }}
                             style={{cursor: "pointer"}}
                         />
                         <span>Show password</span>
@@ -1025,7 +1025,11 @@ impl JacForm(props: dict) -> JsxElement {
 Fires asynchronously and silently ignores failures (to avoid error loops).
 """
 impl __jacReportError(
-    message: str, stack: str = "", url: str = "", source: str = ""
+    message: str,
+    stack: str = "",
+    url: str = "",
+    source: str = "",
+    componentStack: str = ""
 ) -> None {
     try {
         baseUrl = __getApiBaseUrl();
@@ -1040,6 +1044,7 @@ impl __jacReportError(
                         "stack": stack,
                         "url": url or window.location.href,
                         "source": source,
+                        "componentStack": componentStack,
                         "timestamp": Reflect.construct(Date, []).toISOString()
                     }
                 )
@@ -1048,6 +1053,22 @@ impl __jacReportError(
     } except Exception {
     # Intentionally silent - error reporting must never throw, as that
     # could cause infinite loops or mask the original error.
+    }
+}
+
+"""onError prop for JacClientErrorBoundary. The FallbackComponent React passes
+to ErrorBoundary only receives `{error, resetErrorBoundary}` — `info` (and
+therefore `info.componentStack`, the only thing that names user components when
+the JS stack lives inside react-dom) is exclusively delivered to onError.
+Wiring this here is the one place we can capture it."""
+impl __jacReactErrorHandler(error: Any, info: Any) -> None {
+    try {
+        message = error.message if error else "Unknown error";
+        stack = error.stack if error else "";
+        componentStack = info.componentStack if info else "";
+        __jacReportError(message, stack, "", "ErrorBoundary", componentStack);
+    } except Exception {
+    # Silent: error reporting from a React lifecycle must never throw.
     }
 }
 
@@ -1067,7 +1088,7 @@ impl __jacInstallErrorHandlers -> None {
             event.error.stack if event.error else "",
             event.filename or "",
             "window.onerror"
-        );}
+        ); }
     );
     # Catch unhandled promise rejections (e.g., failed fetch, async errors)
     window.addEventListener(
