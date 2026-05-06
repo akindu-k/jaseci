@@ -894,7 +894,8 @@ impl SqliteMemory.sync -> None {
                         if arch is not None
                         else set();
                     dirty = setattr_dirty | hash_dirty;
-                    if (access_changed or dirty) and Jac.check_write_access(anchor, op_hint="field_write") {
+                    if (access_changed or dirty)
+                    and Jac.check_write_access(anchor, op_hint="field_write") {
                         if access_changed {
                             stored_anchor.access = anchor.access;
                             changed = True;
