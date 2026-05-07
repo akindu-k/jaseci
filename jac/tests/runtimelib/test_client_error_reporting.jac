@@ -91,6 +91,36 @@ test "client error is logged to server console" {
     }
 }
 
+test "client error componentStack is logged when provided" {
+    with TemporaryDirectory() as tmpdir {
+        client = make_client(tmpdir);
+        logger = logging.getLogger("jaclang.client_errors");
+        (buf, handler, old_level) = capture_log_start(logger);
+        try {
+            error_msg = f"Render error {uuid.uuid4().hex}";
+            comp_stack = "    in Toolbar\n    in App\n    in JacClientErrorBoundary";
+            client.post(
+                "/cl/__error__",
+                json={
+                    "message": error_msg,
+                    "stack": "TypeError: d is not a function\n    at hs (/static/client.js:1:100)",
+                    "componentStack": comp_stack,
+                    "url": "http://localhost:8001/",
+                    "source": "ErrorBoundary"
+                }
+            );
+            log_output = buf.getvalue();
+            assert error_msg in log_output;
+            assert "Component stack:" in log_output , f"Expected component stack section in log, got: {log_output}";
+            assert "in Toolbar" in log_output;
+            assert "in App" in log_output;
+        } finally {
+            capture_log_stop(logger, handler, old_level);
+        }
+        client.close();
+    }
+}
+
 test "client error endpoint handles missing fields gracefully" {
     with TemporaryDirectory() as tmpdir {
         client = make_client(tmpdir);

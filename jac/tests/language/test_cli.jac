@@ -533,7 +533,11 @@ test "graph" {
     old_stdout = sys.stdout;
     sys.stdout = captured;
     try {
-        tools.dot(f"{examples_path('micro/simple_walk.jac')}");
+        tools.dot(
+            os.path.join(
+                JAC_ROOT, "tests", "compiler", "fixtures", "micro", "simple_walk.jac"
+            )
+        );
     } finally {
         sys.stdout = old_stdout;
     }

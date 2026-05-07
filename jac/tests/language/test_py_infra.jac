@@ -359,27 +359,6 @@ test "deep outer imports from loc" {
     );
 }
 
-test "inherit baseclass sym" {
-    pytest.xfail("TODO: Support symtable for inheritance");
-    mypass = JacProgram().compile(
-        os.path.join(EXAMPLES, "guess_game", "guess_game3.jac")
-    );
-    table = None;
-    for i in mypass.sym_tab.kid_scope {
-        if i.scope_name == "GuessTheNumberGame" {
-            for j in i.kid_scope {
-                if j.scope_name == "play" {
-                    table = j;
-                    break;
-                }
-            }
-            break;
-        }
-    }
-    assert table is not None;
-    assert table.lookup("attempts") is not None;
-}
-
 test "list methods" {
     Jac.set_base_path(FIXTURES);
     Jac.attach_program(JacProgram());
