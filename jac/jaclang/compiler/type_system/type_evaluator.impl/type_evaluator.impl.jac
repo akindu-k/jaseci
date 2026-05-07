@@ -3312,6 +3312,9 @@ impl TypeEvaluator.postinit -> None {
     self._DOM_TYPES_STUB_FILE_PATH = os.path.join(
         os.path.dirname(__file__), "dom_types.pyi"
     );
+    self._TYPING_AMBIENT_STUB_FILE_PATH = os.path.join(
+        os.path.dirname(__file__), "typing_ambient.pyi"
+    );
     self._ENUM_STUB_FILE_PATH = os.path.join(
         os.path.dirname(__file__), "../../vendor/typeshed/stdlib/enum.pyi"
     );
@@ -3385,6 +3388,23 @@ impl TypeEvaluator.postinit -> None {
         existing = self.builtins_module.names_in_scope.get(name);
         if existing is None or existing.imported {
             self.builtins_module.names_in_scope[name] = sym;
+        }
+    }
+    # Merge curated typing constructs into builtins. The set of names is
+    # owned by typing_ambient.pyi's __all__ — that file is the single source
+    # of truth for both the type checker (this merge) and PyastGenPass
+    # (which auto-emits `from typing import <names>` when references appear).
+    typing_ambient_allowed = read_dunder_all(self._TYPING_AMBIENT_STUB_FILE_PATH);
+    if typing_ambient_allowed is not None {
+        for typing_name in typing_ambient_allowed {
+            typing_sym = self.typing_module.names_in_scope.get(typing_name);
+            if typing_sym is None {
+                continue;
+            }
+            existing_typing = self.builtins_module.names_in_scope.get(typing_name);
+            if existing_typing is None or existing_typing.imported {
+                self.builtins_module.names_in_scope[typing_name] = typing_sym;
+            }
         }
     }
     self._prefetch_types();
