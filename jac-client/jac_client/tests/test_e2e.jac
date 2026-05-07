@@ -243,9 +243,7 @@ def _click_and_wait_status(
 test "jacSignup and jacLogin round trip: old and new calling forms" {
     tests_dir = os.path.dirname(__file__);
     jac_client_root = os.path.dirname(tests_dir);
-    app_src = os.path.join(
-        jac_client_root, "examples", "auth-calling-forms"
-    );
+    app_src = os.path.join(jac_client_root, "examples", "auth-calling-forms");
     (server, port, url, temp_dir, original_cwd) = _start_server_from(
         app_src, "e2e-auth-calling-forms-app"
     );
@@ -256,9 +254,7 @@ test "jacSignup and jacLogin round trip: old and new calling forms" {
             page = context.new_page();
             try {
                 page.goto(url, wait_until="load", timeout=60000);
-                page.wait_for_selector(
-                    '[data-testid="signup-old"]', timeout=30000
-                );
+                page.wait_for_selector('[data-testid="signup-old"]', timeout=30000);
 
                 ts = int(time.time());
                 user_old = f"old_{ts}";
@@ -266,9 +262,7 @@ test "jacSignup and jacLogin round trip: old and new calling forms" {
                 password = "roundtrip_pass_123";
 
                 # 1. Signup via backward-compat form: jacSignup(user, pw)
-                status = _click_and_wait_status(
-                    page, user_old, password, "signup-old"
-                );
+                status = _click_and_wait_status(page, user_old, password, "signup-old");
                 assert status == "signup_old_ok" , (
                     f"signup (old form) failed: {status}"
                 );
@@ -276,9 +270,7 @@ test "jacSignup and jacLogin round trip: old and new calling forms" {
                 # 2. Logout then log back in via old form: jacLogin(user, pw)
                 page.locator('[data-testid="logout-btn"]').click();
                 page.wait_for_timeout(500);
-                status = _click_and_wait_status(
-                    page, user_old, password, "login-old"
-                );
+                status = _click_and_wait_status(page, user_old, password, "login-old");
                 assert status == "login_old_ok" , (
                     f"login (old form) failed: {status}"
                 );
@@ -287,9 +279,7 @@ test "jacSignup and jacLogin round trip: old and new calling forms" {
                 #    jacSignup([{type,value}], password)
                 page.locator('[data-testid="logout-btn"]').click();
                 page.wait_for_timeout(500);
-                status = _click_and_wait_status(
-                    page, user_new, password, "signup-new"
-                );
+                status = _click_and_wait_status(page, user_new, password, "signup-new");
                 assert status == "signup_new_ok" , (
                     f"signup (new form) failed: {status}"
                 );
@@ -298,9 +288,7 @@ test "jacSignup and jacLogin round trip: old and new calling forms" {
                 #    jacLogin({type,value}, password)
                 page.locator('[data-testid="logout-btn"]').click();
                 page.wait_for_timeout(500);
-                status = _click_and_wait_status(
-                    page, user_new, password, "login-new"
-                );
+                status = _click_and_wait_status(page, user_new, password, "login-new");
                 assert status == "login_new_ok" , (
                     f"login (new form) failed: {status}"
                 );

@@ -395,7 +395,9 @@ test "resize pvc if needed: increase patches, no-op skips, decrease raises" {
 
     # Case 2 — same size: patch must NOT be called.
     core_v1_noop = unittest.mock.MagicMock();
-    core_v1_noop.read_namespaced_persistent_volume_claim.return_value = make_pvc("10Gi");
+    core_v1_noop.read_namespaced_persistent_volume_claim.return_value = make_pvc(
+        "10Gi"
+    );
     resize_pvc_if_needed(core_v1_noop, "ns", "mongo-pvc", "10Gi");
     core_v1_noop.patch_namespaced_persistent_volume_claim.assert_not_called();
 
