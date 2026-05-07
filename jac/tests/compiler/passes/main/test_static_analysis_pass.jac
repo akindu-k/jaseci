@@ -139,6 +139,30 @@ test "cl def has variables reassigned in nested abilities produce no unused warn
     ]}";
 }
 
+test "ambient typing names resolve without import" {
+    file_path = os.path.join(FIXTURES, "ambient_typing.jac");
+    prog = JacProgram();
+    prog.compile(file_path, type_check=True);
+    warning_msgs = [str(w) for w in prog.warnings_had];
+    error_msgs = [str(e) for e in prog.errors_had];
+    typing_names = ["Callable", "Mapping", "Sequence", "Iterable", "Protocol"];
+    for tname in typing_names {
+        undef = [
+            w
+            for w in warning_msgs
+            if f"'{tname}' may be undefined" in w
+        ];
+        assert len(undef) == 0 , f"{tname} should be ambient: got {undef}";
+    }
+    assert len(error_msgs) == 0 , f"Expected no errors, got: {error_msgs}";
+    py_code = prog.compile(file_path).gen.py;
+    assert py_code is not None , "Expected Python codegen to succeed";
+    assert "from typing import" in py_code , f"Expected typing import auto-injected, got:\n{py_code[:500]}";
+    for tname in typing_names {
+        assert tname in py_code , f"Expected {tname} in injected typing import";
+    }
+}
+
 test "obj bare assignment to has var name still warns as unused" {
     file_path = os.path.join(FIXTURES, "obj_bare_has_assign.jac");
     prog = JacProgram();
