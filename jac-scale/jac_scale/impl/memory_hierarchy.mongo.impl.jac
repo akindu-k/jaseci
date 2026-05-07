@@ -293,6 +293,9 @@ impl MongoBackend._write_to_db(anchor: Anchor) -> None {
             arch.__dict__.pop('__jac_dirty_fields__', None);
         }
         _snapshot_field_hashes(anchor);
+        if isinstance(anchor, NodeAnchor) {
+            anchor.is_topology_dirty = False;
+        }
     } except Exception as e {
         logger.error(f"MongoDB _write_to_db failed: {e}");
     }
@@ -465,7 +468,6 @@ impl MongoBackend.sync -> None {
                     added = [str(eid) for eid in delta[0]];
                     removed = [str(eid) for eid in delta[1]];
                     self._put_node_atomic(anchor, added, removed);
-                    anchor.is_topology_dirty = False;
                     continue;
                 }
             }
@@ -492,9 +494,6 @@ impl MongoBackend.sync -> None {
             }
             # First insert (hash == 0), no field changes found, or topology is dirty.
             self._write_to_db(anchor);
-            if isinstance(anchor, NodeAnchor) {
-                anchor.is_topology_dirty = False;
-            }
         } except Exception as e {
             logger.warning(f"MongoDB sync failed for anchor {anchor.id}: {e}");
         }
@@ -550,6 +549,7 @@ impl MongoBackend._put_node_atomic(
         );
         anchor.hash = Serializer._compute_hash(anchor);
         _snapshot_field_hashes(anchor);
+        anchor.is_topology_dirty = False;
     } except Exception as e {
         logger.error(f"MongoDB _put_node_atomic failed: {e}");
     }
