@@ -292,7 +292,11 @@ impl NodeAnchor.get_topology_index -> Any {
 
 """Set topology index from TopologyIndex object (encodes to blob)."""
 impl NodeAnchor.set_topology_index(index: Any) -> None {
-    self.topology_index_data = index.encode();
+    new_blob = index.encode();
+    if new_blob != self.topology_index_data {
+        self.topology_index_data = new_blob;
+        self.is_topology_dirty = True;
+    }
 }
 
 """Serialize Edge Anchor."""

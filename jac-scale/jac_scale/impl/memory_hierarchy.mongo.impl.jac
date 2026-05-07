@@ -444,9 +444,13 @@ impl MongoBackend.sync -> None {
         if not anchor.persistent {
             continue;
         }
-        # Check hash first — skip unchanged anchors without access check
+        # Check hash first — skip unchanged anchors without access check.
+        # topology_index_data is excluded from the hash, so use the explicit
+        # dirty flag as a secondary signal to avoid silently dropping index updates.
         current_hash = Serializer._compute_hash(anchor);
-        if current_hash == anchor.hash {
+        topology_dirty = isinstance(anchor, NodeAnchor)
+        and getattr(anchor, 'is_topology_dirty', False);
+        if current_hash == anchor.hash and not topology_dirty {
             continue;
         }
         if not Jac.check_write_access(anchor) {
@@ -461,6 +465,7 @@ impl MongoBackend.sync -> None {
                     added = [str(eid) for eid in delta[0]];
                     removed = [str(eid) for eid in delta[1]];
                     self._put_node_atomic(anchor, added, removed);
+                    anchor.is_topology_dirty = False;
                     continue;
                 }
             }
@@ -468,7 +473,10 @@ impl MongoBackend.sync -> None {
             # field-hash-derived fields (in-place mutations) to get the complete
             # dirty set. Both must be combined — running only one silently drops
             # the other category (e.g. direct + in-place in the same request).
-            if anchor.hash != 0 {
+            # Skip put_partial when topology is dirty — topology_index_data lives
+            # outside data.archetype, so partial writes would miss it. Fall through
+            # to _write_to_db which serializes the full document.
+            if anchor.hash != 0 and not topology_dirty {
                 arch = anchor.archetype if anchor.is_populated() else None;
                 setattr_dirty: set[str] = (
                     arch.__dict__.get('__jac_dirty_fields__') or set()
@@ -482,8 +490,11 @@ impl MongoBackend.sync -> None {
                     continue;
                 }
             }
-            # First insert (hash == 0) or no field changes found — full upsert.
+            # First insert (hash == 0), no field changes found, or topology is dirty.
             self._write_to_db(anchor);
+            if isinstance(anchor, NodeAnchor) {
+                anchor.is_topology_dirty = False;
+            }
         } except Exception as e {
             logger.warning(f"MongoDB sync failed for anchor {anchor.id}: {e}");
         }

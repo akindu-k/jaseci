@@ -59,6 +59,102 @@ test "topology index survives anchor serialization" {
     assert len(decoded.node_table) == 2;
 }
 
+test "is_topology_dirty set on content change cleared on sync" {
+    import from jaclang.runtimelib.memory { SqliteMemory }
+    import from jaclang.jac0core.archetype { Root }
+    tmpdir = mkdtemp();
+    try {
+        mem = SqliteMemory(path=os.path.join(tmpdir, "test.db"));
+        r = Root();
+        anchor = r.__jac__;
+        anchor.persistent = True;
+
+        idx = TopologyIndex();
+        idx.add_node(anchor.id, "Root");
+        anchor.set_topology_index(idx);
+        assert anchor.is_topology_dirty is True , "flag must be set after first write";
+
+        mem.put(anchor);
+        mem.sync();
+        assert anchor.is_topology_dirty is False , "flag must be cleared after sync";
+        mem.close();
+    } finally {
+        shutil.rmtree(tmpdir, ignore_errors=True);
+    }
+}
+
+test "is_topology_dirty not set when content unchanged" {
+    import from jaclang.jac0core.archetype { Root }
+    r = Root();
+    anchor = r.__jac__;
+
+    idx = TopologyIndex();
+    idx.add_node(anchor.id, "Root");
+    anchor.set_topology_index(idx);
+    anchor.is_topology_dirty = False;  # manually reset
+
+    # Re-encoding the same content must not re-raise the flag
+    anchor.set_topology_index(idx);
+    assert anchor.is_topology_dirty is False , "no-op update must not set dirty flag";
+}
+
+test "topology-only update persisted in sqlite after hash unchanged" {
+    # Regression: second walker updates only topology_index_data; hash stays
+    # the same (topology excluded from hash), so sync must still write it.
+    import from jaclang.runtimelib.memory { SqliteMemory }
+    import from jaclang.jac0core.archetype { Root, NodeAnchor }
+    tmpdir = mkdtemp();
+    try {
+        db_path = os.path.join(tmpdir, "test.db");
+
+        # --- Request 1: create root with initial topology ---
+        mem1 = SqliteMemory(path=db_path);
+        r = Root();
+        root_anchor = r.__jac__;
+        root_anchor.persistent = True;
+        idx1 = TopologyIndex();
+        idx1.add_node(root_anchor.id, "Root");
+        n1 = uuid4();
+        idx1.add_node(n1, "UserProfile");
+        idx1.add_edge(root_anchor.id, n1, "default");
+        root_anchor.set_topology_index(idx1);
+        mem1.put(root_anchor);
+        mem1.sync();
+        mem1.close();
+
+        # --- Request 2: ONLY update topology (add new node type) ---
+        mem2 = SqliteMemory(path=db_path);
+        loaded = mem2.get(root_anchor.id);
+        assert loaded is not None;
+        assert isinstance(loaded, NodeAnchor);
+        loaded_node: NodeAnchor = loaded;
+
+        idx2 = loaded_node.get_topology_index();
+        n2 = uuid4();
+        idx2.add_node(n2, "Project");
+        idx2.add_edge(root_anchor.id, n2, "default");
+        loaded_node.set_topology_index(idx2);
+        assert loaded_node.is_topology_dirty is True;
+        # No other changes — hash will be identical to pre-change hash
+        mem2.sync();
+        assert loaded_node.is_topology_dirty is False , "flag must clear after sync";
+        mem2.close();
+
+        # --- Request 3: verify Project type is in the persisted index ---
+        mem3 = SqliteMemory(path=db_path);
+        final = mem3.get(root_anchor.id);
+        assert final is not None and isinstance(final, NodeAnchor);
+        final_node: NodeAnchor = final;
+        final_idx = final_node.get_topology_index();
+        type_names = set(final_idx.type_table);
+        assert "Project" in type_names , f"Project type lost — only found: {type_names}";
+        assert "UserProfile" in type_names , "UserProfile type unexpectedly missing";
+        mem3.close();
+    } finally {
+        shutil.rmtree(tmpdir, ignore_errors=True);
+    }
+}
+
 test "concurrent edge adds merged in sqlite sync" {
     import from jaclang.runtimelib.memory { SqliteMemory }
     import from jaclang.jac0core.archetype { Root, NodeAnchor, EdgeAnchor }

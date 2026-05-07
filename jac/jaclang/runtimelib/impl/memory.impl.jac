@@ -845,6 +845,14 @@ impl SqliteMemory.sync -> None {
                         }
                         changed = True;
                     }
+                    # Topology index is excluded from hash; use explicit dirty flag
+                    if (
+                        isinstance(anchor, NodeAnchor)
+                        and getattr(anchor, 'is_topology_dirty', False)
+                    ) {
+                        stored_anchor.topology_index_data = anchor.topology_index_data;
+                        changed = True;
+                    }
                     # Only write to database if something actually changed
                     if changed {
                         merged_row = _anchor_to_row(stored_anchor);
@@ -857,6 +865,9 @@ impl SqliteMemory.sync -> None {
                             """,
                             (key, ) + merged_row
                         );
+                        if isinstance(anchor, NodeAnchor) {
+                            anchor.is_topology_dirty = False;
+                        }
                     }
                 } else {
                     # No stored or stored is a stub - save anchor if valid
@@ -876,6 +887,9 @@ impl SqliteMemory.sync -> None {
                             """,
                             (key, ) + new_row
                         );
+                        if isinstance(anchor, NodeAnchor) {
+                            anchor.is_topology_dirty = False;
+                        }
                     }
                 }
             } except (AttributeError, ModuleNotFoundError) {
