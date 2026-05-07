@@ -6,7 +6,6 @@ import from pathlib { Path }
 
 
 """Verify DesktopConfig supports client_only field."""
-"""Verify DesktopConfig supports client_only field."""
 test "client_only config is supported" {
     import jaclang;
     import from jac_client.plugin.src.desktop_config { DesktopConfig }
@@ -19,7 +18,6 @@ test "client_only config is supported" {
 }
 
 
-"""Verify DesktopConfig has is_client_only method."""
 """Verify DesktopConfig has is_client_only method."""
 test "is_client_only method exists" {
     import jaclang;
@@ -36,7 +34,6 @@ test "is_client_only method exists" {
 
 
 """Verify the desktop build sets JAC_BUILD=1 to prevent server startup."""
-"""Verify the desktop build sets JAC_BUILD=1 to prevent server startup."""
 test "JAC_BUILD env var set during build" {
     target_file = Path(__file__).parent.parent / "plugin" / "src" / "targets" / "impl" / "desktop_target.impl.jac";
     if target_file.exists() {
@@ -49,7 +46,6 @@ test "JAC_BUILD env var set during build" {
 }
 
 
-"""Verify the build logic checks client_only to skip sidecar."""
 """Verify the build logic checks client_only to skip sidecar."""
 test "client_only skips sidecar bundling" {
     target_file = Path(__file__).parent.parent / "plugin" / "src" / "targets" / "impl" / "desktop_target.impl.jac";
