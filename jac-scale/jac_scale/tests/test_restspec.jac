@@ -591,3 +591,71 @@ test "unknown query params are silently dropped" {
         client.close();
     }
 }
+
+test "kwargs function is permissive - extras are not dropped" {
+    # A function declaring **kwargs must not have its extras filtered out.
+    # The filter is disabled when _has_var_kw is True.
+    client = make_client("restspec_fixtures.jac");
+    try {
+        client.register_user("u_kw", "p_kw");
+        auth = {"Authorization": f"Bearer {client.login_user('u_kw', 'p_kw')}"};
+
+        r = client.get(
+            "/passthrough", headers=auth, params={"foo": "1", "bar": "2", "baz": "3"}
+        );
+        assert r.status_code == 200 , r.text;
+        d = extract_data(r.json())["result"];
+        assert d["keys"] == ["bar", "baz", "foo"];
+    } finally {
+        client.close();
+    }
+}
+
+test "jac_spawn_node survives param filter" {
+    # When a walker has declared has-fields (so filtering is active), the
+    # _jac_spawn_node key injected from the nd path param must still pass
+    # through the filter even though it is not in _walker_allowed_keys.
+    client = make_client("restspec_fixtures.jac");
+    try {
+        # Create a node to spawn on
+        r = client.post(
+            "/walker/CreateUserProfile", json={"user_id": "u_spn", "name": "Spawn"}
+        );
+        assert r.status_code == 200 , r.text;
+        node_id = extract_data(r.json())["reports"][0]["node_id"];
+
+        # Call TaggedWalker with nd path param + extra unknown body param
+        r = client.post(
+            f"/walker/TaggedWalker/{node_id}",
+            json={"tag": "hello", "value": 42, "unknown_extra": "should_be_dropped"}
+        );
+        assert r.status_code == 200 , r.text;
+        d = extract_data(r.json())["reports"][0];
+        assert d["tag"] == "hello";
+        assert d["value"] == 42;
+    } finally {
+        client.close();
+    }
+}
+
+test "multiple declared params all pass when extras present" {
+    # All declared params must survive filtering; only the extras are dropped.
+    client = make_client("restspec_fixtures.jac");
+    try {
+        client.register_user("u_mp", "p_mp");
+        auth = {"Authorization": f"Bearer {client.login_user('u_mp', 'p_mp')}"};
+
+        r = client.get(
+            "/multi",
+            headers=auth,
+            params={"a": "hello", "b": "7", "c": "false", "ghost": "drop_me"}
+        );
+        assert r.status_code == 200 , r.text;
+        d = extract_data(r.json())["result"];
+        assert d["a"] == "hello";
+        assert d["b"] == 7;
+        assert not d["c"];
+    } finally {
+        client.close();
+    }
+}

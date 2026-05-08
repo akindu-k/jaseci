@@ -326,6 +326,32 @@ walker:pub SearchWalker {
     }
 }
 
+# ============================================================================
+# Unknown-param filter edge-case fixtures
+# ============================================================================
+"""Function that accepts **kwargs — filter must be permissive (no dropping)."""
+@restspec(method=HTTPMethod.GET, path="/passthrough")
+def passthrough_func(**kwargs: any) -> dict[str, list[str]] {
+    return {"keys": sorted(kwargs.keys())};
+}
+
+"""Walker with two declared fields + node routing — tests _jac_spawn_node guard."""
+@restspec(method=HTTPMethod.POST, path="/tagged")
+walker:pub TaggedWalker {
+    has tag: str,
+        value: int;
+
+    can run with Root entry {
+        report {"tag": self.tag, "value": self.value};
+    }
+}
+
+"""Function with multiple declared params — all must survive when extras present."""
+@restspec(method=HTTPMethod.GET, path="/multi")
+def multi_param_func(a: str, b: int, c: bool = True) -> dict[str, str | int | bool] {
+    return {"a": a, "b": b, "c": c};
+}
+
 """Function taking a recursive tree as a body parameter."""
 @restspec(method=HTTPMethod.POST, path="/func/create_tree")
 def create_tree_func(`root: TreeNode) -> dict {
