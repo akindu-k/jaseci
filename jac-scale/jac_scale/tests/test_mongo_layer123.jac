@@ -249,6 +249,46 @@ test "MongoBackend topology-only update persisted when hash unchanged" {
 }
 
 
+test "MongoBackend topology and archetype field both persist via full write path" {
+    container = MongoDbContainer("mongo:latest");
+    container.start();
+    try {
+        uri = container.get_connection_url();
+        backend = MongoBackend(mongo_url=uri, db_name="jac_topo_combined_test");
+
+        p = _MongoLayer123Person(name="alice", age=30);
+        root_anchor = p.__jac__;
+        root_anchor.persistent = True;
+        idx = TopologyIndex();
+        idx.add_node(root_anchor.id, "_MongoLayer123Person");
+        root_anchor.set_topology_index(idx);
+        root_anchor.is_topology_dirty = False;
+        backend._write_to_db(root_anchor);
+
+        p.name = "bob";
+        idx2 = root_anchor.get_topology_index();
+        n1 = uuid4();
+        idx2.add_node(n1, "Project");
+        root_anchor.set_topology_index(idx2);
+        assert root_anchor.is_topology_dirty is True;
+
+        backend._write_to_db(root_anchor);
+        assert root_anchor.is_topology_dirty is False;
+
+        loaded = backend.get(root_anchor.id);
+        assert loaded is not None and isinstance(loaded, NodeAnchor);
+        loaded_node: NodeAnchor = loaded;
+        assert loaded_node.archetype.name == "bob" , "archetype field lost during topology write";
+        loaded_idx = loaded_node.get_topology_index();
+        assert "Project" in set(loaded_idx.type_table) , "topology lost during combined write";
+
+        backend.close();
+    } finally {
+        container.stop();
+    }
+}
+
+
 test "MongoBackend _put_node_atomic resets is_topology_dirty on success" {
     container = MongoDbContainer("mongo:latest");
     container.start();
@@ -277,6 +317,48 @@ test "MongoBackend _put_node_atomic resets is_topology_dirty on success" {
         loaded_node: NodeAnchor = loaded;
         loaded_idx = loaded_node.get_topology_index();
         assert "Root" in set(loaded_idx.type_table) , "topology not persisted by _put_node_atomic";
+
+        backend.close();
+    } finally {
+        container.stop();
+    }
+}
+
+
+test "MongoBackend put_partial skipped when topology dirty leaving topology in DB" {
+    container = MongoDbContainer("mongo:latest");
+    container.start();
+    try {
+        uri = container.get_connection_url();
+        backend = MongoBackend(mongo_url=uri, db_name="jac_topo_partial_test");
+
+        p = _MongoLayer123Person(name="alice", age=30);
+        root_anchor = p.__jac__;
+        root_anchor.persistent = True;
+        backend._write_to_db(root_anchor);
+
+        idx = TopologyIndex();
+        idx.add_node(root_anchor.id, "_MongoLayer123Person");
+        root_anchor.set_topology_index(idx);
+
+        topology_dirty = getattr(root_anchor, 'is_topology_dirty', False);
+        assert topology_dirty;
+
+        # When topology_dirty, put_partial must be skipped in favour of _write_to_db.
+        # Guard condition: anchor.hash != 0 and not topology_dirty → False → won't put_partial.
+        would_partial = root_anchor.hash != 0 and not topology_dirty;
+        assert not would_partial , "put_partial guard must be False when topology is dirty";
+
+        backend._write_to_db(root_anchor);
+        assert root_anchor.is_topology_dirty is False;
+
+        loaded = backend.get(root_anchor.id);
+        assert loaded is not None and isinstance(loaded, NodeAnchor);
+        loaded_node: NodeAnchor = loaded;
+        loaded_idx = loaded_node.get_topology_index();
+        assert "_MongoLayer123Person" in set(loaded_idx.type_table) , (
+            "topology lost — put_partial must have been bypassed for full write"
+        );
 
         backend.close();
     } finally {

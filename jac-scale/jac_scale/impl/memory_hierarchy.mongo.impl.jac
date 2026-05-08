@@ -465,7 +465,9 @@ impl MongoBackend.sync -> None {
                 if delta is not None {
                     added = [str(eid) for eid in delta[0]];
                     removed = [str(eid) for eid in delta[1]];
-                    self._put_node_atomic(anchor, added, removed);
+                    self._put_node_atomic(
+                        anchor, added, removed
+                    );  # also clears is_topology_dirty
                     continue;
                 }
             }
