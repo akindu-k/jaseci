@@ -626,7 +626,7 @@ test "jac_spawn_node survives param filter" {
 
         # Call TaggedWalker with nd path param + extra unknown body param
         r = client.post(
-            f"/walker/TaggedWalker/{node_id}",
+            f"/tagged/{node_id}",
             json={"tag": "hello", "value": 42, "unknown_extra": "should_be_dropped"}
         );
         assert r.status_code == 200 , r.text;

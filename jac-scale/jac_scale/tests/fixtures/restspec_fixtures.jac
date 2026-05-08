@@ -341,7 +341,7 @@ walker:pub TaggedWalker {
     has tag: str,
         value: int;
 
-    can run with Root entry {
+    can run with entry {
         report {"tag": self.tag, "value": self.value};
     }
 }
