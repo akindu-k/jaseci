@@ -233,6 +233,7 @@ impl JacAPIServerEndpoints.create_function_parameters(
     func_name: str, method: HTTPMethod = HTTPMethod.POST
 ) -> list[APIParameter] {
     import from typing { get_type_hints }
+    import inspect;
     parameters: list[APIParameter] = [];
     # Extract path parameter names from restspec path
     func_obj = self.get_functions()[func_name];
@@ -240,12 +241,29 @@ impl JacAPIServerEndpoints.create_function_parameters(
     spec_path = restspec.path if restspec else None;
     path_param_names = _extract_path_param_names(spec_path);
     func_fields = self.introspector.introspect_callable(func_obj)['parameters'];
+    # introspect_callable does not filter *args/**kwargs; build a skip-set so
+    # they are not registered as FastAPI parameters (they have no fixed name).
+    _var_param_names: set = set();
+    try {
+        _fsig = inspect.signature(func_obj);
+        _var_param_names = {
+            name
+            for (name, p) in _fsig.parameters.items()
+            if p.kind in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD
+            )
+        };
+    } except Exception { }
     try {
         func_type_hints = get_type_hints(func_obj);
     } except Exception {
         func_type_hints = {};
     }
     for field_name in func_fields {
+        if field_name in _var_param_names {
+            continue;
+        }
         field_type = func_fields[field_name]['type'];
         if field_name in path_param_names {
             param_type = ParameterType.PATH;
