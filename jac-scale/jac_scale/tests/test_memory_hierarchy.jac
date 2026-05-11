@@ -1317,18 +1317,18 @@ test "acommit is idempotent — _committed flag prevents second sync pass" {
 
     call_count = [0];
 
-    def mock_commit(self: ScaleTieredMemory, anchor: Any = None) -> None {
+    def mock_commit(self: ScaleTieredMemory, anchor: Any = None) {
         call_count[0] += 1;
     }
 
     with patch.object(ScaleTieredMemory, 'commit', mock_commit) {
         mem = object.__new__(ScaleTieredMemory);
         mem._committed = False;
-
         asyncio.run(mem.acommit());
-        assert call_count[0] == 1 , f"expected 1 commit call after first acommit, got {call_count[0]}";
+        assert call_count[0] == 1 , f"expected 1 commit call after first acommit, got {call_count[
+            0
+        ]}";
         assert mem._committed is True , "_committed must be True after first acommit";
-
         asyncio.run(mem.acommit());
         assert call_count[0] == 1 , (
             f"second acommit (middleware pass) must be a no-op via _committed flag, "
