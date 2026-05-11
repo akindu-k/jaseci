@@ -1336,3 +1336,36 @@ test "acommit is idempotent — _committed flag prevents second sync pass" {
         );
     }
 }
+
+"""Unit test for issue 1g fix: _committed stays False when commit() raises.
+
+If the thread pool commit raises (e.g. MongoDB unreachable), _committed must
+remain False so the middleware safety-net path can retry the commit.
+"""
+test "acommit leaves _committed False when commit() raises" {
+    import asyncio;
+    import from unittest.mock { patch }
+    import from jac_scale.memory_hierarchy { ScaleTieredMemory }
+
+    def failing_commit(self: ScaleTieredMemory, anchor: Any = None) {
+        raise RuntimeError("simulated commit failure");
+    }
+
+    with patch.object(ScaleTieredMemory, 'commit', failing_commit) {
+        mem = object.__new__(ScaleTieredMemory);
+        mem._committed = False;
+
+        raised = False;
+        try {
+            asyncio.run(mem.acommit());
+        } except Exception {
+            raised = True;
+        }
+
+        assert raised , "acommit() must propagate the exception from commit()";
+        assert mem._committed is False , (
+            "_committed must stay False when commit() raises — "
+            "the middleware safety net must still be able to retry"
+        );
+    }
+}
