@@ -1354,14 +1354,12 @@ test "acommit leaves _committed False when commit() raises" {
     with patch.object(ScaleTieredMemory, 'commit', failing_commit) {
         mem = object.__new__(ScaleTieredMemory);
         mem._committed = False;
-
         raised = False;
         try {
             asyncio.run(mem.acommit());
         } except Exception {
             raised = True;
         }
-
         assert raised , "acommit() must propagate the exception from commit()";
         assert mem._committed is False , (
             "_committed must stay False when commit() raises — "
