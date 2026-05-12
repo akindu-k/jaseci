@@ -310,6 +310,13 @@ impl BaseLLM._compact_messages(
 }
 
 
+"""Offloads invoke() to a thread pool; keeps the event loop free during LLM calls."""
+impl BaseLLM.ainvoke(mt_run: MTRuntime) -> object {
+    import asyncio;
+    return await asyncio.to_thread(self.invoke, mt_run);
+}
+
+
 """Construct the call parameters and return self (factory pattern).
 
 Allows chaining like: `model(temperature=0.5).invoke(mt_run)`.

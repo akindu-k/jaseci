@@ -724,6 +724,9 @@ class JacByLLM {
     """Call the LLM model."""
     static def call_llm(model: LLMModel, mt_run: MTRuntime) -> Any;
 
+    """Async variant of call_llm; offloads the LLM call so the event loop stays free."""
+    static async def acall_llm(model: LLMModel, mt_run: MTRuntime) -> Any;
+
     """Python library mode decorator for Jac's by llm() syntax."""
     static def `by(model: LLMModel) -> Callable;
 
