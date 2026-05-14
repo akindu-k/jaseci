@@ -120,13 +120,21 @@ impl JacScaleUserManager.get_root_id(user_id: str) -> str | None {
     return result;
 }
 
-"""Update password by user_id."""
+"""Update password by user_id.
+
+Revokes all outstanding tokens on success so a compromised password cannot
+keep an attacker authenticated beyond the password-change event.
+"""
 impl JacScaleUserManager.update_password(
     user_id: str, current_password: str, new_password: str
 ) -> dict[str, str] {
-    return self._identity_storage.update_password(
+    result = self._identity_storage.update_password(
         user_id, current_password, new_password
     );
+    if 'error' not in result {
+        self.invalidate_user_tokens(user_id);
+    }
+    return result;
 }
 
 impl JacScaleUserManager.update_profile(
@@ -157,6 +165,37 @@ impl JacScaleUserManager.validate_token(token: str) -> str | None {
 
 impl JacScaleUserManager.close -> None { }
 
+"""Revoke all outstanding tokens for a user.
+
+Sets `tokens_valid_from` to now in the user document so that any token
+with an older `iat` claim is rejected on the next revocation-cache miss
+(within _REVOCATION_CACHE_TTL seconds).  In the same process, decode-cache
+entries for this user are immediately evicted via the reverse index so
+revocation takes effect without waiting for the cache TTL to expire.
+
+Multi-process deployments: other workers pick up the change on the next
+cache miss (within _REVOCATION_CACHE_TTL).  For stricter guarantees, reduce
+_REVOCATION_CACHE_TTL or centralise the revocation timestamp in Redis.
+"""
+impl JacScaleUserManager.invalidate_user_tokens(user_id: str) -> None {
+    global _decoded_token_cache, _revocation_ts_cache, _user_token_hashes;
+
+    # Persist revocation boundary so other workers (and restarts) pick it up
+    now_unix = time.time();
+    self._identity_storage.update_user_fields(
+        user_id, {'tokens_valid_from': now_unix}
+    );
+
+    # Eagerly evict this worker's decode-cache entries for this user
+    for token_hash in list(_user_token_hashes.get(user_id, set())) {
+        _decoded_token_cache.pop(token_hash, None);
+    }
+    _user_token_hashes.pop(user_id, None);
+
+    # Evict revocation cache so the next validation reads the new boundary
+    _revocation_ts_cache.pop(user_id, None);
+}
+
 """Get username from user_id."""
 impl JacScaleUserManager.get_username(user_id: str) -> str | None {
     return self._identity_storage.get_username(user_id);
@@ -168,9 +207,11 @@ impl JacScaleUserManager.get_username(user_id: str) -> str | None {
 impl JacScaleUserManager.create_jwt_token(
     user_id: str, include_role: bool = True
 ) -> str {
+    import uuid;
     now = datetime.now(UTC);
     payload: dict[(str, Any)] = {
         'user_id': user_id,
+        'jti': str(uuid.uuid4()),
         'exp': (now + timedelta(days=JWT_EXP_DELTA_DAYS)),
         'iat': now.timestamp()
     };
@@ -192,19 +233,95 @@ impl JacScaleUserManager.get_jwt_claims(token: str) -> dict | None {
     }
 }
 
-"""Validate JWT and return user_id if valid.
+"""Validate a JWT and return the user_id if the token is authentic and not revoked.
 
-JWT signature and expiry are verified by jwt.decode() — an extra DB round-trip
-to confirm user existence on every request is unnecessary and costly.
+Validation is split into three layers to avoid unnecessary work:
+
+Layer 1 — process-local decode cache (hot path, zero crypto cost):
+  SHA-256(raw_token) -> (user_id, monotonic_expiry) with TTL=_TOKEN_CACHE_TTL.
+  A hit skips both jwt.decode() and any DB access.
+
+Layer 2 — cryptographic verification (jwt.decode):
+  Checks signature and expiry without touching the database.
+
+Layer 3 — revocation check (one DB read per user per _REVOCATION_CACHE_TTL):
+  Each user document may carry a `tokens_valid_from` Unix timestamp.  Any token
+  whose `iat` claim is older than that timestamp was issued before the last
+  revocation event (password change, explicit logout, or account deletion) and
+  is rejected.  The per-user `tokens_valid_from` value is cached for
+  _REVOCATION_CACHE_TTL seconds so the DB is consulted at most once per user
+  per that window, even at high request rates.
+
+Multi-process note: the process-local caches are not shared across workers.
+Revocation propagates to other workers within _REVOCATION_CACHE_TTL seconds
+(one DB miss per worker per window), and decode-cache entries for the
+invalidated user are eagerly evicted in the same worker via invalidate_user_tokens.
 """
 impl JacScaleUserManager.validate_jwt_token(token: str) -> str | None {
+    global _decoded_token_cache, _revocation_ts_cache, _user_token_hashes;
+    now_m = time.monotonic();
+
+    # Layer 1: process-local decode cache — avoids jwt.decode() on repeated hits
+    token_hash = hashlib.sha256(token.encode()).hexdigest();
+    cached = _decoded_token_cache.get(token_hash);
+    if cached is not None {
+        # Use index access — tuple-unpack of untyped dict values is not supported
+        if now_m < cached[1] {
+            return str(cached[0]);
+        }
+        # Expired entry — evict from both indexes
+        del _decoded_token_cache[token_hash];
+        hashes = _user_token_hashes.get(str(cached[0]));
+        if hashes is not None {
+            hashes.discard(token_hash);
+        }
+    }
+
+    # Layer 2: cryptographic signature + expiry check (no DB)
     try {
         decoded = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM]);
-        return decoded.get('user_id') or None;
     } except Exception as e {
-        logger.debug(f"Failed to validate JWT token: {str(e)}");
+        logger.debug(f"JWT validation failed: {e}");
         return None;
     }
+    user_id = decoded.get('user_id');
+    if not user_id {
+        return None;
+    }
+
+    # Layer 3: revocation — one DB read per user per _REVOCATION_CACHE_TTL seconds
+    iat = float(decoded.get('iat', 0.0));
+    rev_entry = _revocation_ts_cache.get(user_id);
+    if rev_entry is None or now_m >= rev_entry[1] {
+        user_doc = self._identity_storage.get_user_by_id(user_id);
+        if user_doc is None {
+            # User has been deleted — reject and cache the sentinel so we
+            # don't hit the DB on every request for the remaining TTL.
+            _revocation_ts_cache[user_id] = (float('inf'), now_m + _REVOCATION_CACHE_TTL);
+            return None;
+        }
+        valid_from_ts = float(user_doc.get('tokens_valid_from', 0.0));
+        _revocation_ts_cache[user_id] = (valid_from_ts, now_m + _REVOCATION_CACHE_TTL);
+        rev_entry = (valid_from_ts, now_m + _REVOCATION_CACHE_TTL);
+    }
+    valid_from_ts = rev_entry[0];
+    if iat < valid_from_ts {
+        logger.debug(
+            f"JWT for {user_id} rejected: iat={iat:.3f} predates "
+            f"revocation boundary {valid_from_ts:.3f}"
+        );
+        return None;
+    }
+
+    # Populate decode cache and reverse index
+    if len(_decoded_token_cache) >= _TOKEN_CACHE_MAX_SIZE {
+        _decoded_token_cache.clear();
+        _user_token_hashes.clear();
+    }
+    _decoded_token_cache[token_hash] = (user_id, now_m + _TOKEN_CACHE_TTL);
+    _user_token_hashes.setdefault(user_id, set()).add(token_hash);
+
+    return user_id;
 }
 
 impl JacScaleUserManager.refresh_jwt_token(token: str) -> str | None {
@@ -515,6 +632,9 @@ impl JacScaleUserManager.delete_user(user_id: str) -> dict[str, str] {
         }
     }
     self._identity_storage.delete_user(user_id);
+    # Eager eviction: bust this worker's caches immediately so in-flight
+    # requests don't see a valid token for a user that no longer exists.
+    self.invalidate_user_tokens(user_id);
     return {'message': 'User deleted successfully', 'user_id': user_id};
 }
 

@@ -1,4 +1,6 @@
 import jwt;
+import time;
+import hashlib;
 import logging;
 import from datetime { UTC, datetime, timedelta }
 import from typing { Any }
@@ -27,7 +29,18 @@ glob _jwt_config = get_scale_config().get_jwt_config(),
      logger = logging.getLogger(__name__),
      _root_id_request_cache: ContextVar[dict[str, str] | None] = ContextVar(
          '_jac_scale_root_id_cache', default=None
-     );
+     ),
+     # --- JWT validation caches (process-local, not shared across workers) ---
+     # token_hash -> (user_id, monotonic_expiry)
+     _decoded_token_cache: dict = {},
+     # user_id -> (tokens_valid_from_unix_ts, monotonic_expiry)
+     _revocation_ts_cache: dict = {},
+     # user_id -> set[token_hash]  (reverse index for eager eviction)
+     _user_token_hashes: dict = {},
+     # Tune via env or leave at these production defaults
+     _TOKEN_CACHE_TTL: float = 30.0,
+     _REVOCATION_CACHE_TTL: float = 60.0,
+     _TOKEN_CACHE_MAX_SIZE: int = 50000;
 
 """User roles enum."""
 enum UserRole {
@@ -109,6 +122,8 @@ obj JacScaleUserManager(UserManager) {
         requires_password_reset: bool = True
     ) -> dict[str, Any];
 
+    # Token revocation — invalidates all outstanding tokens for a user
+    def invalidate_user_tokens(user_id: str) -> None;
     # Backward compat helpers
     def get_username(user_id: str) -> str | None;
 }
