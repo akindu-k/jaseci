@@ -960,6 +960,12 @@ glob E0001 = _err("E0001", Category.SYNTAX, "Expected '{expected}', got '{got}'"
          Category.CODEGEN,
          "C library import declaration '{name}' must not have a body"
      ),
+     E5090 = _err(
+         "E5090",
+         Category.CODEGEN,
+         "Native pathway does not yet support {kind} '{name}'",
+         help="This Jac construct is supported on the @sv/Python pathway but is not implemented in the .na.jac native compiler yet. Move the code to a non-native context, or extend NaIRGenPass to handle this node type."
+     ),
      # Language server
      E5070 = _err("E5070", Category.CODEGEN, "Error during type check: {error}"),
      E5071 = _err("E5071", Category.CODEGEN, "Error during formatting: {error}"),
