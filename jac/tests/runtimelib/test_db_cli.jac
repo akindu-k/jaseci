@@ -124,10 +124,11 @@ test "db recover-all rescues quarantined rows after CLI alias add" {
         # when the v2 walker tries to traverse them.
         app.write_text(V2_PERSON);
         _jac(tmpdir, ["enter", str(app), "dump"]);
-        # Confirm quarantine populated.
+        # Confirm quarantine populated. The cascade fix quarantines both the
+        # 2 LegacyPerson nodes AND their 2 connecting GenericEdge anchors = 4.
         (rc, out, _) = _jac(tmpdir, ["db", "inspect"]);
         assert rc == 0;
-        assert "quarantined=2" in out;
+        assert "quarantined=4" in out;
         # Operator-side rescue: register the alias in the DB, then recover.
         (rc, _, _) = _jac(
             tmpdir, ["db", "alias", "add", "__main__.LegacyPerson", "__main__.Person"]
@@ -135,7 +136,7 @@ test "db recover-all rescues quarantined rows after CLI alias add" {
         assert rc == 0;
         (rc, out, err) = _jac(tmpdir, ["db", "recover-all", "--app", str(app)]);
         assert rc == 0 , f"recover-all failed: {err}";
-        assert "Recovered 2 of 2" in out;
+        assert "Recovered 4 of 4" in out;
         # Inspect confirms quarantine cleared via its plain-text summary line.
         (rc, out, _) = _jac(tmpdir, ["db", "inspect"]);
         assert rc == 0;
@@ -179,14 +180,20 @@ test "db quarantine list and show return data, never silently empty" {
         # rows exist is verified via direct DB query below.
         (rc, _, _) = _jac(tmpdir, ["db", "quarantine", "list"]);
         assert rc == 0;
-        # Find a row id straight from the DB for the show step, and
-        # confirm quarantine has exactly the expected 2 rows.
+        # Find a NodeAnchor row id for the show step. The cascade fix also
+        # quarantines the connecting EdgeAnchors, so we explicitly filter to a
+        # NodeAnchor row to ensure the show output contains "LegacyPerson".
         import sqlite3;
         data_dir = Path(tmpdir) / ".jac" / "data";
         dbs = sorted(data_dir.glob("*.db"));
         assert dbs;
         conn = sqlite3.connect(str(dbs[0]));
-        ids = [r[0] for r in conn.execute("SELECT id FROM anchors_quarantine LIMIT 1")];
+        ids = [
+            r[0]
+            for r in conn.execute(
+                "SELECT id FROM anchors_quarantine WHERE type = 'NodeAnchor' LIMIT 1"
+            )
+        ];
         conn.close();
         assert ids;
         # `quarantine show` prints json.dumps() output -- plain text, not a

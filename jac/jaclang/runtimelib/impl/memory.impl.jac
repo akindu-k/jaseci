@@ -1194,6 +1194,36 @@ def _sqlite_attempt_recover(conn: sqlite3.Connection, row: tuple) -> tuple {
         )
     );
     conn.execute("DELETE FROM anchors_quarantine WHERE id = ?", (row_id, ));
+    # Re-link: when recovering an EdgeAnchor that was cascade-quarantined, the
+    # source node's data.edges was stripped. Re-add the edge ID to that node.
+    if anchor_type == 'EdgeAnchor' {
+        source_id = data.get('source') if isinstance(data, dict) else None;
+        if source_id {
+            src_row = conn.execute(
+                "SELECT data FROM anchors WHERE id = ? AND type = 'NodeAnchor'",
+                (source_id, )
+            ).fetchone();
+            if src_row {
+                try {
+                    src_data = json.loads(src_row[0]);
+                    edges = src_data.get('edges', []);
+                    if row_id not in edges {
+                        edges.append(row_id);
+                        src_data['edges'] = edges;
+                        conn.execute(
+                            "UPDATE anchors SET data = ? WHERE id = ?",
+                            (json.dumps(src_data), source_id)
+                        );
+                    }
+                } except Exception as relink_err {
+                    logger.warning(
+                        f"SqliteMemory: recover re-link of edge {row_id} "
+                        f"to source {source_id} failed: {relink_err}"
+                    );
+                }
+            }
+        }
+    }
     return (True, "recovered");
 }
 

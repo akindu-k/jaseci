@@ -732,6 +732,24 @@ def _mongo_attempt_recover(backend: MongoBackend, doc: dict) -> tuple {
     } except Exception as e {
         return (False, f"write-back failed: {type(e).__name__}: {e}");
     }
+    # Re-link: when recovering an EdgeAnchor that was cascade-quarantined, the
+    # source node's data.edges was stripped. Re-add the edge ID to that node.
+    if doc.get('type') == 'EdgeAnchor' {
+        source_id = data.get('source') if isinstance(data, dict) else None;
+        if source_id {
+            try {
+                backend.collection.update_one(
+                    {'_id': source_id, 'type': 'NodeAnchor'},
+                    {'$addToSet': {'data.edges': doc_id}}
+                );
+            } except Exception as relink_err {
+                logger.warning(
+                    f"MongoBackend: recover re-link of edge {doc_id} "
+                    f"to source {source_id} failed: {relink_err}"
+                );
+            }
+        }
+    }
     return (True, "recovered");
 }
 
