@@ -228,68 +228,89 @@ def _quarantine(
             orphaned = cursor.fetchall();
             if orphaned {
                 cascade_error = f"cascade quarantine: connected node {id} was quarantined";
-                orphaned_ids = [];
-                for row in orphaned {
-                    (e_id, e_type, e_mod, e_atype, e_fp, e_data, e_fv) = row;
-                    orphaned_ids.append(e_id);
-                    conn.execute(
-                        """
-                        INSERT OR REPLACE INTO anchors_quarantine
-                            (id, type, arch_module, arch_type, fingerprint, data,
-                             error, quarantined_at, from_format_version)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            e_id,
-                            e_type,
-                            e_mod,
-                            e_atype,
-                            e_fp,
-                            e_data,
-                            cascade_error,
-                            now_ts,
-                            e_fv
-                        )
-                    );
-                    conn.execute("DELETE FROM anchors WHERE id = ?", (e_id, ));
-                }
-                # Strip the orphaned edge IDs from live NodeAnchors' data.edges.
-                placeholders = ','.join('?' * len(orphaned_ids));
-                live_nodes = conn.execute(
-                    f"""
-                    SELECT id, data FROM anchors
-                    WHERE type = 'NodeAnchor'
-                      AND EXISTS (
-                          SELECT 1 FROM json_each(json_extract(data, '$.edges')) je
-                          WHERE je.value IN ({placeholders})
-                      )
-                    """,
-                    orphaned_ids
-                ).fetchall();
-                for (node_id, node_data_str) in live_nodes {
-                    try {
-                        node_data = json.loads(node_data_str);
-                        old_edges = node_data.get('edges', []);
-                        orphaned_set = set(orphaned_ids);
-                        node_data['edges'] = [
-                            e
-                            for e in old_edges
-                            if e not in orphaned_set
-                        ];
+                orphaned_ids: list[str] = [];
+                try {
+                    conn.execute("SAVEPOINT cascade_q");
+                    for row in orphaned {
+                        (e_id, e_type, e_mod, e_atype, e_fp, e_data, e_fv) = row;
+                        orphaned_ids.append(e_id);
                         conn.execute(
-                            "UPDATE anchors SET data = ? WHERE id = ?",
-                            (json.dumps(node_data), node_id)
-                        );
-                    } except Exception as patch_err {
-                        logger.error(
-                            f"Failed to strip orphaned edges from node {node_id}: {patch_err}"
+                            """
+                            INSERT OR REPLACE INTO anchors_quarantine
+                                (id, type, arch_module, arch_type, fingerprint, data,
+                                 error, quarantined_at, from_format_version)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                e_id,
+                                e_type,
+                                e_mod,
+                                e_atype,
+                                e_fp,
+                                e_data,
+                                cascade_error,
+                                now_ts,
+                                e_fv
+                            )
                         );
                     }
+                    # Batched delete — one round-trip instead of N.
+                    placeholders = ','.join('?' * len(orphaned_ids));
+                    conn.execute(
+                        f"DELETE FROM anchors WHERE id IN ({placeholders})",
+                        orphaned_ids
+                    );
+                    # Strip the orphaned edge IDs from live NodeAnchors' data.edges.
+                    live_nodes = conn.execute(
+                        f"""
+                        SELECT id, data FROM anchors
+                        WHERE type = 'NodeAnchor'
+                          AND EXISTS (
+                              SELECT 1 FROM json_each(json_extract(data, '$.edges')) je
+                              WHERE je.value IN ({placeholders})
+                          )
+                        """,
+                        orphaned_ids
+                    ).fetchall();
+                    for (node_id, node_data_str) in live_nodes {
+                        try {
+                            node_data = json.loads(node_data_str);
+                            old_edges = node_data.get('edges', []);
+                            orphaned_set = set(orphaned_ids);
+                            node_data['edges'] = [
+                                e
+                                for e in old_edges
+                                if e not in orphaned_set
+                            ];
+                            conn.execute(
+                                "UPDATE anchors SET data = ? WHERE id = ?",
+                                (json.dumps(node_data), node_id)
+                            );
+                        } except Exception as patch_err {
+                            logger.error(
+                                f"Failed to strip orphaned edges from node {node_id}: {patch_err}"
+                            );
+                        }
+                    }
+                    conn.execute("RELEASE cascade_q");
+                    logger.info(
+                        f"SqliteMemory: cascade-quarantined {len(
+                            orphaned_ids
+                        )} edge(s) "
+                        f"connected to quarantined node {id}."
+                    );
+                } except Exception as cascade_err {
+                    try {
+                        conn.execute("ROLLBACK TO SAVEPOINT cascade_q");
+                    } except Exception { }
+                    try {
+                        conn.execute("RELEASE cascade_q");
+                    } except Exception { }
+                    logger.error(
+                        f"SqliteMemory: cascade quarantine for node {id} failed "
+                        f"(rolled back to savepoint): {cascade_err}"
+                    );
                 }
-                logger.info(
-                    f"SqliteMemory: cascade-quarantined {len(orphaned_ids)} edge(s) "
-                    f"connected to quarantined node {id}."
-                );
             }
         }
         conn.commit();
@@ -1195,30 +1216,41 @@ def _sqlite_attempt_recover(conn: sqlite3.Connection, row: tuple) -> tuple {
     );
     conn.execute("DELETE FROM anchors_quarantine WHERE id = ?", (row_id, ));
     # Re-link: when recovering an EdgeAnchor that was cascade-quarantined, the
-    # source node's data.edges was stripped. Re-add the edge ID to that node.
-    if anchor_type == 'EdgeAnchor' {
-        source_id = data.get('source') if isinstance(data, dict) else None;
-        if source_id {
-            src_row = conn.execute(
+    # connected node(s)' data.edges was stripped. Re-add the edge ID to the
+    # source (always) and also to the target for undirected edges.
+    if anchor_type == 'EdgeAnchor' and isinstance(data, dict) {
+        source_id = data.get('source');
+        target_id = data.get('target');
+        is_undirected = bool(data.get('is_undirected', False));
+        relink_ids: list[str] = [
+            n
+            for n in [source_id]
+            if n
+        ];
+        if is_undirected and target_id and target_id != source_id {
+            relink_ids.append(target_id);
+        }
+        for node_id in relink_ids {
+            node_row = conn.execute(
                 "SELECT data FROM anchors WHERE id = ? AND type = 'NodeAnchor'",
-                (source_id, )
+                (node_id, )
             ).fetchone();
-            if src_row {
+            if node_row {
                 try {
-                    src_data = json.loads(src_row[0]);
-                    edges = src_data.get('edges', []);
+                    node_data = json.loads(node_row[0]);
+                    edges = node_data.get('edges', []);
                     if row_id not in edges {
                         edges.append(row_id);
-                        src_data['edges'] = edges;
+                        node_data['edges'] = edges;
                         conn.execute(
                             "UPDATE anchors SET data = ? WHERE id = ?",
-                            (json.dumps(src_data), source_id)
+                            (json.dumps(node_data), node_id)
                         );
                     }
                 } except Exception as relink_err {
                     logger.warning(
                         f"SqliteMemory: recover re-link of edge {row_id} "
-                        f"to source {source_id} failed: {relink_err}"
+                        f"to node {node_id} failed: {relink_err}"
                     );
                 }
             }

@@ -155,9 +155,24 @@ test "db recover-all rescues quarantined rows after CLI alias add" {
         legacy_count = conn.execute(
             "SELECT count(*) FROM anchors WHERE arch_type = 'LegacyPerson'"
         ).fetchone()[0];
+        # Verify re-link: root node's data.edges must be repopulated with
+        # the 2 recovered edge IDs (cascade stripped them during quarantine).
+        # Use json_each in SQL to count, matching the style of other DB checks.
+        root_edge_count = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM json_each(json_extract(
+                (SELECT data FROM anchors WHERE arch_type = 'Root'),
+                '$.edges'
+            ))
+            """
+        ).fetchone()[0];
         conn.close();
         assert person_count == 2 , f"expected 2 rows stamped as Person, got {person_count}";
         assert legacy_count == 0 , f"expected 0 stale LegacyPerson rows, got {legacy_count}";
+        assert root_edge_count == 2 , (
+            f"root data.edges must have 2 re-linked edges after recover-all, got: {root_edge_count}"
+        );
         # Final smoke: the dump walker now finds the recovered data.
         (rc, out, err) = _jac(tmpdir, ["enter", str(app), "dump"]);
         assert rc == 0 , f"dump failed: {err}";

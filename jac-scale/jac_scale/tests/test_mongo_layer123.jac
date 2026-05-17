@@ -318,3 +318,102 @@ test "MongoBackend cascade-quarantines edges when their target node is quarantin
         container.stop();
     }
 }
+
+
+test "MongoBackend recover re-links undirected edge to both endpoints" {
+    # Verifies the undirected-edge gap: when an EdgeAnchor with is_undirected=True
+    # is recovered from quarantine, the edge ID must be re-added to BOTH the
+    # source node's data.edges AND the target node's data.edges.
+    container = MongoDbContainer("mongo:latest");
+    container.start();
+    try {
+        uri = container.get_connection_url();
+        backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
+        client = MongoClient(uri);
+        col = client["jac_test_l123"]["_anchors"];
+        q_col = client["jac_test_l123"]["_anchors_quarantine"];
+
+        source_id = str(uuid4());
+        target_id = str(uuid4());
+        edge_id = str(uuid4());
+
+        # Two live nodes whose data.edges are empty (edge was stripped during cascade).
+        for (nid, nname) in [(source_id, 'src'), (target_id, 'tgt')] {
+            col.insert_one(
+                {
+                    '_id': nid,
+                    'type': 'NodeAnchor',
+                    'arch_module': '__main__',
+                    'arch_type': '_MongoLayer123Person',
+                    'fingerprint': None,
+                    'data': {
+                        '__type__': 'NodeAnchor',
+                        '__module__': 'jaclang.jac0core.archetype',
+                        'id': nid,
+                        'persistent': True,
+                        'archetype': {
+                            '__type__': '_MongoLayer123Person',
+                            '__module__': '__main__',
+                            'name': nname,
+                            'age': 0
+                        },
+                        'edges': []
+                    },
+                    'format_version': 1,
+                    'updated_at': '2026-05-17T00:00:00'
+                }
+            );
+        }
+
+        # Insert the undirected GenericEdge directly into quarantine,
+        # simulating a prior cascade-quarantine event.
+        q_col.insert_one(
+            {
+                '_id': edge_id,
+                'type': 'EdgeAnchor',
+                'arch_module': 'jaclang.jac0core.archetype',
+                'arch_type': 'GenericEdge',
+                'fingerprint': None,
+                'data': {
+                    '__type__': 'EdgeAnchor',
+                    '__module__': 'jaclang.jac0core.archetype',
+                    'id': edge_id,
+                    'persistent': True,
+                    'source': source_id,
+                    'target': target_id,
+                    'is_undirected': True,
+                    'archetype': {
+                        '__type__': 'GenericEdge',
+                        '__module__': 'jaclang.jac0core.archetype'
+                    }
+                },
+                'error': 'cascade quarantine: connected node <x> was quarantined',
+                'quarantined_at': '2026-05-17T00:00:00',
+                'from_format_version': 1
+            }
+        );
+
+        # Recover the edge — GenericEdge is always resolvable.
+        (ok, reason) = backend.recover_one(edge_id);
+        assert ok , f"recover_one must succeed for a GenericEdge, got: {reason}";
+
+        # Both endpoints must have the edge ID in their data.edges.
+        src_doc = col.find_one({'_id': source_id});
+        tgt_doc = col.find_one({'_id': target_id});
+        assert src_doc is not None , "source node must still be live";
+        assert tgt_doc is not None , "target node must still be live";
+        src_edges = src_doc.get('data', {}).get('edges', []);
+        tgt_edges = tgt_doc.get('data', {}).get('edges', []);
+        assert edge_id in src_edges , (
+            f"source data.edges must contain the recovered edge; got: {src_edges}"
+        );
+        assert edge_id in tgt_edges , (
+            f"target data.edges must contain the recovered undirected edge; got: {tgt_edges}"
+        );
+
+        client.close();
+        backend.close();
+    } finally {
+        container.stop();
+    }
+}

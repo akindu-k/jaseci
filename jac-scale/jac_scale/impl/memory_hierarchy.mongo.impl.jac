@@ -179,8 +179,8 @@ def _mongo_quarantine(
             if orphaned {
                 orphaned_ids = [e['_id'] for e in orphaned];
                 cascade_error = f"cascade quarantine: connected node {id_str} was quarantined";
-                for edge_doc in orphaned {
-                    q_col.update_one(
+                cascade_ops = [
+                    UpdateOne(
                         {'_id': edge_doc['_id']},
                         {
                             '$set': {
@@ -195,8 +195,9 @@ def _mongo_quarantine(
                             }
                         },
                         upsert=True
-                    );
-                }
+                    ) for edge_doc in orphaned
+                ];
+                q_col.bulk_write(cascade_ops, ordered=False);
                 backend.collection.delete_many({'_id': {'$in': orphaned_ids}});
                 backend.collection.update_many(
                     {'type': 'NodeAnchor', 'data.edges': {'$in': orphaned_ids}},
@@ -733,19 +734,30 @@ def _mongo_attempt_recover(backend: MongoBackend, doc: dict) -> tuple {
         return (False, f"write-back failed: {type(e).__name__}: {e}");
     }
     # Re-link: when recovering an EdgeAnchor that was cascade-quarantined, the
-    # source node's data.edges was stripped. Re-add the edge ID to that node.
-    if doc.get('type') == 'EdgeAnchor' {
-        source_id = data.get('source') if isinstance(data, dict) else None;
-        if source_id {
+    # connected node(s)' data.edges was stripped. Re-add the edge ID to the
+    # source (always) and also to the target for undirected edges.
+    if doc.get('type') == 'EdgeAnchor' and isinstance(data, dict) {
+        source_id = data.get('source');
+        target_id = data.get('target');
+        is_undirected = bool(data.get('is_undirected', False));
+        relink_ids: list = [
+            n
+            for n in [source_id]
+            if n
+        ];
+        if is_undirected and target_id and target_id != source_id {
+            relink_ids.append(target_id);
+        }
+        for node_id in relink_ids {
             try {
                 backend.collection.update_one(
-                    {'_id': source_id, 'type': 'NodeAnchor'},
+                    {'_id': node_id, 'type': 'NodeAnchor'},
                     {'$addToSet': {'data.edges': doc_id}}
                 );
             } except Exception as relink_err {
                 logger.warning(
                     f"MongoBackend: recover re-link of edge {doc_id} "
-                    f"to source {source_id} failed: {relink_err}"
+                    f"to node {node_id} failed: {relink_err}"
                 );
             }
         }
