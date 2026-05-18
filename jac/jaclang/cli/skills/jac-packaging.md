@@ -1,6 +1,6 @@
 ---
 name: jac-packaging
-description: Packaging a Jac project as a wheel and publishing it to PyPI - jac.toml metadata, the package-directory layout, the __init__.py bootstrap that makes .jac modules importable after install, console-script entry points, jac bundle, and twine upload. Load when turning a project into a pip-installable CLI tool or an importable library. Pair with `jac-scaffold` (creating the project) and `jac-impl-files` (source layout).
+description: Packaging a Jac project as a wheel and publishing it to PyPI - jac.toml metadata, the package-directory layout, console-script entry points, jac bundle, and twine upload. Load when turning a project into a pip-installable CLI tool or an importable library. Pair with `jac-scaffold` (creating the project) and `jac-impl-files` (source layout).
 ---
 
 `jac bundle` builds a standard PEP 427 wheel (`dist/<name>-<version>-py3-none-any.whl`) straight from `jac.toml` - no `setup.py`, no `pyproject.toml`. Upload it to PyPI with `twine`. This covers both shapes: a **CLI tool** (installs a terminal command) and an **importable library** (`pip install` then `import`).
@@ -14,20 +14,8 @@ greet/                  <- project root (holds jac.toml)
   jac.toml
   README.md
   greet/                <- package dir, name matches project.name
-    __init__.py         <- Python file, NOT .jac - see below
     cli.jac             <- your code, normal Jac
 ```
-
-## The `__init__.py` bootstrap - REQUIRED, easy to miss
-
-The package's `__init__` must be a **Python** file (`__init__.py`), not `__init__.jac`, containing exactly:
-
-```python
-"""mypkg - bootstraps the Jac meta-importer for .jac submodules."""
-import jaclang  # noqa: F401  (registers JacMetaImporter on sys.meta_path)
-```
-
-Why: after a normal `pip install`, a directory with no `__init__.py` is claimed by Python as a *namespace package* before the lazy Jac finder runs - so the `.jac` modules inside it never load and `import mypkg.cli` fails with `ModuleNotFoundError`. A real `__init__.py` makes it a regular package; `import jaclang` inside it registers the importer that loads every `.jac` submodule. Without this, the wheel installs but nothing inside it can be imported.
 
 ## jac.toml for distribution
 
@@ -80,7 +68,6 @@ jac install -e /path/to/lib # install a cloned library editable
 ## Pitfalls
 
 - **No package directory = empty/unimportable wheel.** The `default` scaffold's root-level `main.jac` is for `jac run`, not for distribution. Move code into a `<name>/` package dir.
-- **`__init__.jac` instead of `__init__.py` breaks import after install.** The bootstrap file must be Python. Submodules stay `.jac`.
 - **`requires_python` (underscore) is dropped.** Use `requires-python`.
 - **Entry-point path is the install-time module path**, e.g. `greet.cli:main` - it must match the package dir name, not the source folder you happened to develop in.
 - **First run of an installed Jac command prints `Jac setup complete! (N modules compiled and cached)`** while jaclang compiles its own cache. This is one-time and harmless; it does not repeat on later runs.
