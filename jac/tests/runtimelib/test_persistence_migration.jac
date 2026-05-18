@@ -352,25 +352,19 @@ test "in-place list mutation is detected dirty and flushed to DB" {
 }
 
 
-test "incompatible field type in stored data is quarantined, not silently loaded" {
-    # A field whose stored value cannot be coerced to the
-    # current type annotation must quarantine the anchor rather than load it with
-    # a corrupt value.
+test "unresolvable nested class in field is quarantined, not silently loaded as None" {
+    # When a field stores a nested object whose class no longer exists,
+    # _deserialize_value returns None. coerce(None, non-Optional-type) raises
+    # TypeError so the anchor is quarantined rather than loaded with a None field.
     #
-    # Scenario A — primitive stored where a custom object is now expected:
-    #   _TypedProfile.score is int, but we seed the DB with a nested dict
-    #   { __type__: RemovedClass } whose class is unresolvable → _deserialize_value
-    #   returns None → coerce(None, int) fails → TypeError → quarantine.
-    #
-    # Scenario B — wrong primitive type that coerce cannot widen:
-    #   _TypedProfile.score is int, but we seed the DB with a list [1,2,3]
-    #   → coerce(list, int) fails → TypeError → quarantine.
+    # Note: other coercion mismatches (e.g. set serialised as str due to JSON
+    # limitations) are NOT quarantined — they fall back with a warning. Only
+    # confirmed None-for-non-Optional is treated as hard corruption.
     with TemporaryDirectory() as raw_tmpdir {
         tmpdir = str(raw_tmpdir);
         db_path = os.path.join(tmpdir, "test.db");
         good_id = str(uuid.uuid4());
         bad_nested_id = str(uuid.uuid4());
-        bad_list_id = str(uuid.uuid4());
         import json;
         import sqlite3;
         mem = SqliteMemory(path=db_path);
@@ -405,28 +399,26 @@ test "incompatible field type in stored data is quarantined, not silently loaded
             );
         }
         _insert(mem.__conn__, good_id, 42);
+        # Nested dict with an unresolvable __type__ — _deserialize_value returns
+        # None, coerce(None, int) fails → TypeError → quarantine.
         _insert(
             mem.__conn__,
             bad_nested_id,
             {'__type__': 'RemovedClass', '__module__': 'app', 'x': 1}
         );
-        _insert(mem.__conn__, bad_list_id, [1, 2, 3]);
         mem.__conn__.commit();
         # Good row loads fine.
         good = mem.get(uuid.UUID(good_id));
         assert good is not None , "valid row must load";
         assert cast(_TypedProfile, good.archetype).score == 42;
-        # Bad rows must be quarantined, not returned.
-        assert mem.get(uuid.UUID(bad_nested_id)) is None , "nested-type mismatch must quarantine";
-        assert mem.get(uuid.UUID(bad_list_id)) is None , "list-for-int mismatch must quarantine";
+        # Bad row must be quarantined, not returned.
+        assert mem.get(uuid.UUID(bad_nested_id)) is None , "unresolvable nested class must quarantine";
         conn = sqlite3.connect(db_path);
         q_ids = {r[0] for r in conn.execute("SELECT id FROM anchors_quarantine")};
         live_ids = {r[0] for r in conn.execute("SELECT id FROM anchors")};
         conn.close();
-        assert bad_nested_id in q_ids , "nested mismatch must be in quarantine table";
-        assert bad_list_id in q_ids , "list mismatch must be in quarantine table";
+        assert bad_nested_id in q_ids , "bad row must be in quarantine table";
         assert bad_nested_id not in live_ids , "bad row must leave anchors table";
-        assert bad_list_id not in live_ids , "bad row must leave anchors table";
         assert good_id in live_ids , "good row must remain live";
         mem.close();
     }
