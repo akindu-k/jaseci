@@ -26,6 +26,11 @@ obj _DemoArchV1(Root) {
         age: int = 0;
 }
 
+# Used by the type-mismatch quarantine test: score must be an int.
+obj _TypedProfile(Root) {
+    has score: int = 0;
+}
+
 obj _SyncProfile(Root) {
     has name: str = "",
         count: int = 0,
@@ -343,5 +348,86 @@ test "in-place list mutation is detected dirty and flushed to DB" {
             f"in-place list mutation not persisted: got {final_tags}"
         );
         mem3.close();
+    }
+}
+
+
+test "incompatible field type in stored data is quarantined, not silently loaded" {
+    # A field whose stored value cannot be coerced to the
+    # current type annotation must quarantine the anchor rather than load it with
+    # a corrupt value.
+    #
+    # Scenario A — primitive stored where a custom object is now expected:
+    #   _TypedProfile.score is int, but we seed the DB with a nested dict
+    #   { __type__: RemovedClass } whose class is unresolvable → _deserialize_value
+    #   returns None → coerce(None, int) fails → TypeError → quarantine.
+    #
+    # Scenario B — wrong primitive type that coerce cannot widen:
+    #   _TypedProfile.score is int, but we seed the DB with a list [1,2,3]
+    #   → coerce(list, int) fails → TypeError → quarantine.
+    with TemporaryDirectory() as raw_tmpdir {
+        tmpdir = str(raw_tmpdir);
+        db_path = os.path.join(tmpdir, "test.db");
+        good_id = str(uuid.uuid4());
+        bad_nested_id = str(uuid.uuid4());
+        bad_list_id = str(uuid.uuid4());
+        import json;
+        import sqlite3;
+        mem = SqliteMemory(path=db_path);
+        mem._ensure_connection();
+        def _insert(conn: sqlite3.Connection, row_id: str, score_val: object) {
+            conn.execute(
+                """
+                INSERT INTO anchors
+                    (id, type, arch_module, arch_type, fingerprint, data,
+                     format_version, updated_at)
+                VALUES (?, 'NodeAnchor', ?, '_TypedProfile', NULL, ?, 1,
+                        '2026-05-18T00:00:00')
+                """,
+                (
+                    row_id,
+                    _TypedProfile.__module__,
+                    json.dumps(
+                        {
+                            '__type__': 'NodeAnchor',
+                            '__module__': 'jaclang.jac0core.archetype',
+                            'id': row_id,
+                            'persistent': True,
+                            'archetype': {
+                                '__type__': '_TypedProfile',
+                                '__module__': _TypedProfile.__module__,
+                                'score': score_val
+                            },
+                            'edges': []
+                        }
+                    )
+                )
+            );
+        }
+        _insert(mem.__conn__, good_id, 42);
+        _insert(
+            mem.__conn__,
+            bad_nested_id,
+            {'__type__': 'RemovedClass', '__module__': 'app', 'x': 1}
+        );
+        _insert(mem.__conn__, bad_list_id, [1, 2, 3]);
+        mem.__conn__.commit();
+        # Good row loads fine.
+        good = mem.get(uuid.UUID(good_id));
+        assert good is not None , "valid row must load";
+        assert cast(_TypedProfile, good.archetype).score == 42;
+        # Bad rows must be quarantined, not returned.
+        assert mem.get(uuid.UUID(bad_nested_id)) is None , "nested-type mismatch must quarantine";
+        assert mem.get(uuid.UUID(bad_list_id)) is None , "list-for-int mismatch must quarantine";
+        conn = sqlite3.connect(db_path);
+        q_ids = {r[0] for r in conn.execute("SELECT id FROM anchors_quarantine")};
+        live_ids = {r[0] for r in conn.execute("SELECT id FROM anchors")};
+        conn.close();
+        assert bad_nested_id in q_ids , "nested mismatch must be in quarantine table";
+        assert bad_list_id in q_ids , "list mismatch must be in quarantine table";
+        assert bad_nested_id not in live_ids , "bad row must leave anchors table";
+        assert bad_list_id not in live_ids , "bad row must leave anchors table";
+        assert good_id in live_ids , "good row must remain live";
+        mem.close();
     }
 }

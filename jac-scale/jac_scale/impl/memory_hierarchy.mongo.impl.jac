@@ -168,7 +168,7 @@ def _mongo_quarantine(
         backend.collection.delete_one({'_id': id_str});
         # Cascade: when a NodeAnchor is quarantined, orphan its edges too.
         if anchor_type == 'NodeAnchor' {
-            orphaned = list(
+            orphaned_edges = list(
                 backend.collection.find(
                     {
                         'type': 'EdgeAnchor',
@@ -176,8 +176,8 @@ def _mongo_quarantine(
                     }
                 )
             );
-            if orphaned {
-                orphaned_ids = [e['_id'] for e in orphaned];
+            if orphaned_edges {
+                orphan_edge_ids = [e['_id'] for e in orphaned_edges];
                 cascade_error = f"cascade quarantine: connected node {id_str} was quarantined";
                 cascade_ops = [
                     UpdateOne(
@@ -195,16 +195,16 @@ def _mongo_quarantine(
                             }
                         },
                         upsert=True
-                    ) for edge_doc in orphaned
+                    ) for edge_doc in orphaned_edges
                 ];
                 q_col.bulk_write(cascade_ops, ordered=False);
-                backend.collection.delete_many({'_id': {'$in': orphaned_ids}});
+                backend.collection.delete_many({'_id': {'$in': orphan_edge_ids}});
                 backend.collection.update_many(
-                    {'type': 'NodeAnchor', 'data.edges': {'$in': orphaned_ids}},
-                    {'$pullAll': {'data.edges': orphaned_ids}}
+                    {'type': 'NodeAnchor', 'data.edges': {'$in': orphan_edge_ids}},
+                    {'$pullAll': {'data.edges': orphan_edge_ids}}
                 );
                 logger.info(
-                    f"MongoBackend: cascade-quarantined {len(orphaned_ids)} edge(s) "
+                    f"MongoBackend: cascade-quarantined {len(orphan_edge_ids)} edge(s) "
                     f"connected to quarantined node {id_str}."
                 );
             }

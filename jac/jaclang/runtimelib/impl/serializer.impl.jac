@@ -675,14 +675,13 @@ impl Serializer._deserialize_archetype(
             }
             target = field_types[k];
             (coerced, ok) = Serializer.coerce(deser_v, target);
-            setattr(arch, k, coerced);
             if not ok {
-                logger.debug(
-                    f"Serializer: coercion fallback on {module_name}."
-                    f"{type_name}.{k}: stored={type(deser_v).__name__}, "
-                    f"target={target}; stored value kept as-is."
+                raise TypeError(
+                    f"{module_name}.{type_name}.{k}: cannot coerce stored "
+                    f"{type(deser_v).__name__} to expected {target}"
                 );
             }
+            setattr(arch, k, coerced);
         }
         if dropped {
             logger.debug(
