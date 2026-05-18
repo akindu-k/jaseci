@@ -225,15 +225,15 @@ def _quarantine(
                 """,
                 (id, id)
             );
-            orphaned = cursor.fetchall();
-            if orphaned {
+            orphaned_edges = cursor.fetchall();
+            if orphaned_edges {
                 cascade_error = f"cascade quarantine: connected node {id} was quarantined";
-                orphaned_ids: list[str] = [];
+                orphan_edge_ids: list[str] = [];
                 try {
                     conn.execute("SAVEPOINT cascade_q");
-                    for row in orphaned {
+                    for row in orphaned_edges {
                         (e_id, e_type, e_mod, e_atype, e_fp, e_data, e_fv) = row;
-                        orphaned_ids.append(e_id);
+                        orphan_edge_ids.append(e_id);
                         conn.execute(
                             """
                             INSERT OR REPLACE INTO anchors_quarantine
@@ -255,10 +255,10 @@ def _quarantine(
                         );
                     }
                     # Batched delete — one round-trip instead of N.
-                    placeholders = ','.join('?' * len(orphaned_ids));
+                    placeholders = ','.join('?' * len(orphan_edge_ids));
                     conn.execute(
                         f"DELETE FROM anchors WHERE id IN ({placeholders})",
-                        orphaned_ids
+                        orphan_edge_ids
                     );
                     # Strip the orphaned edge IDs from live NodeAnchors' data.edges.
                     live_nodes = conn.execute(
@@ -270,17 +270,17 @@ def _quarantine(
                               WHERE je.value IN ({placeholders})
                           )
                         """,
-                        orphaned_ids
+                        orphan_edge_ids
                     ).fetchall();
                     for (node_id, node_data_str) in live_nodes {
                         try {
                             node_data = json.loads(node_data_str);
                             old_edges = node_data.get('edges', []);
-                            orphaned_set = set(orphaned_ids);
+                            orphan_edge_id_set = set(orphan_edge_ids);
                             node_data['edges'] = [
                                 e
                                 for e in old_edges
-                                if e not in orphaned_set
+                                if e not in orphan_edge_id_set
                             ];
                             conn.execute(
                                 "UPDATE anchors SET data = ? WHERE id = ?",
@@ -295,7 +295,7 @@ def _quarantine(
                     conn.execute("RELEASE cascade_q");
                     logger.info(
                         f"SqliteMemory: cascade-quarantined {len(
-                            orphaned_ids
+                            orphan_edge_ids
                         )} edge(s) "
                         f"connected to quarantined node {id}."
                     );
