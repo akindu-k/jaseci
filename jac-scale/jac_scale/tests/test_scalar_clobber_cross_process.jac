@@ -138,6 +138,27 @@ def stop_pods(pods: list) {
     }
 }
 
+"""Poll ReadCounter until both fields match expected values or timeout elapses.
+
+Returns the last observed counter dict — callers assert on the result so
+the failure message always shows the actual vs expected values.
+"""
+def poll_counter(
+    base_url: str, token: str, expected_a: int, expected_b: int, timeout: float = 5.0
+) -> dict[str, Any] {
+    deadline = time.time() + timeout;
+    result: dict[str, Any] = {};
+    while time.time() < deadline {
+        raw: Any = extract(call_walker(base_url, "ReadCounter", token));
+        result = cast(dict[str, Any], cast(list, raw["reports"])[0]);
+        if result.get("a") == expected_a and result.get("b") == expected_b {
+            return result;
+        }
+        time.sleep(0.1);
+    }
+    return result;
+}
+
 
 test "_put_node_atomic: dirty-only writes do not clobber concurrent scalar changes from other pods (issue #5997)" {
     # Sequence:
@@ -187,12 +208,8 @@ test "_put_node_atomic: dirty-only writes do not clobber concurrent scalar chang
             url2, "SetBAndAddEdge", token2, {"value": 99, "item_name": "probe"}
         );
 
-        time.sleep(0.3);
-
-        # t=4: Read final state from pod1 (its L1 may be stale — pod1 re-fetches from Mongo).
-        final = cast(dict, extract(call_walker(url1, "ReadCounter", token1)))["reports"][
-            0
-        ];
+        # t=4: Poll pod1 until both writes are visible (up to 5 s) or return last seen state.
+        final = poll_counter(url1, token1, expected_a=42, expected_b=99);
 
         assert final["a"] == 42 , (
             f"_put_node_atomic clobbered pod1's write: a={final['a']} (expected 42). "
@@ -261,12 +278,8 @@ test "sync dispatch: scalar-only commit routes to put_partial, not _put_node_ato
         #       Without fix: _put_node_atomic called with stale snapshot → a reset to 0.
         call_walker(url2, "SetB", token2, {"value": 99});
 
-        time.sleep(0.3);
-
-        # t=4: Read final state.
-        final = cast(dict, extract(call_walker(url1, "ReadCounter", token1)))["reports"][
-            0
-        ];
+        # t=4: Poll pod1 until both writes are visible (up to 5 s) or return last seen state.
+        final = poll_counter(url1, token1, expected_a=42, expected_b=99);
 
         assert final["a"] == 42 , (
             f"Dispatch guard is broken: scalar-only commit on pod2 clobbered pod1's write. "
