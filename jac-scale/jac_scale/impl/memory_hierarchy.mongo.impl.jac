@@ -503,15 +503,15 @@ impl MongoBackend.sync -> None {
             continue;
         }
         try {
-            # NodeAnchors with a load snapshot: atomic edge-merge pipeline
-            # preserves edge changes from sibling walkers.
             if isinstance(anchor, NodeAnchor) {
                 delta = anchor.edge_delta();
                 if delta is not None {
                     added = [str(eid) for eid in delta[0]];
                     removed = [str(eid) for eid in delta[1]];
-                    self._put_node_atomic(anchor, added, removed);
-                    continue;
+                    if added or removed {
+                        self._put_node_atomic(anchor, added, removed);
+                        continue;
+                    }
                 }
             }
             # Union __setattr__-tracked fields (direct assignments) with
