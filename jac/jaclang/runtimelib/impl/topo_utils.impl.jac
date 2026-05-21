@@ -67,18 +67,10 @@ impl _get_type_mro(`obj: object) -> list[str] {
     return chain;
 }
 
-"""Called after an edge is created between source and target."""
-impl on_edge_created(source: any, target: any, `edge: any) -> None {
-    if not _is_enabled() {
-        return;
-    }
-    if not source.persistent {
-        return;
-    }
-    root_anchor = _get_root_anchor(source);
-    if root_anchor is None {
-        return;
-    }
+"""Add edge + both endpoint nodes to one root anchor's index. The
+`owner_root` marker on each non-self node lets `plan_query` detect when
+a chain hop has crossed a root boundary and bail to the global walk."""
+impl _index_edge_into(root_anchor: any, source: any, target: any, `edge: any) -> None {
     import from jaclang.runtimelib.topology_index { TopologyIndex }
     idx = root_anchor.get_topology_index();
     if not isinstance(idx, TopologyIndex) {
@@ -112,18 +104,11 @@ impl on_edge_created(source: any, target: any, `edge: any) -> None {
     root_anchor.set_topology_index(idx);
 }
 
-"""Called when an edge is destroyed."""
-impl on_edge_destroyed(source: any, target: any, `edge: any) -> None {
-    if not _is_enabled() {
-        return;
-    }
-    if not source.persistent {
-        return;
-    }
-    root_anchor = _get_root_anchor(source);
-    if root_anchor is None {
-        return;
-    }
+"""Drop edge from one root anchor's index. No-op if the index doesn't
+exist (mirrors the symmetric guard in `_index_edge_into`)."""
+impl _unindex_edge_from(
+    root_anchor: any, source: any, target: any, `edge: any
+) -> None {
     import from jaclang.runtimelib.topology_index { TopologyIndex }
     idx = root_anchor.get_topology_index();
     if not isinstance(idx, TopologyIndex) {
@@ -134,6 +119,51 @@ impl on_edge_destroyed(source: any, target: any, `edge: any) -> None {
         idx.remove_edge(target.id, source.id, _type_name(`edge.archetype));
     }
     root_anchor.set_topology_index(idx);
+}
+
+"""Called after an edge is created between source and target. When the
+edge crosses roots, mirror the update into the target's root index so
+reverse queries from the target side can still find it."""
+impl on_edge_created(source: any, target: any, `edge: any) -> None {
+    if not _is_enabled() {
+        return;
+    }
+    if not source.persistent {
+        return;
+    }
+    source_root = _get_root_anchor(source);
+    if source_root is None {
+        return;
+    }
+    _index_edge_into(source_root, source, target, `edge);
+    if target.root and target.root != source_root.id {
+        target_root = _get_root_anchor(target);
+        if target_root is not None {
+            _index_edge_into(target_root, source, target, `edge);
+        }
+    }
+}
+
+"""Called when an edge is destroyed. Cleans up both root indexes that
+`on_edge_created` may have touched."""
+impl on_edge_destroyed(source: any, target: any, `edge: any) -> None {
+    if not _is_enabled() {
+        return;
+    }
+    if not source.persistent {
+        return;
+    }
+    source_root = _get_root_anchor(source);
+    if source_root is None {
+        return;
+    }
+    _unindex_edge_from(source_root, source, target, `edge);
+    if target.root and target.root != source_root.id {
+        target_root = _get_root_anchor(target);
+        if target_root is not None {
+            _unindex_edge_from(target_root, source, target, `edge);
+        }
+    }
 }
 
 """Called when a node is saved/persisted. Ensures it's in the root's index."""
@@ -305,7 +335,10 @@ impl plan_query(path: any) -> (set[UUID] | None) {
         return None;
     }
     origin_ids = {nd.__jac__.id for nd in path.origin};
-    return idx.resolve_chain(origin_ids, chain);
+    # Bail (None) if any intermediate hop lands on a foreign-owned node;
+    # those nodes' outgoing edges live in the owner's index, not this one,
+    # so the global edge walk has to take over from there.
+    return idx.resolve_chain(origin_ids, chain, bail_on_intermediate_foreign=True);
 }
 
 """Load nodes by UUID set, preserving edge-list order from origin nodes.
@@ -439,9 +472,15 @@ impl plan_query_ordered(path: any, slc: slice) -> (list[UUID] | None) {
     origin_ids = {nd.__jac__.id for nd in path.origin};
     # For multi-hop: resolve the non-final prefix via the set-based walker —
     # intermediate-hop order isn't observable to the slice. The resulting set
-    # becomes the origin set for the ordered final hop.
+    # becomes the origin set for the ordered final hop. Bail (None) if any
+    # prefix hop crosses into a foreign-owned subgraph.
     if len(chain) > 1 {
-        prev_set = idx.resolve_chain(origin_ids, chain[:-1]);
+        prev_set = idx.resolve_chain(
+            origin_ids, chain[:-1], bail_on_intermediate_foreign=True
+        );
+        if prev_set is None {
+            return None;
+        }
         if not prev_set {
             return [];
         }
