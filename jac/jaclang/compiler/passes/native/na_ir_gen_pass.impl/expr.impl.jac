@@ -88,6 +88,12 @@ impl NaIRGenPass._codegen_expr(nd: (uni.UniNode | None)) -> (ir.Value | None) {
         # Handle parenthesized expressions: (expr) → AtomUnit
     } elif isinstance(nd, uni.AtomUnit) {
         _result = self._codegen_expr(nd.value);
+        # Cast (`value as T`) is type-erased: it evaluates to the inner
+        # value unchanged and only refines the static type. The narrowed
+        # type lets `.attr` on a nullable archetype compile; a None value
+        # then traps at the native deref just like any AttributeError.
+    } elif isinstance(nd, uni.CastExpr) {
+        _result = self._codegen_expr(nd.value);
         # Lambda expressions: emit an anonymous LLVM function and return
         # a function pointer to it.
     } elif isinstance(nd, uni.LambdaExpr) {
@@ -166,8 +172,11 @@ impl NaIRGenPass._codegen_lambda(nd: uni.LambdaExpr) -> (ir.Value | None) {
     if sig is not None and sig.params {
         for p in sig.params {
             p_name = p.name.value if p?.name and p.name else f"arg{len(param_names)}";
-            p_type = self._resolve_jac_type(p.type_tag)
-                if p?.type_tag and p.type_tag
+            # Pass the annotation Expr inside the SubTag (not the SubTag
+            # wrapper); SubTag has no `.type`, so the unified-path lowering
+            # in _resolve_jac_type only kicks in when given .tag.
+            p_type = self._resolve_jac_type(p.type_tag.tag)
+                if p?.type_tag and p.type_tag and p.type_tag?.tag
                 else ir.IntType(64);
             param_types.append(p_type);
             param_names.append(p_name);

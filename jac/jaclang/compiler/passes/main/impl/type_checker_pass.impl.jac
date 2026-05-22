@@ -1329,6 +1329,16 @@ This validates all TypeVar usages including nested ones like `list[T]`.
 impl TypeCheckPass.exit_sub_tag(self: TypeCheckPass, nd: uni.SubTag[uni.T]) -> None {
     if isinstance(nd.tag, uni.Expr) {
         self.evaluator.validate_typevar_in_type_expr(nd.tag);
+        # Evaluate the annotation so the tag Expr carries a resolved `.type`.
+        # Symbol-type resolution only annotates the tag for the symbol kinds
+        # whose path happens to evaluate it; doing it here covers every
+        # annotation uniformly. Codegen backends (notably NaIRGenPass) lower
+        # Expr.type directly instead of re-deriving structure from the
+        # annotation AST. get_type_of_expression is memoized, so this is a
+        # no-op when the tag was already evaluated.
+        if nd.tag?.type is None {
+            self.evaluator.get_type_of_expression(nd.tag);
+        }
     }
 }
 

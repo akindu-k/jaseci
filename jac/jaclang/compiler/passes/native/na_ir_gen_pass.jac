@@ -235,9 +235,11 @@ obj NaIRGenPass(ModuleCodegenPass) {
     def _get_snprintf_fmt(fmt: str) -> ir.GlobalVariable;
     # Helper methods
     def _resolve_jac_type(type_expr: (uni.UniNode | None)) -> ir.Type;
-    def _llvm_to_spec(t: any) -> str;
-    def _resolve_callable_type(slice: uni.IndexSlice) -> ir.Type;
-    def _resolve_func_ptr_type(sig: uni.FuncSignature) -> ir.Type;
+    # Unified TypeBase -> LLVM lowering (consumes the central type checker's
+    # result; returns None when a type category is not yet handled).
+    def _lower_type(t: any) -> (ir.Type | None);
+    def _lower_class_type(t: any) -> (ir.Type | None);
+    def _lower_function_type(t: any) -> ir.Type;
     def _resolve_type_str(type_name: str) -> ir.Type;
     def _get_name(nd: (uni.UniNode | None)) -> (str | None);
     def _to_bool(val: ir.Value) -> ir.Value;
