@@ -508,6 +508,7 @@ impl MongoBackend.close -> None {
     # Don't close the shared process-level client; just drop local reference.
     self.client = None;
     self._mem_ref = None;
+    self._l2_ref = None;
 }
 
 """Check if an anchor exists in MongoDB."""
