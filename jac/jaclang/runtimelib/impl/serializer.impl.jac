@@ -682,11 +682,27 @@ impl Serializer._deserialize_archetype(
                     (origin is Union or origin is UnionType) and NoneType in args
                 );
                 if deser_v is None and not is_optional {
-                    raise TypeError(
-                        f"{module_name}.{type_name}.{k}: stored value is None "
-                        f"but field type {target} does not allow None — "
-                        "nested class likely removed"
+                    # Stored None on a non-Optional field. Recover using the
+                    # field's declared default rather than failing the entire
+                    # anchor. Common case: has things: list[X] = [] stored as null
+                    # after a schema migration or a past write bug.
+                    recovered: object = None;
+                    for fd in fields(cls) {
+                        if fd.name == k {
+                            if fd.default_factory is not MISSING {
+                                recovered = fd.default_factory();
+                            } elif fd.default is not MISSING {
+                                recovered = fd.default;
+                            }
+                            break;
+                        }
+                    }
+                    logger.warning(
+                        f"Serializer: {module_name}.{type_name}.{k}: stored None "
+                        f"on non-Optional field {target}; restored class default."
                     );
+                    setattr(arch, k, recovered);
+                    continue;
                 }
                 logger.warning(
                     f"Serializer: coercion fallback on {module_name}."
