@@ -373,8 +373,8 @@ impl MongoBackend.get(id: UUID) -> (Anchor | None) {
         #    deserialization failed" (fix: widen field type or rewrite stored value)
         cls_resolved = (
             Serializer._get_class(arch_module, arch_type)
-            if (arch_module and arch_type)
-            else None
+                if (arch_module and arch_type)
+                else None
         );
         if cls_resolved is None {
             reason = f"class {arch_module}.{arch_type} unresolvable";
