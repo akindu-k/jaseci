@@ -652,8 +652,7 @@ test "_put_node_atomic written document round-trips correctly after fix (issue #
         anchor.persistent = True;
 
         # Step 1: initial full upsert (sets data.__type__, arch_module, etc.).
-        # Call via getattr to avoid the checker rejecting NodeAnchor→Anchor widening.
-        getattr(backend, '_write_to_db')(anchor);
+        backend._write_to_db(anchor);
 
         # Step 2: simulate a subsequent edge addition via the atomic path.
         fake_edge_id = str(uuid4());
