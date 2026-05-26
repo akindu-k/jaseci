@@ -693,11 +693,6 @@ test "_put_node_atomic written document round-trips correctly after fix (issue #
 
 
 test "cascade quarantine invalidates Redis L2 cache for connected live nodes" {
-    # Regression test for issue #6184.
-    # When a NodeAnchor is quarantined and its connected edges are cascade-quarantined,
-    # the Redis entries for both the orphaned edges AND the live nodes that referenced
-    # them must be invalidated so the next cache-first read reflects the post-quarantine
-    # state rather than serving a stale entry with dangling edge IDs.
     mongo_container = MongoDbContainer("mongo:latest");
     redis_container = RedisContainer("redis:latest");
     mongo_container.start();
@@ -719,7 +714,6 @@ test "cascade quarantine invalidates Redis L2 cache for connected live nodes" {
 
         col = mem.l3.collection;
 
-        # --- Setup: insert source -> edge -> bar into Mongo and warm Redis for source ---
         source_id = str(uuid4());
         edge_id = str(uuid4());
         bar_id = str(uuid4());
@@ -793,14 +787,12 @@ test "cascade quarantine invalidates Redis L2 cache for connected live nodes" {
             }
         );
 
-        # Warm Redis for source: L3 -> L2 promotion via tiered get.
         source_anchor = mem.get(UUID(source_id));
         assert source_anchor is not None , "source must load from Mongo";
         assert mem.l2.redis_client.get(f"anchor:{source_id}") is not None , (
             "source must be cached in Redis after tiered get"
         );
 
-        # --- Trigger: corrupt bar so its deserialization fails -> quarantine + cascade ---
         mem.__mem__.clear();
         col.update_one(
             {'_id': bar_id},
@@ -816,7 +808,6 @@ test "cascade quarantine invalidates Redis L2 cache for connected live nodes" {
         bar_result = mem.get(UUID(bar_id));
         assert bar_result is None , "corrupt bar must not rehydrate";
 
-        # --- Verify Mongo: source.data.edges must be empty after cascade ---
         source_doc = col.find_one({'_id': source_id});
         assert source_doc is not None , "source node must still be live in Mongo";
         live_edges = source_doc.get('data', {}).get('edges', []);
@@ -824,14 +815,12 @@ test "cascade quarantine invalidates Redis L2 cache for connected live nodes" {
             f"orphaned edge must be stripped from source.data.edges in Mongo; got: {live_edges}"
         );
 
-        # --- Verify Redis: source entry must be invalidated (key deleted) ---
         source_in_redis = mem.l2.redis_client.get(f"anchor:{source_id}");
         assert source_in_redis is None , (
             f"source Redis entry must be invalidated after cascade quarantine; "
             f"got: {json.loads(source_in_redis) if source_in_redis else None}"
         );
 
-        # --- Verify end-to-end: cache-first tiered read must return empty edges ---
         mem.__mem__.clear();
         source_reloaded = mem.get(UUID(source_id));
         assert source_reloaded is not None , "source must still be loadable after cascade";
