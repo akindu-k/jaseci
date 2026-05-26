@@ -585,6 +585,9 @@ test "non-Optional field with no default stores null quarantines only that ancho
         assert neighbour_id in live_ids , "neighbour must remain live";
         quarantine_reason = q_rows[bad_id];
         assert quarantine_reason is not None , "quarantine row must carry a reason string";
+        assert "archetype field deserialization failed" in quarantine_reason , (
+            "reason must identify field failure, not class-unresolvable"
+        );
         mem.close();
     }
 }
