@@ -96,14 +96,14 @@ def _reset_redis {
 }
 
 
-test "MongoBackend stamps fingerprint + archetype identity on put" {
+test "MongoBackend stamps fingerprint + archetype identity on write" {
     _reset_mongo();
     (client, uri) = _get_mongo();
     backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
     p = _MongoLayer123Person(name="alice", age=30);
     anchor = p.__jac__;
     anchor.persistent = True;
-    backend.put(anchor);
+    backend._write_to_db(anchor);
     doc = client["jac_test_l123"]["_anchors"].find_one({'_id': str(anchor.id)});
     assert doc is not None;
     assert doc.get('arch_module');
