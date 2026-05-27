@@ -43,13 +43,13 @@ obj _MongoRequiredField(Root) {
 """Lazily start a shared MongoDB container; return (MongoClient, uri)."""
 def _get_mongo -> tuple {
     if "mongo_client" not in _shared {
-        c = MongoDbContainer("mongo:latest");
-        c.start();
-        uri = c.get_connection_url();
-        _shared["mongo_container"] = c;
+        container = MongoDbContainer("mongo:latest");
+        container.start();
+        uri = container.get_connection_url();
+        _shared["mongo_container"] = container;
         _shared["mongo_uri"] = uri;
         _shared["mongo_client"] = MongoClient(uri);
-        atexit.register(c.stop);
+        atexit.register(container.stop);
     }
     return (_shared["mongo_client"], _shared["mongo_uri"]);
 }
@@ -72,17 +72,17 @@ def _reset_mongo -> None {
 """Lazily start a shared Redis container; return (redis.Redis, url)."""
 def _get_redis -> tuple {
     if "redis_client" not in _shared {
-        c = RedisContainer("redis:latest", port=6379);
-        c.start();
-        host = c.get_container_host_ip();
-        exposed_port = c.get_exposed_port(6379);
-        url = f"redis://{host}:{exposed_port}/0";
-        _shared["redis_container"] = c;
-        _shared["redis_url"] = url;
+        container = RedisContainer("redis:latest", port=6379);
+        container.start();
+        host = container.get_container_host_ip();
+        exposed_port = container.get_exposed_port(6379);
+        redis_url = f"redis://{host}:{exposed_port}/0";
+        _shared["redis_container"] = container;
+        _shared["redis_url"] = redis_url;
         _shared["redis_client"] = redis.Redis(
             host=host, port=int(exposed_port), decode_responses=False
         );
-        atexit.register(c.stop);
+        atexit.register(container.stop);
     }
     return (_shared["redis_client"], _shared["redis_url"]);
 }
@@ -100,8 +100,8 @@ test "MongoBackend stamps fingerprint + archetype identity on write" {
     _reset_mongo();
     (client, uri) = _get_mongo();
     backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
-    p = _MongoLayer123Person(name="alice", age=30);
-    anchor = p.__jac__;
+    person_node = _MongoLayer123Person(name="alice", age=30);
+    anchor = person_node.__jac__;
     anchor.persistent = True;
     backend._write_to_db(anchor);
     doc = client["jac_test_l123"]["_anchors"].find_one({'_id': str(anchor.id)});
@@ -141,13 +141,13 @@ test "MongoBackend quarantines un-deserializable documents instead of dropping" 
     );
     loaded = backend.get(UUID(bad_id));
     assert loaded is None , "unresolvable class must not rehydrate";
-    q = client["jac_test_l123"]["_anchors_quarantine"];
-    quarantined_doc = q.find_one({'_id': bad_id});
+    quarantine_col = client["jac_test_l123"]["_anchors_quarantine"];
+    quarantined_doc = quarantine_col.find_one({'_id': bad_id});
     assert quarantined_doc is not None;
     assert quarantined_doc.get('arch_type') == 'Missing';
     assert quarantined_doc.get('error');
-    main = client["jac_test_l123"]["_anchors"];
-    assert main.find_one({'_id': bad_id}) is None;
+    anchors_col = client["jac_test_l123"]["_anchors"];
+    assert anchors_col.find_one({'_id': bad_id}) is None;
     backend.close();
 }
 
@@ -188,8 +188,8 @@ test "MongoBackend recovers null field to class default and loads anchor normall
     assert arch.name == "" , (
         f"null field must be restored to class default ''; got '{arch.name}'"
     );
-    q = client["jac_test_l123"]["_anchors_quarantine"];
-    assert q.find_one({'_id': bad_id}) is None , "recovered anchor must NOT be quarantined";
+    quarantine_col = client["jac_test_l123"]["_anchors_quarantine"];
+    assert quarantine_col.find_one({'_id': bad_id}) is None , "recovered anchor must NOT be quarantined";
     backend.close();
 }
 
@@ -225,8 +225,8 @@ test "MongoBackend quarantine reason identifies field failure not class unresolv
     );
     loaded = backend.get(UUID(bad_id));
     assert loaded is None , "anchor with no-default null field must be quarantined";
-    q = client["jac_test_l123"]["_anchors_quarantine"];
-    q_doc = cast(dict, q.find_one({'_id': bad_id}));
+    quarantine_col = client["jac_test_l123"]["_anchors_quarantine"];
+    q_doc = cast(dict, quarantine_col.find_one({'_id': bad_id}));
     assert q_doc is not None , "anchor must be in quarantine";
     reason = cast(str, q_doc.get('error', ''));
     assert "archetype field deserialization failed" in reason , (
@@ -298,7 +298,7 @@ test "MongoBackend inspect_summary shape matches SqliteMemory's" {
     _reset_mongo();
     (_, uri) = _get_mongo();
     backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
-    s = backend.inspect_summary();
+    summary = backend.inspect_summary();
     for key in [
         'format_version',
         'anchors_total',
@@ -308,7 +308,7 @@ test "MongoBackend inspect_summary shape matches SqliteMemory's" {
         'aliases_total',
         'location'
     ] {
-        assert key in s , f"missing key in summary: {key}";
+        assert key in summary , f"missing key in summary: {key}";
     }
     backend.close();
 }
@@ -321,14 +321,14 @@ test "MongoBackend cascade-quarantines edges when their target node is quarantin
     _reset_mongo();
     (client, uri) = _get_mongo();
     backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
-    col = client["jac_test_l123"]["_anchors"];
-    q_col = client["jac_test_l123"]["_anchors_quarantine"];
+    anchors_col = client["jac_test_l123"]["_anchors"];
+    quarantine_col = client["jac_test_l123"]["_anchors_quarantine"];
 
     source_id = str(uuid4());
     edge_id = str(uuid4());
     foo_id = str(uuid4());
 
-    col.insert_one(
+    anchors_col.insert_one(
         {
             '_id': source_id,
             'type': 'NodeAnchor',
@@ -353,7 +353,7 @@ test "MongoBackend cascade-quarantines edges when their target node is quarantin
         }
     );
 
-    col.insert_one(
+    anchors_col.insert_one(
         {
             '_id': edge_id,
             'type': 'EdgeAnchor',
@@ -378,7 +378,7 @@ test "MongoBackend cascade-quarantines edges when their target node is quarantin
         }
     );
 
-    col.insert_one(
+    anchors_col.insert_one(
         {
             '_id': foo_id,
             'type': 'NodeAnchor',
@@ -401,17 +401,17 @@ test "MongoBackend cascade-quarantines edges when their target node is quarantin
     loaded = backend.get(UUID(foo_id));
     assert loaded is None , "unresolvable Foo must not rehydrate";
 
-    assert col.find_one({'_id': foo_id}) is None , "Foo must be removed from _anchors";
-    assert q_col.find_one({'_id': foo_id}) is not None , "Foo must be in quarantine";
+    assert anchors_col.find_one({'_id': foo_id}) is None , "Foo must be removed from _anchors";
+    assert quarantine_col.find_one({'_id': foo_id}) is not None , "Foo must be in quarantine";
 
-    assert col.find_one({'_id': edge_id}) is None , "orphaned edge must be removed from _anchors";
-    q_edge = q_col.find_one({'_id': edge_id});
+    assert anchors_col.find_one({'_id': edge_id}) is None , "orphaned edge must be removed from _anchors";
+    q_edge = quarantine_col.find_one({'_id': edge_id});
     assert q_edge is not None , "orphaned edge must be in quarantine";
     assert 'cascade quarantine' in q_edge.get('error', '') , (
         f"edge quarantine error should mention cascade, got: {q_edge.get('error')}"
     );
 
-    source_doc = col.find_one({'_id': source_id});
+    source_doc = anchors_col.find_one({'_id': source_id});
     assert source_doc is not None , "source node must still be live";
     live_edges = source_doc.get('data', {}).get('edges', []);
     assert edge_id not in live_edges , (
@@ -429,15 +429,15 @@ test "MongoBackend recover re-links undirected edge to both endpoints" {
     _reset_mongo();
     (client, uri) = _get_mongo();
     backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
-    col = client["jac_test_l123"]["_anchors"];
-    q_col = client["jac_test_l123"]["_anchors_quarantine"];
+    anchors_col = client["jac_test_l123"]["_anchors"];
+    quarantine_col = client["jac_test_l123"]["_anchors_quarantine"];
 
     source_id = str(uuid4());
     target_id = str(uuid4());
     edge_id = str(uuid4());
 
     for (nid, nname) in [(source_id, 'src'), (target_id, 'tgt')] {
-        col.insert_one(
+        anchors_col.insert_one(
             {
                 '_id': nid,
                 'type': 'NodeAnchor',
@@ -463,7 +463,7 @@ test "MongoBackend recover re-links undirected edge to both endpoints" {
         );
     }
 
-    q_col.insert_one(
+    quarantine_col.insert_one(
         {
             '_id': edge_id,
             'type': 'EdgeAnchor',
@@ -492,8 +492,8 @@ test "MongoBackend recover re-links undirected edge to both endpoints" {
     (ok, reason) = backend.recover_one(edge_id);
     assert ok , f"recover_one must succeed for a GenericEdge, got: {reason}";
 
-    src_doc = col.find_one({'_id': source_id});
-    tgt_doc = col.find_one({'_id': target_id});
+    src_doc = anchors_col.find_one({'_id': source_id});
+    tgt_doc = anchors_col.find_one({'_id': target_id});
     assert src_doc is not None , "source node must still be live";
     assert tgt_doc is not None , "target node must still be live";
     src_edges = src_doc.get('data', {}).get('edges', []);
@@ -515,14 +515,14 @@ test "MongoBackend recover_all processes nodes before edges so re-link finds liv
     _reset_mongo();
     (client, uri) = _get_mongo();
     backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
-    col = client["jac_test_l123"]["_anchors"];
-    q_col = client["jac_test_l123"]["_anchors_quarantine"];
+    anchors_col = client["jac_test_l123"]["_anchors"];
+    quarantine_col = client["jac_test_l123"]["_anchors_quarantine"];
 
     node_id = str(uuid4());
     edge_id = str(uuid4());
 
     # Adversarial insertion order: edge first, node second.
-    q_col.insert_one(
+    quarantine_col.insert_one(
         {
             '_id': edge_id,
             'type': 'EdgeAnchor',
@@ -547,7 +547,7 @@ test "MongoBackend recover_all processes nodes before edges so re-link finds liv
             'from_format_version': 1
         }
     );
-    q_col.insert_one(
+    quarantine_col.insert_one(
         {
             '_id': node_id,
             'type': 'NodeAnchor',
@@ -575,7 +575,7 @@ test "MongoBackend recover_all processes nodes before edges so re-link finds liv
     assert recovered == 2 , f"both docs must recover, got {recovered}: {still_stuck}";
     assert not still_stuck , f"nothing should remain stuck, got {still_stuck}";
 
-    node_doc = col.find_one({'_id': node_id});
+    node_doc = anchors_col.find_one({'_id': node_id});
     assert node_doc is not None , "recovered node must be live in _anchors";
     node_edges = node_doc.get('data', {}).get('edges', []);
     assert edge_id in node_edges , (
@@ -593,13 +593,13 @@ test "MongoBackend recover_all emits warning when re-link target is missing" {
     _reset_mongo();
     (client, uri) = _get_mongo();
     backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
-    col = client["jac_test_l123"]["_anchors"];
-    q_col = client["jac_test_l123"]["_anchors_quarantine"];
+    anchors_col = client["jac_test_l123"]["_anchors"];
+    quarantine_col = client["jac_test_l123"]["_anchors_quarantine"];
 
     ghost_node_id = str(uuid4());
     edge_id = str(uuid4());
 
-    q_col.insert_one(
+    quarantine_col.insert_one(
         {
             '_id': edge_id,
             'type': 'EdgeAnchor',
@@ -629,8 +629,8 @@ test "MongoBackend recover_all emits warning when re-link target is missing" {
     assert recovered == 1 , f"edge must be recovered even without live node, got {recovered}";
     assert not still_stuck , f"edge must not be stuck, got {still_stuck}";
 
-    assert col.find_one({'_id': edge_id}) is not None , "edge must be live after recovery";
-    assert col.find_one({'_id': ghost_node_id}) is None , "ghost node must not materialise";
+    assert anchors_col.find_one({'_id': edge_id}) is not None , "edge must be live after recovery";
+    assert anchors_col.find_one({'_id': ghost_node_id}) is None , "ghost node must not materialise";
 
     backend.close();
 }
@@ -649,17 +649,17 @@ test "_put_node_atomic persists node despite default empty access.roots.anchors 
     (client, uri) = _get_mongo();
     backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
 
-    p = _MongoLayer123Person(name="charlie", age=40);
-    anchor = cast(NodeAnchor, p.__jac__);
+    person_node = _MongoLayer123Person(name="charlie", age=40);
+    anchor = cast(NodeAnchor, person_node.__jac__);
     anchor.persistent = True;
 
     fake_edge_id = str(uuid4());
 
     backend._put_node_atomic(anchor, [fake_edge_id], []);
 
-    col = client["jac_test_l123"]["_anchors"];
+    anchors_col = client["jac_test_l123"]["_anchors"];
 
-    doc = col.find_one({'_id': str(anchor.id)});
+    doc = anchors_col.find_one({'_id': str(anchor.id)});
     assert doc is not None , (
         "_put_node_atomic must persist the NodeAnchor even when "
         "access.roots.anchors is the default empty dict"
@@ -705,8 +705,8 @@ test "_put_node_atomic written document round-trips correctly after fix (issue #
     (_, uri) = _get_mongo();
     backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
 
-    p = _MongoLayer123Person(name="diana", age=35);
-    anchor = cast(NodeAnchor, p.__jac__);
+    person_node = _MongoLayer123Person(name="diana", age=35);
+    anchor = cast(NodeAnchor, person_node.__jac__);
     anchor.persistent = True;
 
     backend._write_to_db(anchor);
@@ -750,13 +750,13 @@ test "cascade quarantine invalidates Redis L2 cache for connected live nodes" {
         assert mem.l3 is not None , "MongoDB backend must be available";
         assert mem.l2 is not None , "Redis backend must be available";
 
-        col = mem.l3.collection;
+        anchors_col = mem.l3.collection;
 
         source_id = str(uuid4());
         edge_id = str(uuid4());
         bar_id = str(uuid4());
 
-        col.insert_one(
+        anchors_col.insert_one(
             {
                 '_id': source_id,
                 'type': 'NodeAnchor',
@@ -778,7 +778,7 @@ test "cascade quarantine invalidates Redis L2 cache for connected live nodes" {
                 'updated_at': '2026-01-01T00:00:00'
             }
         );
-        col.insert_one(
+        anchors_col.insert_one(
             {
                 '_id': edge_id,
                 'type': 'EdgeAnchor',
@@ -802,7 +802,7 @@ test "cascade quarantine invalidates Redis L2 cache for connected live nodes" {
                 'updated_at': '2026-01-01T00:00:00'
             }
         );
-        col.insert_one(
+        anchors_col.insert_one(
             {
                 '_id': bar_id,
                 'type': 'NodeAnchor',
@@ -832,7 +832,7 @@ test "cascade quarantine invalidates Redis L2 cache for connected live nodes" {
         );
 
         mem.__mem__.clear();
-        col.update_one(
+        anchors_col.update_one(
             {'_id': bar_id},
             {
                 '$set': {
@@ -846,7 +846,7 @@ test "cascade quarantine invalidates Redis L2 cache for connected live nodes" {
         bar_result = mem.get(UUID(bar_id));
         assert bar_result is None , "corrupt bar must not rehydrate";
 
-        source_doc = col.find_one({'_id': source_id});
+        source_doc = anchors_col.find_one({'_id': source_id});
         assert source_doc is not None , "source node must still be live in Mongo";
         live_edges = source_doc.get('data', {}).get('edges', []);
         assert edge_id not in live_edges , (
