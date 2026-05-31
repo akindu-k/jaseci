@@ -35,6 +35,13 @@ obj _MongoRequiredField(Root) {
     has name: str;
 }
 
+# Used by issue-#6167 regression: archetype with default empty-dict fields.
+obj _MongoEmptyDictNode(Root) {
+    has label: str = "",
+        settings: dict = {},
+        metadata: dict = {};
+}
+
 
 test "MongoBackend stamps fingerprint + archetype identity on put" {
     container = MongoDbContainer("mongo:latest");
@@ -789,6 +796,115 @@ test "_put_node_atomic written document round-trips correctly after fix (issue #
 
         backend.close();
         backend2.close();
+    } finally {
+        container.stop();
+    }
+}
+
+
+# ---------------------------------------------------------------------------
+# Regression: issue #6167 — _strip_empty_dicts not applied to partial_data,
+# allowing empty-dict archetype fields to re-trigger error 40180.
+# ---------------------------------------------------------------------------
+test "put_partial strips empty-dict archetype fields before $set (issue #6167)" {
+    _process_cache.pop('mongo_client', None);
+    _process_cache.pop('mongo_available', None);
+    container = MongoDbContainer("mongo:latest");
+    container.start();
+    try {
+        uri = container.get_connection_url();
+        backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
+
+        node = _MongoEmptyDictNode(label="test-partial");
+        anchor = cast(NodeAnchor, node.__jac__);
+        anchor.persistent = True;
+
+        # Seed the full document first, then call put_partial with both
+        # empty-dict fields in the dirty set — this is the exact path that
+        # re-triggers 40180 when partial_data values are not stripped.
+        backend._write_to_db(anchor);
+        backend.put_partial(anchor, {'label', 'settings', 'metadata'});
+
+        client = MongoClient(uri);
+        col = client["jac_test_l123"]["_anchors"];
+        doc = col.find_one({'_id': str(anchor.id)});
+        assert doc is not None , "put_partial must persist the anchor";
+
+        def _has_empty_dict(v: object) -> bool {
+            if isinstance(v, dict) {
+                if not v {
+                    return True;
+                }
+                return bool(any(_has_empty_dict(vv) for vv in v.values()));
+            }
+            if isinstance(v, list) {
+                return bool(any(_has_empty_dict(item) for item in v));
+            }
+            return False;
+        }
+        arch_data = doc.get('data', {}).get('archetype', {});
+        assert not _has_empty_dict(arch_data) , (
+            "put_partial must strip empty dicts from archetype fields — "
+            "MongoDB aggregation-pipeline $set rejects them (error 40180). "
+            f"Offending archetype data: {arch_data}"
+        );
+
+        client.close();
+        backend.close();
+    } finally {
+        container.stop();
+    }
+}
+
+
+test "_put_node_atomic strips empty-dict archetype fields via partial_data path (issue #6167)" {
+    _process_cache.pop('mongo_client', None);
+    _process_cache.pop('mongo_available', None);
+    container = MongoDbContainer("mongo:latest");
+    container.start();
+    try {
+        uri = container.get_connection_url();
+        backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
+
+        node = _MongoEmptyDictNode(label="test-atomic");
+        anchor = cast(NodeAnchor, node.__jac__);
+        anchor.persistent = True;
+
+        # Inject dirty-field tracking directly — this is exactly what the
+        # __setattr__ hook writes, and what _put_node_atomic reads to build
+        # partial_data.  settings and metadata are empty dicts; they must be
+        # stripped before reaching the aggregation-pipeline $set.
+        node.__dict__['__jac_dirty_fields__'] = {'label', 'settings', 'metadata'};
+
+        fake_edge_id = str(uuid4());
+        backend._put_node_atomic(anchor, [fake_edge_id], []);
+
+        client = MongoClient(uri);
+        col = client["jac_test_l123"]["_anchors"];
+        doc = col.find_one({'_id': str(anchor.id)});
+        assert doc is not None , "_put_node_atomic must persist the anchor";
+
+        def _has_empty_dict(v: object) -> bool {
+            if isinstance(v, dict) {
+                if not v {
+                    return True;
+                }
+                return bool(any(_has_empty_dict(vv) for vv in v.values()));
+            }
+            if isinstance(v, list) {
+                return bool(any(_has_empty_dict(item) for item in v));
+            }
+            return False;
+        }
+        data_field = doc.get('data', {});
+        assert not _has_empty_dict(data_field) , (
+            "_put_node_atomic partial_data path must strip empty dicts — "
+            "MongoDB aggregation-pipeline $set rejects them (error 40180). "
+            f"Offending data: {data_field}"
+        );
+
+        client.close();
+        backend.close();
     } finally {
         container.stop();
     }

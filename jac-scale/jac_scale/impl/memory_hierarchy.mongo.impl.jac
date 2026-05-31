@@ -470,7 +470,7 @@ impl MongoBackend.put_partial(anchor: Anchor, field_names: set[str]) -> None {
             return;
         }
         update: dict[str, object] = {
-            f"data.archetype.{k}": v for (k, v) in partial_data.items()
+            f"data.archetype.{k}": _strip_empty_dicts(v) for (k, v) in partial_data.items()
         };
         update['updated_at'] = datetime.now(timezone.utc).isoformat();
         self.collection.update_one({'_id': str(_id)}, {'$set': update});
@@ -807,7 +807,7 @@ impl MongoBackend._put_node_atomic(
             set_doc[f"data.{k}"] = v;
         }
         for (k, v) in partial_data.items() {
-            set_doc[f"data.archetype.{k}"] = v;
+            set_doc[f"data.archetype.{k}"] = _strip_empty_dicts(v);
         }
         set_doc['data.edges'] = {
             '$setUnion': [
