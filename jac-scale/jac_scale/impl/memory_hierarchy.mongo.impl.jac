@@ -10,6 +10,7 @@ collections on first write, so all we do here is load any existing
 aliases into the in-process Serializer map.
 """
 impl MongoBackend.postinit -> None {
+    self._atomic_written = set();
     if self.mongo_url is None {
         self.mongo_url = _get_db_config().get('mongodb_uri');
     }
@@ -709,6 +710,9 @@ impl MongoBackend.sync -> None {
     if not self._mem_ref or not self.client {
         return;
     }
+    # Reset per-sync tracking set so commit() gets a fresh view of which anchors
+    # were written via the atomic edge-delta path in this cycle.
+    self._atomic_written = set();
     for (_, anchor) in list(self._mem_ref.items()) {
         if not anchor.persistent {
             continue;
@@ -817,11 +821,49 @@ impl MongoBackend._put_node_atomic(
         };
 
         self.collection.update_one({'_id': _id}, [{'$set': set_doc}], upsert=True);
+
+        try {
+            merged_doc = self.collection.find_one({'_id': _id}, {'data.edges': 1});
+            if merged_doc {
+                merged_ids_str: list = merged_doc.get('data', {}).get('edges', [])
+                or [];
+                merged_ids: set = {
+                    UUID(s)
+                    for s in merged_ids_str
+                    if s
+                };
+                object.__setattr__(anchor, '_initial_edge_ids', frozenset(merged_ids));
+                anchor.edges = [
+                    e
+                    for e in anchor.edges
+                    if e.id in merged_ids
+                ];
+            }
+        } except Exception as rb_err {
+            logger.debug(f"MongoDB _put_node_atomic read-back failed: {rb_err}");
+        }
+
         anchor.hash = Serializer._compute_hash(anchor);
         if arch is not None {
             arch.__dict__.pop('__jac_dirty_fields__', None);
         }
         _snapshot_field_hashes(anchor);
+
+        if self._l2_ref {
+            try {
+                self._l2_ref.delete(anchor.id);
+                # Broadcast the invalidation so sibling pods drop their stale L1 entries.
+                if hasattr(self._l2_ref, 'publish_invalidation') {
+                    self._l2_ref.publish_invalidation(anchor.id);
+                }
+            } except Exception as inv_err {
+                logger.debug(
+                    f"MongoDB _put_node_atomic L2 invalidation failed: {inv_err}"
+                );
+            }
+        }
+        # Mark as atomic-written so commit() skips the stale L2.put() call.
+        self._atomic_written.add(anchor.id);
     } except Exception as e {
         logger.error(f"MongoDB _put_node_atomic failed: {e}");
     }

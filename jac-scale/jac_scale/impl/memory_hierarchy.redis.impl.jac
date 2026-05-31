@@ -105,9 +105,58 @@ impl RedisBackend.delete(id: UUID) -> None {
     }
 }
 
-"""Close Redis connection (drops local reference; shared client stays open)."""
+"""Close Redis connection and stop pub/sub listener if running."""
 impl RedisBackend.close -> None {
+    if self._pubsub_listener is not None {
+        try {
+            self._pubsub_listener.stop();
+        } except Exception { }
+        self._pubsub_listener = None;
+    }
     self.redis_client = None;
+}
+
+"""Publish an anchor UUID to the cross-pod invalidation channel."""
+impl RedisBackend.publish_invalidation(id: UUID) -> None {
+    if self.redis_client is None {
+        return;
+    }
+    try {
+        self.redis_client.publish("jac:anchor:invalidate", str(id));
+    } except Exception as e {
+        logger.debug(f"Redis publish_invalidation failed: {e}");
+    }
+}
+
+"""Subscribe to the cross-pod invalidation channel in a background daemon thread.
+
+When an anchor UUID is received, evict_cb is called so each pod can drop the
+stale entry from its in-process L1 memory.  The thread is daemonized so it
+does not block interpreter shutdown.
+"""
+impl RedisBackend.start_invalidation_listener(evict_cb: Any) -> None {
+    if self.redis_client is None or self._pubsub_listener is not None {
+        return;
+    }
+    try {
+        def _handle_invalidation(message: Any) {
+            try {
+                raw = message.get('data', b'');
+                id_str = raw.decode('utf-8') if isinstance(raw, bytes) else str(raw);
+                if id_str {
+                    evict_cb(UUID(id_str));
+                }
+            } except Exception as e {
+                logger.debug(f"Redis invalidation handler error: {e}");
+            }
+        }
+        pubsub = self.redis_client.pubsub(ignore_subscribe_messages=True);
+        pubsub.subscribe(**{"jac:anchor:invalidate": _handle_invalidation});
+        self._pubsub_listener = pubsub.run_in_thread(sleep_time=0.05, daemon=True);
+        logger.debug("Redis cross-pod invalidation listener started");
+    } except Exception as e {
+        logger.debug(f"Redis start_invalidation_listener failed: {e}");
+    }
 }
 
 """Check if an anchor is in the cache."""
