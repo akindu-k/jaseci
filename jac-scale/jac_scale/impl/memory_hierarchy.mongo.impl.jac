@@ -821,7 +821,10 @@ impl MongoBackend._put_node_atomic(
         self.collection.update_one({'_id': _id}, [{'$set': set_doc}], upsert=True);
 
         try {
-            merged_doc = self.collection.find_one({'_id': _id}, {'data.edges': 1});
+            import from pymongo { ReadPreference }
+            merged_doc = self.collection.find_one(
+                {'_id': _id}, {'data.edges': 1}, read_preference=ReadPreference.PRIMARY
+            );
             if merged_doc {
                 merged_ids_str: list = merged_doc.get('data', {}).get('edges', [])
                 or [];
@@ -845,7 +848,13 @@ impl MongoBackend._put_node_atomic(
         if arch is not None {
             arch.__dict__.pop('__jac_dirty_fields__', None);
         }
-        _snapshot_field_hashes(anchor);
+        try {
+            _snapshot_field_hashes(anchor);
+        } except Exception as shf_err {
+            logger.debug(
+                f"MongoDB _put_node_atomic _snapshot_field_hashes failed: {shf_err}"
+            );
+        }
 
         if self._l2_ref {
             try {

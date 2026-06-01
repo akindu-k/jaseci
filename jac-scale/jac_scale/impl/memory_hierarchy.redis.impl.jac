@@ -111,13 +111,19 @@ impl RedisBackend.close -> None {
     self.redis_client = None;
 }
 
-"""Publish an anchor UUID to the cross-pod invalidation channel."""
+"""Publish an anchor UUID to the cross-pod invalidation channel.
+
+The message is prefixed with this process's pod_id so the listener on the
+same pod can skip it and avoid evicting its own freshly-written L1 entry.
+"""
 impl RedisBackend.publish_invalidation(id: UUID) -> None {
     if self.redis_client is None {
         return;
     }
     try {
-        self.redis_client.publish("jac:anchor:invalidate", str(id));
+        import from uuid { uuid4 }
+        pod_id = _process_cache.setdefault('pod_id', str(uuid4()));
+        self.redis_client.publish("jac:anchor:invalidate", f"{pod_id}:{str(id)}");
     } except Exception as e {
         logger.debug(f"Redis publish_invalidation failed: {e}");
     }
@@ -128,8 +134,15 @@ impl RedisBackend.publish_invalidation(id: UUID) -> None {
 One listener thread is shared across all requests in the process (stored in
 _process_cache['pubsub_listener']). The callback evicts from every active L1
 registered in _process_cache['l1_registry'] so concurrent requests all benefit.
-On connection error the handler clears the _process_cache entry so the next
-request can re-register, recovering from a Redis restart automatically.
+
+Messages are formatted as "pod_id:anchor_uuid". If the pod_id matches this
+process, the message was self-published — skip it so the writing pod does not
+evict its own freshly-updated L1 entry.
+
+On connection error the handler stops the thread and clears _process_cache so
+the next request can re-register, recovering from a Redis restart automatically.
+The handler does not capture `self` so the per-request RedisBackend is not
+kept alive by the process-level thread.
 """
 impl RedisBackend.start_invalidation_listener(evict_cb: Any) -> None {
     if self.redis_client is None {
@@ -145,20 +158,36 @@ impl RedisBackend.start_invalidation_listener(evict_cb: Any) -> None {
             try {
                 raw = message.get('data', b'');
                 id_str = raw.decode('utf-8') if isinstance(raw, bytes) else str(raw);
-                if id_str {
-                    anchor_id = UUID(id_str);
-                    for l1 in list(_process_cache.get('l1_registry', {}).values()) {
-                        l1.pop(anchor_id, None);
+                if not id_str {
+                    return;
+                }
+                # Messages are "pod_id:anchor_uuid"; skip self-originated ones.
+                if ':' in id_str {
+                    parts = id_str.split(':', 1);
+                    src_pod_id = parts[0];
+                    anchor_uuid_str = parts[1];
+                    if src_pod_id == _process_cache.get('pod_id') {
+                        return;
                     }
+                } else {
+                    anchor_uuid_str = id_str;
+                }
+                anchor_id = UUID(anchor_uuid_str);
+                for l1 in list(_process_cache.get('l1_registry', {}).values()) {
+                    l1.pop(anchor_id, None);
                 }
             } except Exception as e {
                 logger.debug(f"Redis invalidation handler error: {e}");
             }
         }
+        # Bug-fix: call thread.stop() to break the run loop on disconnect so
+        # the thread does not busy-spin. Do NOT reference `self` here — keeping
+        # `self` out of the closure prevents the per-request RedisBackend from
+        # being held alive by the process-level thread indefinitely.
         def _on_thread_error(ex: Any, pubsub: Any, thread: Any) {
             logger.debug(f"Redis invalidation listener thread error: {ex}");
+            thread.stop();
             _process_cache.pop('pubsub_listener', None);
-            self._pubsub_listener = None;
         }
         pubsub = self.redis_client.pubsub(ignore_subscribe_messages=True);
         pubsub.subscribe(**{"jac:anchor:invalidate": _handle_invalidation});
