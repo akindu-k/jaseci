@@ -743,105 +743,120 @@ test "_put_node_atomic written document round-trips correctly after fix (issue #
 glob _MONGO_40180_IMAGE = "mongo:6.0";
 
 
+"""Lazily start a shared mongo:6.0 container (reproduces 40180); return (MongoClient, uri)."""
+def _get_mongo_40180 -> tuple {
+    if "mongo40180_client" not in _shared {
+        container = MongoDbContainer(_MONGO_40180_IMAGE);
+        container.start();
+        uri = container.get_connection_url();
+        _shared["mongo40180_container"] = container;
+        _shared["mongo40180_uri"] = uri;
+        _shared["mongo40180_client"] = MongoClient(uri);
+        atexit.register(container.stop);
+    }
+    return (_shared["mongo40180_client"], _shared["mongo40180_uri"]);
+}
+
+
+"""Drop all non-system databases on the shared mongo:6.0 container."""
+def _reset_mongo_40180 -> None {
+    if "mongo40180_client" not in _shared {
+        return;
+    }
+    system_dbs = {"admin", "config", "local"};
+    for db_name in _shared["mongo40180_client"].list_database_names() {
+        if db_name not in system_dbs {
+            _shared["mongo40180_client"].drop_database(db_name);
+        }
+    }
+}
+
+
 test "put_partial path is unaffected by 40180 (classic $set tolerates empty dicts)" {
+    _reset_mongo_40180();
     _process_cache.pop('mongo_client', None);
     _process_cache.pop('mongo_available', None);
-    container = MongoDbContainer(_MONGO_40180_IMAGE);
-    container.start();
-    try {
-        uri = container.get_connection_url();
-        backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
+    (client, uri) = _get_mongo_40180();
+    backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
 
-        inst = _MongoEmptyDictNode(label="original");
-        anchor = cast(NodeAnchor, inst.__jac__);
-        anchor.persistent = True;
+    inst = _MongoEmptyDictNode(label="original");
+    anchor = cast(NodeAnchor, inst.__jac__);
+    anchor.persistent = True;
 
-        backend._write_to_db(anchor);
-        inst.label = "updated";
-        backend.put_partial(anchor, {'label', 'settings', 'metadata'});
+    backend._write_to_db(anchor);
+    inst.label = "updated";
+    backend.put_partial(anchor, {'label', 'settings', 'metadata'});
 
-        client = MongoClient(uri);
-        col = client["jac_test_l123"]["_anchors"];
-        doc = col.find_one({'_id': str(anchor.id)});
-        assert doc is not None , "document must exist after seed + put_partial";
+    col = client["jac_test_l123"]["_anchors"];
+    doc = col.find_one({'_id': str(anchor.id)});
+    assert doc is not None , "document must exist after seed + put_partial";
 
-        arch_data = doc.get('data', {}).get('archetype', {});
-        assert arch_data.get('label') == 'updated' , (
-            "put_partial must write the mutated scalar field even when "
-            f"empty-dict fields are in the dirty set; got archetype: {arch_data}"
-        );
-        # Classic $set stores the empty dict as-is: no 40180, no strip needed.
-        assert arch_data.get('settings') == {} , (
-            "classic $set should persist an empty dict as-is on the partial "
-            f"path; got archetype: {arch_data}"
-        );
+    arch_data = doc.get('data', {}).get('archetype', {});
+    assert arch_data.get('label') == 'updated' , (
+        "put_partial must write the mutated scalar field even when "
+        f"empty-dict fields are in the dirty set; got archetype: {arch_data}"
+    );
+    # Classic $set stores the empty dict as-is: no 40180, no strip needed.
+    assert arch_data.get('settings') == {} , (
+        "classic $set should persist an empty dict as-is on the partial "
+        f"path; got archetype: {arch_data}"
+    );
 
-        client.close();
-        backend.close();
-    } finally {
-        container.stop();
-    }
+    backend.close();
 }
 
 
 test "_put_node_atomic strips empty-dict archetype fields (reproduces 40180 on mongo:6.0)" {
     # Without the fix, the pipeline $set raises 40180, the error is swallowed,
     # and nothing persists — so find_one returns None.
+    _reset_mongo_40180();
     _process_cache.pop('mongo_client', None);
     _process_cache.pop('mongo_available', None);
-    container = MongoDbContainer(_MONGO_40180_IMAGE);
-    container.start();
-    try {
-        uri = container.get_connection_url();
-        backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
+    (client, uri) = _get_mongo_40180();
+    backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
 
-        inst = _MongoEmptyDictNode(label="test-atomic");
-        anchor = cast(NodeAnchor, inst.__jac__);
-        anchor.persistent = True;
+    inst = _MongoEmptyDictNode(label="test-atomic");
+    anchor = cast(NodeAnchor, inst.__jac__);
+    anchor.persistent = True;
 
-        # Mirror the __setattr__ hook: force the empty-dict fields through partial_data.
-        inst.__dict__['__jac_dirty_fields__'] = {'label', 'settings', 'metadata'};
+    # Mirror the __setattr__ hook: force the empty-dict fields through partial_data.
+    inst.__dict__['__jac_dirty_fields__'] = {'label', 'settings', 'metadata'};
 
-        fake_edge_id = str(uuid4());
-        backend._put_node_atomic(anchor, [fake_edge_id], []);
+    fake_edge_id = str(uuid4());
+    backend._put_node_atomic(anchor, [fake_edge_id], []);
 
-        client = MongoClient(uri);
-        col = client["jac_test_l123"]["_anchors"];
-        doc = col.find_one({'_id': str(anchor.id)});
-        assert doc is not None , (
-            "None document means the pipeline $set raised 40180 on an empty "
-            "dict (regression: _strip_empty_dicts not applied)."
-        );
+    col = client["jac_test_l123"]["_anchors"];
+    doc = col.find_one({'_id': str(anchor.id)});
+    assert doc is not None , (
+        "None document means the pipeline $set raised 40180 on an empty "
+        "dict (regression: _strip_empty_dicts not applied)."
+    );
 
-        data_field = cast(dict, doc.get('data', {}));
-        arch_data = cast(dict, data_field.get('archetype', {}));
-        assert arch_data.get('label') == 'test-atomic' , (
-            f"mutated scalar field must survive the atomic write; got: {arch_data}"
-        );
+    data_field = cast(dict, doc.get('data', {}));
+    arch_data = cast(dict, data_field.get('archetype', {}));
+    assert arch_data.get('label') == 'test-atomic' , (
+        f"mutated scalar field must survive the atomic write; got: {arch_data}"
+    );
 
-        def _has_empty_dict(v: object) -> bool {
-            if isinstance(v, dict) {
-                if not v {
-                    return True;
-                }
-                return bool(any(_has_empty_dict(vv) for vv in v.values()));
+    def _has_empty_dict(v: object) -> bool {
+        if isinstance(v, dict) {
+            if not v {
+                return True;
             }
-            if isinstance(v, list) {
-                return bool(any(_has_empty_dict(item) for item in v));
-            }
-            return False;
+            return bool(any(_has_empty_dict(vv) for vv in v.values()));
         }
-        assert not _has_empty_dict(data_field) , (
-            "_put_node_atomic partial_data path must strip empty dicts — "
-            "MongoDB aggregation-pipeline $set rejects them (error 40180). "
-            f"Offending data: {data_field}"
-        );
-
-        client.close();
-        backend.close();
-    } finally {
-        container.stop();
+        if isinstance(v, list) {
+            return bool(any(_has_empty_dict(item) for item in v));
+        }
+        return False;
     }
+    assert not _has_empty_dict(data_field) , (
+        "_put_node_atomic partial_data path must strip empty dicts — "
+        "MongoDB aggregation-pipeline $set rejects them (error 40180). "
+        f"Offending data: {data_field}"
+    );
+
+    backend.close();
 }
 
 
