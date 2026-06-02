@@ -643,8 +643,6 @@ test "MongoBackend recover_all emits warning when re-link target is missing" {
 # (error 40180), so every graph write silently failed before this fix.
 # ---------------------------------------------------------------------------
 test "_put_node_atomic persists node despite default empty access.roots.anchors (issue #6076)" {
-    _process_cache.pop('mongo_client', None);
-    _process_cache.pop('mongo_available', None);
     _reset_mongo();
     (client, uri) = _get_mongo();
     backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
@@ -699,8 +697,6 @@ test "_put_node_atomic written document round-trips correctly after fix (issue #
     # _put_node_atomic to atomically merge the edge list.  A fresh second
     # backend (simulating a different pod with a cold L1 cache) must be able
     # to read and fully deserialize the anchor afterwards.
-    _process_cache.pop('mongo_client', None);
-    _process_cache.pop('mongo_available', None);
     _reset_mongo();
     (_, uri) = _get_mongo();
     backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
