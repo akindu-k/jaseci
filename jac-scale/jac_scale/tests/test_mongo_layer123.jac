@@ -802,10 +802,15 @@ test "_put_node_atomic written document round-trips correctly after fix (issue #
 }
 
 
-test "put_partial strips empty-dict archetype fields before $set" {
+# mongo:6.0 is the production image and the only version where pipeline $set
+# rejects empty dicts (40180); 7.0+ accepts them. See issue #6167.
+glob _MONGO_40180_IMAGE = "mongo:6.0";
+
+
+test "put_partial path is unaffected by 40180 (classic $set tolerates empty dicts)" {
     _process_cache.pop('mongo_client', None);
     _process_cache.pop('mongo_available', None);
-    container = MongoDbContainer("mongo:latest");
+    container = MongoDbContainer(_MONGO_40180_IMAGE);
     container.start();
     try {
         uri = container.get_connection_url();
@@ -829,6 +834,11 @@ test "put_partial strips empty-dict archetype fields before $set" {
             "put_partial must write the mutated scalar field even when "
             f"empty-dict fields are in the dirty set; got archetype: {arch_data}"
         );
+        # Classic $set stores the empty dict as-is: no 40180, no strip needed.
+        assert arch_data.get('settings') == {} , (
+            "classic $set should persist an empty dict as-is on the partial "
+            f"path; got archetype: {arch_data}"
+        );
 
         client.close();
         backend.close();
@@ -838,10 +848,12 @@ test "put_partial strips empty-dict archetype fields before $set" {
 }
 
 
-test "_put_node_atomic strips empty-dict archetype fields via partial_data path" {
+test "_put_node_atomic strips empty-dict archetype fields (reproduces 40180 on mongo:6.0)" {
+    # Without the fix, the pipeline $set raises 40180, the error is swallowed,
+    # and nothing persists — so find_one returns None.
     _process_cache.pop('mongo_client', None);
     _process_cache.pop('mongo_available', None);
-    container = MongoDbContainer("mongo:latest");
+    container = MongoDbContainer(_MONGO_40180_IMAGE);
     container.start();
     try {
         uri = container.get_connection_url();
@@ -851,10 +863,7 @@ test "_put_node_atomic strips empty-dict archetype fields via partial_data path"
         anchor = cast(NodeAnchor, inst.__jac__);
         anchor.persistent = True;
 
-        # Inject dirty-field tracking directly — this is exactly what the
-        # __setattr__ hook writes, and what _put_node_atomic reads to build
-        # partial_data.  settings and metadata are empty dicts; they must be
-        # stripped before reaching the aggregation-pipeline $set.
+        # Mirror the __setattr__ hook: force the empty-dict fields through partial_data.
         inst.__dict__['__jac_dirty_fields__'] = {'label', 'settings', 'metadata'};
 
         fake_edge_id = str(uuid4());
@@ -863,7 +872,16 @@ test "_put_node_atomic strips empty-dict archetype fields via partial_data path"
         client = MongoClient(uri);
         col = client["jac_test_l123"]["_anchors"];
         doc = col.find_one({'_id': str(anchor.id)});
-        assert doc is not None , "_put_node_atomic must persist the anchor";
+        assert doc is not None , (
+            "None document means the pipeline $set raised 40180 on an empty "
+            "dict (regression: _strip_empty_dicts not applied)."
+        );
+
+        data_field = cast(dict, doc.get('data', {}));
+        arch_data = cast(dict, data_field.get('archetype', {}));
+        assert arch_data.get('label') == 'test-atomic' , (
+            f"mutated scalar field must survive the atomic write; got: {arch_data}"
+        );
 
         def _has_empty_dict(v: object) -> bool {
             if isinstance(v, dict) {
@@ -877,7 +895,6 @@ test "_put_node_atomic strips empty-dict archetype fields via partial_data path"
             }
             return False;
         }
-        data_field = doc.get('data', {});
         assert not _has_empty_dict(data_field) , (
             "_put_node_atomic partial_data path must strip empty dicts — "
             "MongoDB aggregation-pipeline $set rejects them (error 40180). "

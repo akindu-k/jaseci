@@ -466,9 +466,8 @@ impl MongoBackend.put_partial(anchor: Anchor, field_names: set[str]) -> None {
     }
     _id = to_uuid(anchor.id);
     try {
-        partial_data = _strip_empty_dicts(
-            Serializer.serialize_fields(anchor, field_names)
-        );
+        # Classic operator $set (below) accepts empty dicts; no strip needed.
+        partial_data = Serializer.serialize_fields(anchor, field_names);
         if not partial_data {
             return;
         }
@@ -791,8 +790,12 @@ impl MongoBackend._put_node_atomic(
         hash_dirty = _derive_dirty_from_field_hashes(anchor);
         dirty = setattr_dirty | hash_dirty;
 
-        # Serialize only the dirty archetype fields.
-        partial_data = Serializer.serialize_fields(anchor, dirty) if dirty else {};
+        # Strip empty dicts: pipeline $set below rejects them (40180) on mongo <= 6.x.
+        partial_data: dict[str, object] = (
+            cast(dict, _strip_empty_dicts(Serializer.serialize_fields(anchor, dirty)))
+                if dirty
+                else {}
+        );
 
         # Non-archetype, non-edge top-level data fields (e.g. access control).
         # Strip empty nested dicts before including in the aggregation-pipeline
@@ -816,7 +819,7 @@ impl MongoBackend._put_node_atomic(
         for (k, v) in non_arch_top.items() {
             set_doc[f"data.{k}"] = v;
         }
-        for (k, v) in _strip_empty_dicts(partial_data).items() {
+        for (k, v) in partial_data.items() {
             set_doc[f"data.archetype.{k}"] = v;
         }
         set_doc['data.edges'] = {
