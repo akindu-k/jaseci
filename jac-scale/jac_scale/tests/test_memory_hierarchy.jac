@@ -26,7 +26,6 @@ def get_free_port -> int {
     }
 }
 
-"""Weakref-able stand-in for a registered L1 owner (issue #6313 unit tests)."""
 obj _FakeL1 {
     has __mem__: dict;
 }
@@ -1664,7 +1663,6 @@ test "L2 Redis is invalidated (not re-poisoned) after edge-delta atomic write (i
 # ----------------------------------------------------------------------
 # Cross-pod L1 cache invalidation via Redis pub/sub (issue #6313)
 # ----------------------------------------------------------------------
-"""Unit: evict drops every registered L1 except the origin."""
 test "L1 invalidation: evict skips origin, evicts every sibling (issue 6313)" {
     import from uuid { uuid4 }
     import from jac_scale.l1_invalidation {
@@ -1699,7 +1697,6 @@ test "L1 invalidation: evict skips origin, evicts every sibling (issue 6313)" {
     }
 }
 
-"""Unit: a context that skips close() can't leak its L1 — GC reclaims it."""
 test "L1 invalidation: registry holds L1 weakly, GC reclaims it (issue 6313)" {
     import gc;
     import from uuid { uuid4 }
@@ -1716,10 +1713,6 @@ test "L1 invalidation: registry holds L1 weakly, GC reclaims it (issue 6313)" {
     );
 }
 
-"""Integration: end-to-end pub/sub evicts the sibling L1, preserves the writer's.
-
-The publish is retried in the wait loop since pub/sub is fire-and-forget — a
-message sent before the listener's async SUBSCRIBE completes is simply lost."""
 test "L1 invalidation: sibling L1 evicted via pub/sub, origin preserved (issue 6313)" {
     import time;
     import from uuid { uuid4 }
@@ -1761,8 +1754,6 @@ test "L1 invalidation: sibling L1 evicted via pub/sub, origin preserved (issue 6
     }
 }
 
-"""Integration: after the listener's connection is killed it re-subscribes and
-resumes delivering."""
 test "L1 invalidation: listener recovers after a Redis connection drop (issue 6313)" {
     import time;
     import from uuid { uuid4 }
@@ -1816,7 +1807,6 @@ test "L1 invalidation: listener recovers after a Redis connection drop (issue 63
     }
 }
 
-"""Unit: ensure_listener reuses a live listener and replaces a dead one."""
 test "L1 invalidation: ensure_listener is idempotent and self-heals (issue 6313)" {
     import time;
     import from jac_scale.l1_invalidation { ensure_listener, stop_listener }
