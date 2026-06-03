@@ -346,7 +346,7 @@ test "desktop dev mode starts vite server" {
         if npm_result.returncode != 0 {
             pytest.skip(f"npm install failed: {npm_result.stderr}");
         }
-        vite_port = 5173;
+        vite_port = get_free_port();
         dev_process = None;
         try {
             dev_process = Popen(

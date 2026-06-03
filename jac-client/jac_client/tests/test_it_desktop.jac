@@ -600,20 +600,31 @@ test "desktop dev mode starts" {
             pytest.skip(f"npm install failed: {npm_result.stderr}");
         }
         # Start desktop dev mode
+        vite_port = get_free_port();
         dev_process = None;
         try {
-            print("[DEBUG] Starting desktop dev mode");
+            print(f"[DEBUG] Starting desktop dev mode on port {vite_port}");
             dev_process = Popen(
-                [*jac_cmd, "start", "main.jac", "--client", "desktop", "--dev"],
+                [
+                    *jac_cmd,
+                    "start",
+                    "main.jac",
+                    "--client",
+                    "desktop",
+                    "--dev",
+                    "--port",
+                    str(vite_port),
+
+                ],
                 cwd=project_dir,
                 env=env,
             );
 
-            # Wait for Vite dev server (port 5173)
-            print("[DEBUG] Waiting for Vite dev server on port 5173");
+            # Wait for Vite dev server
+            print(f"[DEBUG] Waiting for Vite dev server on port {vite_port}");
             try {
-                wait_for_port("127.0.0.1", 5173, timeout=90.0);
-                print("[DEBUG] Vite dev server is running on port 5173");
+                wait_for_port("127.0.0.1", vite_port, timeout=90.0);
+                print(f"[DEBUG] Vite dev server is running on port {vite_port}");
             } except TimeoutError {
                 if dev_process.poll() is not None {
                     pytest.fail(
@@ -628,7 +639,7 @@ test "desktop dev mode starts" {
 
             # Verify dev server is serving content
             try {
-                with urlopen("http://127.0.0.1:5173/", timeout=10) as resp {
+                with urlopen(f"http://127.0.0.1:{vite_port}/", timeout=10) as resp {
                     body = resp.read().decode("utf-8", errors="ignore");
                     print(f"[DEBUG] Dev server response: {body[:500]}");
                     assert resp.status == 200 , "Dev server should return 200";
