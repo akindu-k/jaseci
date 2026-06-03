@@ -30,7 +30,10 @@ impl JacScaleConfig.get_default_config(self: JacScaleConfig) -> dict[str, any] {
             'redis_enable_keyspace_notifications': False,
             # Cross-pod L1 cache invalidation (issue #6313).
             'redis_l1_invalidation_enabled': True,
-            'redis_l1_invalidation_channel': 'jac:anchor:invalidate'
+            'redis_l1_invalidation_channel': 'jac:anchor:invalidate',
+            # Safety net: max seconds a clean L1 entry survives between sweeps,
+            # bounding staleness if an invalidation is missed (0 disables).
+            'redis_l1_max_age_seconds': 300
         },
         'kubernetes': {
             'app_name': 'jaseci',
@@ -208,7 +211,8 @@ impl JacScaleConfig.get_database_config(self: JacScaleConfig) -> dict[str, any] 
         ),
         'redis_l1_invalidation_channel': db_config.get(
             'redis_l1_invalidation_channel', 'jac:anchor:invalidate'
-        )
+        ),
+        'redis_l1_max_age_seconds': int(db_config.get('redis_l1_max_age_seconds', 300))
     };
 }
 

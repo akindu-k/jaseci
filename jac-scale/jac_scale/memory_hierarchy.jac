@@ -210,4 +210,6 @@ obj ScaleTieredMemory(TieredMemory) {
     async def acommit(anchor: (Anchor | None) = None) -> None;
     def close -> None;
     def batch_get(ids: list[UUID]) -> dict[UUID, Anchor];
+    # Safety-net sweep: drop clean, persistent anchors from L1 (issue #6313).
+    def evict_clean_entries -> int;
 }

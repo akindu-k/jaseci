@@ -29,7 +29,8 @@ impl ScaleTieredMemory.postinit -> None {
                         str,
                         db_config.get('redis_l1_invalidation_channel')
                         or DEFAULT_INVALIDATION_CHANNEL
-                    )
+                    ),
+                    cast(float, db_config.get('redis_l1_max_age_seconds', 300))
                 );
             }
         } except Exception as e {
@@ -205,4 +206,25 @@ impl ScaleTieredMemory.close -> None {
     }
     self.__mem__.clear();
     self.__gc__.clear();
+}
+
+"""Drop clean, persistent anchors from L1 — the max-age safety net (issue #6313)
+that bounds staleness if a cross-pod invalidation was missed. Dirty (uncommitted)
+anchors and ephemeral (non-persistent) ones are kept, since the former hold
+unsynced work and the latter live only here."""
+impl ScaleTieredMemory.evict_clean_entries -> int {
+    evicted = 0;
+    for id in list(self.__mem__.keys()) {
+        anchor = self.__mem__.get(id);
+        if anchor is None or not anchor.persistent {
+            continue;
+        }
+        try {
+            if Serializer._compute_hash(anchor) == anchor.hash {
+                self.__mem__.pop(id, None);
+                evicted += 1;
+            }
+        } except Exception { }
+    }
+    return evicted;
 }

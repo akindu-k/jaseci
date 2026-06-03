@@ -1847,3 +1847,42 @@ test "L1 invalidation: ensure_listener is idempotent and self-heals (issue 6313)
         _reset_process_cache();
     }
 }
+
+test "L1 invalidation: clean-sweep safety net drops clean but keeps dirty and ephemeral (issue 6313)" {
+    import from uuid { uuid4 }
+    import from jaclang.jac0core.archetype { Root }
+    import from jaclang.runtimelib.serializer { Serializer }
+    import from jac_scale.memory_hierarchy { ScaleTieredMemory }
+    import from jac_scale.l1_invalidation { sweep_clean_l1s }
+
+    os.environ.pop("REDIS_URL", None);
+    os.environ.pop("MONGODB_URI", None);
+    _reset_process_cache();
+    try {
+        mem = ScaleTieredMemory();
+
+        clean = Root().__jac__;
+        clean.persistent = True;
+        clean.hash = Serializer._compute_hash(clean);
+
+        dirty = Root().__jac__;
+        dirty.persistent = True;
+        dirty.hash = 0;  # uncommitted: hash won't match
+
+        ephemeral = Root().__jac__;
+        ephemeral.persistent = False;
+        ephemeral.hash = Serializer._compute_hash(ephemeral);
+
+        mem.__mem__[clean.id] = clean;
+        mem.__mem__[dirty.id] = dirty;
+        mem.__mem__[ephemeral.id] = ephemeral;
+
+        sweep_clean_l1s();
+
+        assert clean.id not in mem.__mem__ , "clean persistent entry must be swept";
+        assert dirty.id in mem.__mem__ , "uncommitted entry must be kept";
+        assert ephemeral.id in mem.__mem__ , "ephemeral entry must be kept";
+    } finally {
+        _reset_process_cache();
+    }
+}

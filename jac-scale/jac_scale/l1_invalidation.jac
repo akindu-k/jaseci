@@ -15,6 +15,7 @@ pods/contexts reload the merged value from L3 instead of serving a stale copy.
 import json;
 import logging;
 import threading;
+import time;
 import weakref;
 import from typing { Any, cast }
 import from uuid { UUID, uuid4 }
@@ -78,6 +79,22 @@ def evict_local_l1(anchor_id: str, origin_l1_id: (str | None) = None) -> int {
 }
 
 
+"""Safety net for the lossy-reconnect window: drop clean (committed, persistent)
+entries from every active L1 so a pub/sub message missed during a reconnect
+can't cause unbounded staleness. Each L1 keeps its own uncommitted/ephemeral
+entries — see ScaleTieredMemory.evict_clean_entries."""
+def sweep_clean_l1s {
+    with _l1_lock {
+        mems = list(_l1_registry.values());
+    }
+    for mem in mems {
+        try {
+            mem.evict_clean_entries();
+        } except Exception { }
+    }
+}
+
+
 """Parse one pub/sub payload and evict the named anchor from sibling L1s."""
 def _handle_message(data: Any) {
     try {
@@ -105,6 +122,7 @@ from sibling L1s, self-healing across Redis drops with capped backoff."""
 obj L1InvalidationListener {
     has redis_url: str,
         channel: str,
+        max_age: float = 0.0,  # clean-L1 sweep interval; 0 disables the safety net
         _stop: Any by postinit,
         _thread: Any by postinit;
 
@@ -143,10 +161,17 @@ obj L1InvalidationListener {
                 pubsub = client.pubsub(ignore_subscribe_messages=True);
                 pubsub.subscribe(self.channel);
                 backoff = 0.5;  # reset after a clean (re)subscribe
+                # A (re)subscribe may follow a gap where evictions were missed,
+                # so sweep on the first iteration, then every max_age.
+                next_sweep = time.monotonic();
                 while not self._stop.is_set() {
                     msg = pubsub.get_message(timeout=1.0);
                     if msg is not None and msg.get("type") == "message" {
                         _handle_message(msg.get("data"));
+                    }
+                    if self.max_age > 0 and time.monotonic() >= next_sweep {
+                        sweep_clean_l1s();
+                        next_sweep = time.monotonic() + self.max_age;
                     }
                 }
             } except Exception as e {
@@ -175,7 +200,7 @@ obj L1InvalidationListener {
 """Start the process-wide listener once (idempotent, thread-safe). A dead handle
 is replaced so the process self-recovers. No-op when redis is unavailable."""
 def ensure_listener(
-    process_cache: dict, redis_url: (str | None), channel: str
+    process_cache: dict, redis_url: (str | None), channel: str, max_age: float = 0.0
 ) -> None {
     if redis is None or not redis_url {
         return;
@@ -185,7 +210,7 @@ def ensure_listener(
         if existing is not None and existing.is_alive() {
             return;
         }
-        listener = L1InvalidationListener(redis_url, channel);
+        listener = L1InvalidationListener(redis_url, channel, max_age);
         process_cache["l1_listener"] = listener;
         listener.start();
     }
