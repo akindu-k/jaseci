@@ -41,7 +41,11 @@ def deregister_l1(l1_id: str) {
 }
 
 
-"""Evict `anchor_id` from every active L1 except the origin; return count evicted."""
+"""Evict `anchor_id` from every active L1 except the origin; return count evicted.
+
+Runs on the listener thread, so it mutates request-owned `__mem__` dicts from
+outside their owning thread. Invariant: anyone iterating an L1 must snapshot it
+first (e.g. `list(__mem__.values())`) — a live iteration can race this pop."""
 def evict_local_l1(anchor_id: str, origin_l1_id: (str | None) = None) -> int {
     try {
         key = UUID(anchor_id);

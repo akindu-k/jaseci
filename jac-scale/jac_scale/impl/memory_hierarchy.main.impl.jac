@@ -242,3 +242,15 @@ impl ScaleTieredMemory.get(id: UUID) -> (Anchor | None) {
     }
     return anchor;
 }
+
+"""L1 scan. Snapshots `__mem__` first: the invalidation listener thread may
+pop concurrently, and iterating the live dict would raise (see evict_local_l1)."""
+impl ScaleTieredMemory.query(
+    filter: (Callable[[Anchor], bool] | None) = None
+) -> Generator[Anchor, None, None] {
+    for anchor in list(self.__mem__.values()) {
+        if filter is None or filter(anchor) {
+            yield anchor;
+        }
+    }
+}

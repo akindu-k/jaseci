@@ -213,4 +213,7 @@ obj ScaleTieredMemory(TieredMemory) {
     async def acommit(anchor: (Anchor | None) = None) -> None;
     def close -> None;
     def batch_get(ids: list[UUID]) -> dict[UUID, Anchor];
+    def query(
+        filter: (Callable[[Anchor], bool] | None) = None
+    ) -> Generator[Anchor, None, None];
 }
