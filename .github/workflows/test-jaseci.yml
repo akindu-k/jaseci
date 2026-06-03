@@ -79,6 +79,11 @@ jobs:
     - name: Set up Bun
       uses: oven-sh/setup-bun@v2
 
+    - name: Install desktop GUI runtime (WebKit + Xvfb)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libwebkit2gtk-4.1-0 xvfb
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
@@ -98,7 +103,8 @@ jobs:
         echo "TEST_ENV=true" >> $GITHUB_ENV
 
     - name: Run all client tests (including E2E in parallel)
-      run: pytest -x jac-client jac-desktop -n auto
+      # xvfb-run provides a virtual display so the PyTauri desktop GUI can launch.
+      run: xvfb-run -a pytest -x jac-client jac-desktop -n auto
 
     - name: Re-run auth roundtrip e2e against jac-scale backend
       run: |
