@@ -2492,7 +2492,7 @@ already loaded.
 
 To prevent that, every write broadcasts a small invalidation message over a
 **Redis pub/sub channel**. One daemon listener per process subscribes to that
-channel and, on each message, drops the named anchor from every *other* live L1
+channel and, on each message, drops the named anchor from every _other_ live L1
 in the process — so sibling requests reload the fresh copy from L3 on their next
 access instead of serving stale data. The writer's own L1 is excluded (it
 already holds the freshly merged copy), and deletes/quarantines evict everyone.
