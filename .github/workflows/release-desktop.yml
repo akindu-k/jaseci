@@ -16,6 +16,9 @@ jobs:
         with:
           submodules: true
 
+      # jac-desktop is pure Jac/Python now (the native desktop host is produced
+      # by `jac nacompile` at the user's build time), so it has no native-wheel
+      # constraints. Precompile for all supported interpreters; requires >=3.12.
       - name: Set up Python 3.12, 3.13, 3.14
         uses: actions/setup-python@v5
         with:

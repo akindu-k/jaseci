@@ -79,6 +79,15 @@ impl JacAPIServerAuth.register_login_endpoint -> None {
             );
         }
         user_id = result.get('user_id', '');
+        # System-role accounts are not loginable over HTTP — return the same
+        # error as bad credentials to avoid account enumeration.
+        if self.user_manager.get_user_role(user_id) == 'system' {
+            return TransportResponse.fail(
+                code='UNAUTHORIZED',
+                message='Invalid credentials',
+                meta=Meta(extra={'http_status': 401})
+            );
+        }
         result['token'] = self.user_manager.create_jwt_token(user_id);
         return TransportResponse.success(
             data=dict[(str, JsonValue)](result), meta=Meta(extra={'http_status': 200})
@@ -112,6 +121,15 @@ impl JacAPIServerAuth.register_refresh_token_endpoint -> None {
         }
         if token.startswith('Bearer ') {
             token = token[7:];
+        }
+        # System-role tokens are not refreshable — they are issued only internally.
+        claims = self.user_manager.get_jwt_claims(token);
+        if claims and claims.get('role') == 'system' {
+            return TransportResponse.fail(
+                code='UNAUTHORIZED',
+                message='Invalid or expired token',
+                meta=Meta(extra={'http_status': 401})
+            );
         }
         new_token = self.user_manager.refresh_jwt_token(token);
         if not new_token {
@@ -306,6 +324,13 @@ impl JacAPIServerAuth.register_update_me_endpoint -> None {
 # ============================================================================
 # SSO
 # ============================================================================
+impl _resolve_sso_client_redirect(requested: str | None, configured: str) -> str {
+    if requested and is_safe_loopback_redirect(requested) {
+        return requested;
+    }
+    return configured;
+}
+
 impl JacAPIServerAuth._create_sso_callback_wrapper -> Callable[
     ...,
     (Response | TransportResponse)
@@ -315,7 +340,14 @@ impl JacAPIServerAuth._create_sso_callback_wrapper -> Callable[
     ) -> (Response | TransportResponse) {
         result = await self.user_manager.sso_callback(request, platform);
         sso_config = get_scale_config().get_sso_config();
-        frontend_url = sso_config.get('client_auth_callback_url', '');
+        configured_url = str(sso_config.get('client_auth_callback_url', ''));
+        # A desktop / loopback client passes its own 127.0.0.1 callback through
+        # the OAuth `state` parameter (RFC 8252) so the token lands on its own
+        # origin. Honor it only when it is a safe loopback URL; otherwise fall
+        # back to the server-configured remote callback. This guards against an
+        # attacker using `state` as an open redirect to steal the token.
+        requested_url = request.query_params.get('state') or '';
+        frontend_url = _resolve_sso_client_redirect(requested_url, configured_url);
         if not frontend_url {
             return result;
         }
@@ -355,6 +387,14 @@ impl JacAPIServerAuth.register_sso_endpoints -> None {
                     default=None,
                     description='Operation: "login" or "register"',
                     type=ParameterType.PATH
+                ),
+                APIParameter(
+                    name='client_callback',
+                    data_type='string',
+                    required=False,
+                    default=None,
+                    description='Optional loopback URL (e.g. http://127.0.0.1:<port>/...) for native/desktop clients. The token is redirected here after auth so it lands on the client\'s own origin; ignored unless it is a safe loopback address.',
+                    type=ParameterType.QUERY
                 )
             ],
             response_model=None,

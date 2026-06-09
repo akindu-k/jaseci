@@ -114,8 +114,12 @@ impl JacScaleConfig.get_default_config(self: JacScaleConfig) -> dict[str, any] {
             'require_password_reset': True
         },
         'scheduler': {
-            'system_user_password': 'system_secret',
-            'collection': 'scheduled_jobs'
+            'collection': 'scheduled_jobs',
+            'thread_pool_size': 10,
+            'misfire_grace_time': 60,
+            'shutdown_timeout': 10,
+            'system_user_password': '__no_login__',
+            'user_exists_ttl': 30.0
         },
         'telemetry': {'max_traces': 1000},
         'emailer': {
@@ -381,9 +385,14 @@ impl JacScaleConfig.get_scheduler_config(self: JacScaleConfig) -> dict[str, any]
     config = self.load();
     scheduler_config = config.get('scheduler', {});
     return {
-        'system_user_password': os.environ.get('SYSTEM_USER_PASSWORD')
-        or scheduler_config.get('system_user_password', 'system_secret'),
-        'collection': scheduler_config.get('collection', 'scheduled_jobs')
+        'collection': scheduler_config.get('collection', 'scheduled_jobs'),
+        'thread_pool_size': int(scheduler_config.get('thread_pool_size', 10)),
+        'misfire_grace_time': int(scheduler_config.get('misfire_grace_time', 60)),
+        'shutdown_timeout': int(scheduler_config.get('shutdown_timeout', 10)),
+        'system_user_password': scheduler_config.get(
+            'system_user_password', '__no_login__'
+        ),
+        'user_exists_ttl': float(scheduler_config.get('user_exists_ttl', 30.0))
     };
 }
 
@@ -504,7 +513,13 @@ impl JacScaleConfig.get_microservices_config(self: JacScaleConfig) -> dict[str, 
         # so KubernetesMicroserviceTarget can read `enabled` and (in
         # M-14.c) nested storage / retention knobs without revisiting
         # this loader on every new key.
-        'logs': dict(ms_config.get('logs', {}))
+        'logs': dict(ms_config.get('logs', {})),
+        # O-02: distributed tracing (OpenTelemetry -> Alloy/Tempo).
+        # Opaque pass-through, same shape as `logs`: `enabled` toggles
+        # the app-side SDK + Tempo deploy; `endpoint` overrides the OTLP
+        # collector URL; `sample_ratio` sets head sampling. Read by the
+        # gateway/service setup (install_tracing) and the K8s target.
+        'tracing': dict(ms_config.get('tracing', {}))
     };
 }
 
