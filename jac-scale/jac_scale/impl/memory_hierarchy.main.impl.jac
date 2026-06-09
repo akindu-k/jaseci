@@ -207,9 +207,8 @@ impl ScaleTieredMemory.close -> None {
     self.__gc__.clear();
 }
 
-"""Drop our L1 copy of `id` if a sibling write flagged it stale and it is clean,
-so the next tiered read reloads it; a dirty (uncommitted) entry is kept so the
-in-flight write survives. Called from every memory-routed read path."""
+"""If a sibling write flagged `id` stale, drop our copy (only if clean) so the
+next read reloads it; a dirty entry is kept so the in-flight write survives."""
 impl ScaleTieredMemory._refresh_if_stale(id: UUID) -> None {
     if consume_stale(self._l1_id, id) {
         existing = self.__mem__.get(id);
@@ -226,8 +225,8 @@ impl ScaleTieredMemory.get(id: UUID) -> (Anchor | None) {
     return super.get(id);
 }
 
-"""Tiered find: delegate to get() so it honors lower tiers and stale marks
-(VolatileMemory.find is L1-only and would miss both), matching SqliteMemory.find."""
+"""Delegate to get() so find honors lower tiers and stale marks (the inherited
+VolatileMemory.find is L1-only and would miss both)."""
 impl ScaleTieredMemory.find(
     ids: (UUID | Iterable[UUID]), filter: (Callable[[Anchor], Anchor] | None) = None
 ) -> Generator[Anchor, None, None] {

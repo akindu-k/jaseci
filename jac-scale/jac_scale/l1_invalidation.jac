@@ -28,11 +28,13 @@ def new_l1_id -> str {
 }
 
 
-"""Register an active L1 under its id."""
+"""Register an active L1 under its id. The finalizer clears its marks if it is
+GC'd without close() (the weak registry only auto-reclaims _l1_registry itself)."""
 def register_l1(l1_id: str, mem: VolatileMemory) {
     with _l1_lock {
         _l1_registry[l1_id] = mem;
     }
+    weakref.finalize(mem, deregister_l1, l1_id);
 }
 
 
@@ -47,9 +49,8 @@ def deregister_l1(l1_id: str) {
 
 """Mark `anchor_id` stale in every active L1 except the origin; return count marked.
 
-Marks rather than pops: this runs on the listener thread, and popping an anchor
-out of a sibling's `__mem__` would strand that request's uncommitted write
-(commit scans `__mem__`). The owner drops it on its next `get` instead."""
+Marks rather than pops: popping a sibling's `__mem__` off the listener thread
+would strand that request's uncommitted write. The owner drops it on next read."""
 def evict_local_l1(anchor_id: str, origin_l1_id: (str | None) = None) -> int {
     try {
         key = UUID(anchor_id);
@@ -90,9 +91,7 @@ def evict_local_l1(anchor_id: str, origin_l1_id: (str | None) = None) -> int {
 
 """Consume the stale mark for (l1_id, anchor id); True if it was marked (one-shot).
 
-Lock-free fast path: the common case (no mark for this L1) reads one atomic
-`dict.get` and returns, so the read hot path takes the lock only when there is
-actually a mark to clear."""
+Lock-free when there's no mark (the common case); locks only to clear a real one."""
 def consume_stale(l1_id: str, id: UUID) -> bool {
     marks = _stale_marks.get(l1_id);
     if marks is None or id not in marks {
