@@ -716,6 +716,16 @@ impl MongoBackend.sync -> set {
         return set();
     }
     self._atomic_written = set();
+
+    # Flush in dependency order — nodes, then edges, then the references that
+    # cite them — so a process killed mid-sync can never leave an edge whose
+    # endpoint node was never written (a dangling edge that breaks traversal).
+    # See issue #6488.
+    node_inserts: list[NodeAnchor] = [];
+    edge_inserts: list[Anchor] = [];
+    atomic_updates: list[tuple[NodeAnchor, list[str], list[str]]] = [];
+    partial_updates: list[tuple[Anchor, set[str]]] = [];
+
     for (_, anchor) in list(self._mem_ref.items()) {
         if not anchor.persistent {
             continue;
@@ -728,38 +738,67 @@ impl MongoBackend.sync -> set {
         if not Jac.check_write_access(anchor) {
             continue;
         }
-        try {
-            if isinstance(anchor, NodeAnchor) {
-                delta = anchor.edge_delta();
-                if delta is not None {
-                    added = [str(eid) for eid in delta[0]];
-                    removed = [str(eid) for eid in delta[1]];
-                    if added or removed {
-                        self._put_node_atomic(anchor, added, removed);
-                        continue;
-                    }
-                }
-            }
-            # Union __setattr__-tracked fields (direct assignments) with
-            # field-hash-derived fields (in-place mutations) to get the complete
-            # dirty set. Both must be combined — running only one silently drops
-            # the other category (e.g. direct + in-place in the same request).
-            if anchor.hash != 0 {
-                arch = anchor.archetype if anchor.is_populated() else None;
-                setattr_dirty: set[str] = (
-                    arch.__dict__.get('__jac_dirty_fields__') or set()
-                ).copy()
-                    if arch is not None
-                    else set();
-                derived = _derive_dirty_from_field_hashes(anchor);
-                dirty = setattr_dirty | derived;
-                if dirty {
-                    self.put_partial(anchor, dirty);
+        if isinstance(anchor, NodeAnchor) {
+            delta = anchor.edge_delta();
+            if delta is not None {
+                added = [str(eid) for eid in delta[0]];
+                removed = [str(eid) for eid in delta[1]];
+                if added or removed {
+                    atomic_updates.append((anchor, added, removed));
                     continue;
                 }
             }
-            # First insert (hash == 0) or no field changes found — full upsert.
+        }
+        # Union __setattr__-tracked fields (direct assignments) with
+        # field-hash-derived fields (in-place mutations) to get the complete
+        # dirty set. Both must be combined — running only one silently drops
+        # the other category (e.g. direct + in-place in the same request).
+        if anchor.hash != 0 {
+            arch = anchor.archetype if anchor.is_populated() else None;
+            setattr_dirty: set[str] = (
+                arch.__dict__.get('__jac_dirty_fields__') or set()
+            ).copy()
+                if arch is not None
+                else set();
+            derived = _derive_dirty_from_field_hashes(anchor);
+            dirty = setattr_dirty | derived;
+            if dirty {
+                partial_updates.append((anchor, dirty));
+                continue;
+            }
+        }
+        # First insert (hash == 0) or no field changes found — full upsert.
+        if isinstance(anchor, NodeAnchor) {
+            node_inserts.append(anchor);
+        } else {
+            edge_inserts.append(anchor);
+        }
+    }
+
+    for anchor in node_inserts {
+        try {
             self._write_to_db(anchor);
+        } except Exception as e {
+            logger.warning(f"MongoDB sync failed for anchor {anchor.id}: {e}");
+        }
+    }
+    for anchor in edge_inserts {
+        try {
+            self._write_to_db(anchor);
+        } except Exception as e {
+            logger.warning(f"MongoDB sync failed for anchor {anchor.id}: {e}");
+        }
+    }
+    for (anchor, added, removed) in atomic_updates {
+        try {
+            self._put_node_atomic(anchor, added, removed);
+        } except Exception as e {
+            logger.warning(f"MongoDB sync failed for anchor {anchor.id}: {e}");
+        }
+    }
+    for (anchor, dirty) in partial_updates {
+        try {
+            self.put_partial(anchor, dirty);
         } except Exception as e {
             logger.warning(f"MongoDB sync failed for anchor {anchor.id}: {e}");
         }
