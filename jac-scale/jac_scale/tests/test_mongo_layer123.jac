@@ -783,6 +783,7 @@ test "put_partial path is unaffected by 40180 (classic $set tolerates empty dict
     _reset_mongo_40180();
     _process_cache.pop('mongo_client', None);
     _process_cache.pop('mongo_available', None);
+    _process_cache.pop('mongo_strip_empty_dicts', None);
     (client, uri) = _get_mongo_40180();
     backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
 
@@ -819,8 +820,15 @@ test "_put_node_atomic strips empty-dict archetype fields (reproduces 40180 on m
     _reset_mongo_40180();
     _process_cache.pop('mongo_client', None);
     _process_cache.pop('mongo_available', None);
+    _process_cache.pop('mongo_strip_empty_dicts', None);
     (client, uri) = _get_mongo_40180();
     backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
+
+    assert backend._strip_pipeline_empty_dicts , (
+        "mongo:6.0 (< 6.1) rejects empty embedded objects in pipeline $set, "
+        "so empty-dict stripping must be enabled by version detection; got "
+        f"_strip_pipeline_empty_dicts={backend._strip_pipeline_empty_dicts}"
+    );
 
     inst = _MongoEmptyDictNode(label="test-atomic");
     anchor = cast(NodeAnchor, inst.__jac__);

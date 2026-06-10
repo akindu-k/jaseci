@@ -40,6 +40,9 @@ impl MongoBackend.postinit -> None {
             logger.debug(f"MongoBackend: index creation skipped: {e}");
         }
     }
+    # Detect once whether the server needs empty-dict stripping on the
+    # aggregation-pipeline $set path (see _put_node_atomic).
+    self._strip_pipeline_empty_dicts = _pipeline_requires_empty_dict_strip(self.client);
 }
 
 
@@ -107,6 +110,47 @@ def _strip_empty_dicts(v: object) -> object {
         return [_strip_empty_dicts(item) for item in v];
     }
     return v;
+}
+
+
+"""First MongoDB version accepting empty embedded objects in pipeline $set (SERVER-54046)."""
+glob _MIN_EMPTY_EMBEDDED_PIPELINE_VERSION: tuple = (6, 1, 0);
+
+
+"""True when the server (< 6.1.0, or version unreadable) needs empty-dict stripping on pipeline $set."""
+def _pipeline_requires_empty_dict_strip(client: any) -> bool {
+    if client is None {
+        return True;
+    }
+    if 'mongo_strip_empty_dicts' in _process_cache {
+        return cast(bool, _process_cache['mongo_strip_empty_dicts']);
+    }
+    required = True;
+    try {
+        info = client.server_info();
+        version = tuple((info.get('versionArray') or [])[:3]);
+        if version {
+            required = version < _MIN_EMPTY_EMBEDDED_PIPELINE_VERSION;
+            logger.info(
+                f"MongoDB server {info.get('version', '?')} detected; "
+                "pipeline empty-dict strip "
+                f"{'enabled' if required else 'disabled'}."
+            );
+        } else {
+            logger.warning(
+                "MongoDB version unreadable (empty versionArray); enabling "
+                "pipeline empty-dict strip as a safe default."
+            );
+        }
+    } except Exception as e {
+        logger.warning(
+            f"MongoDB version detection failed ({e}); enabling pipeline "
+            "empty-dict strip as a safe default."
+        );
+        required = True;
+    }
+    _process_cache['mongo_strip_empty_dicts'] = required;
+    return required;
 }
 
 
@@ -826,11 +870,18 @@ impl MongoBackend._put_node_atomic(
         hash_dirty = _derive_dirty_from_field_hashes(anchor);
         dirty = setattr_dirty | hash_dirty;
 
-        # Strip empty dicts: pipeline $set below rejects them (40180) on mongo <= 6.x.
+        # Serialize only the dirty archetype fields. On servers < 6.1.0 the
+        # aggregation-pipeline $set below rejects empty embedded documents
+        # (error 40180), so strip empty-dict leaves to keep the write durable;
+        # the cost is that a deliberate "clear a dict field to {}" cannot be
+        # expressed on this atomic path there. On >= 6.1.0 (capability detected
+        # once at connect) we keep empty dicts so such clears persist, matching
+        # put_partial's classic-$set behavior. See _pipeline_requires_empty_dict_strip.
+        serialized: dict = Serializer.serialize_fields(anchor, dirty) if dirty else {};
         partial_data: dict[str, object] = (
-            cast(dict, _strip_empty_dicts(Serializer.serialize_fields(anchor, dirty)))
-                if dirty
-                else {}
+            cast(dict, _strip_empty_dicts(serialized))
+                if self._strip_pipeline_empty_dicts
+                else serialized
         );
 
         # Non-archetype, non-edge top-level data fields (e.g. access control).
