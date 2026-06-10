@@ -12,7 +12,7 @@ import from llvmlite { ir }
 import jaclang.jac0core.unitree as uni;
 import from jaclang.jac0core.passes.module_codegen_pass { ModuleCodegenPass }
 import from jaclang.jac0core.constant { CodeContext, Tokens as Tok }
-import from jaclang.jac0core.diagnostics { E5026, E5060, E5090, E5091 }
+import from jaclang.jac0core.diagnostics { E5026, E5060, E5090, E5091, E9002 }
 
 # ── Python stdlib modules the native backend can lower ────────────────────
 # Allowlist of bare `import X;` modules whose member accesses (`X.attr`,
@@ -133,7 +133,6 @@ obj NaIRGenPass(ModuleCodegenPass) {
         enum_value_arrays: dict[str, object] = {},
         enum_name_arrays: dict[str, object] = {},
         enum_member_ordinal: dict[str, int] = {},
-        var_enum_type: dict[str, str] = {},
         struct_field_enum_type: dict[str, dict] = {},
         loop_stack: list[tuple] = [],
         _str_count: int = 0,
@@ -144,11 +143,9 @@ obj NaIRGenPass(ModuleCodegenPass) {
         struct_field_defaults: dict[str, object] = {},
         method_funcs: dict[str, ir.Function] = {},
         method_ast_sigs: dict[str, object] = {},
-        type_var_map: dict[str, str] = {},
         # List support (Phase 4)
         list_types: dict[str, object] = {},
         list_helpers: dict[str, dict] = {},
-        var_list_elem_type: dict[str, str] = {},
         # For ptr-element lists holding boxed tuples, the pointer-to-struct
         # LLVM type of an element (e.g. `{i64, i64}*`). Lets `(a, b) = lst.pop()`
         # recover the tuple shape for a bare `list` whose annotation carries no
@@ -158,10 +155,12 @@ obj NaIRGenPass(ModuleCodegenPass) {
         # just boxed, read by the enclosing assignment to seed
         # var_list_elem_struct. Reset at the start of each list-literal codegen.
         _pending_list_elem_struct: (object | None) = None,
+        # Archetype whose method body is being codegen'd. Inherited methods are
+        # re-emitted per subclass, so `self` must resolve to the *current*
+        # (flattened) layout, not the declaring parent the checker reports.
+        _self_arch: (str | None) = None,
         field_type_node: dict[str, dict] = {},
-        var_type_node: dict[str, object] = {},
         _list_type_hint: (str | None) = None,
-        _last_type_node_hint: (object | None) = None,
         # True while codegen'ing the TupleVal of a `return (...)`. In that
         # context borrowed (field-load / element-read) pointer elements must be
         # retained so they outlive the owning local's scope-exit teardown — the
@@ -212,23 +211,16 @@ obj NaIRGenPass(ModuleCodegenPass) {
         _osp_ensure_fn: (object | None) = None,
         # Tuple support (Phase 9)
         tuple_types: dict[str, object] = {},
-        var_tuple_type: dict[str, str] = {},
-        # Complex/Range/Slice var tracking
-        var_complex: set[str] = set(),
-        var_range: set[str] = set(),
-        var_slice: set[str] = set(),
         # Global variable support (Phase 11)
         global_vars: dict[str, ir.GlobalVariable] = {},
         global_var_types: dict[str, ir.Type] = {},
         # Dictionary support (Phase 12)
         dict_types: dict[str, object] = {},
         dict_helpers: dict[str, dict] = {},
-        var_dict_type: dict[str, str] = {},
         _dict_val_type_hint: (str | None) = None,
         # Set support (Phase 13)
         set_types: dict[str, object] = {},
         set_helpers: dict[str, dict] = {},
-        var_set_elem_type: dict[str, str] = {},
         # Exception handling support (Phase 14)
         _exc_state_type: (object | None) = None,
         _exc_handler_global: (object | None) = None,
@@ -294,14 +286,10 @@ obj NaIRGenPass(ModuleCodegenPass) {
         # Both are reset at the start of each function/method.
         _param_store_instr: dict[str, object] = {},
         _param_promoted: set[str] = set(),
-        # Python-scoping for module globals (keeps na ⊆ sv): only module-level
-        # code (_in_module_scope) or a name pulled in by an explicit `global x;`
-        # (_declared_globals) may rebind a module global. A bare function-scope
-        # assignment to a glob-named variable allocates a function-local
-        # instead — matching CPython and the sv (.sv.jac) pathway. Both are
-        # reset per function.
-        _declared_globals: set[str] = set(),
-        _in_module_scope: bool = False,
+        # TypeBase -> ir.Type lowering memo, keyed by the canonical type key
+        # (TypeBase.mangle). Per LLVM module; a hit implies any collection
+        # helpers for the type were already emitted.
+        _lowered_type_cache: dict[str, ir.Type] = {},
         # DWARF debug metadata (populated in postinit when JAC_NATIVE_DEBUG=1)
         di_file: object = None,
         di_cu: object = None,
@@ -349,7 +337,6 @@ obj NaIRGenPass(ModuleCodegenPass) {
     # with a variable name during assignment. Set by _codegen_lambda, consumed
     # and cleared by _codegen_assignment.
     def _codegen_lambda(nd: uni.LambdaExpr) -> (ir.Value | None);
-    def _find_free_vars(body: object, param_names: list[str]) -> list[str];
     # External function support (Phase 0)
     def _get_or_declare_extern(
         name: str, ret_type: ir.Type, arg_types: list[ir.Type], var_arg: bool = False
@@ -370,6 +357,24 @@ obj NaIRGenPass(ModuleCodegenPass) {
     def _lower_type(t: any) -> (ir.Type | None);
     def _lower_class_type(t: any) -> (ir.Type | None);
     def _lower_function_type(t: any) -> ir.Type;
+    # Canonical type key (TypeBase.mangle) of an expression's checked type.
+    def _type_key_of(expr: (uni.UniNode | None)) -> (str | None);
+    # Enum class name of an expression's checked type (instance or member).
+    def _enum_name_of(expr: (uni.UniNode | None)) -> (str | None);
+    # Native tuple registry key derived from an expression's checked type.
+    def _tuple_key_of(expr: (uni.UniNode | None)) -> (str | None);
+    # Native set spec key ("i64"/"f64"/"ptr"/...) from a checked set type.
+    def _set_spec_of(expr: (uni.UniNode | None)) -> (str | None);
+    # Native dict registry key ("k:v" spec) from a checked dict type.
+    def _dict_key_of(expr: (uni.UniNode | None)) -> (str | None);
+    # Native list spec key ("i64"/"f64"/"ptr"/...) from a checked list type.
+    def _list_spec_of(expr: (uni.UniNode | None)) -> (str | None);
+    # Native struct name from a checked instance type (handles T | None).
+    def _struct_name_of(expr: (uni.UniNode | None)) -> (str | None);
+    # Lowered LLVM type of a checked list type's element.
+    def _list_elem_llvm_of(expr: (uni.UniNode | None)) -> (ir.Type | None);
+    # Element spec ("i64"/"f64"/"ptr"/"jacval") of a checked list type.
+    def _elem_spec_of(expr: (uni.UniNode | None)) -> (str | None);
     def _resolve_type_str(type_name: str) -> ir.Type;
     def _get_name(nd: (uni.UniNode | None)) -> (str | None);
     def _to_bool(val: ir.Value) -> ir.Value;
@@ -429,7 +434,6 @@ obj NaIRGenPass(ModuleCodegenPass) {
     def _forward_declare_imported_ability(nd: uni.Ability) -> None;
     def _register_archetypes(module: uni.Module) -> None;
     # Object-Spatial kernel lowering (Phase 4 / issue #6146)
-    def _arch_kind(nd: uni.Archetype) -> (str | None);
     def _register_osp_tags(archetypes: list[uni.Archetype]) -> None;
     def _register_osp_kernel_module -> None;
     def _emit_osp_thunk(arch_name: str, method: uni.Ability) -> None;
@@ -455,6 +459,13 @@ obj NaIRGenPass(ModuleCodegenPass) {
     # Resolve the member struct names a trigger tag denotes -- a single `Name`,
     # a `|` union, or a `(A, B)` tuple trigger -- filtered to known structs.
     def _trigger_member_structs(tag: (uni.UniNode | None)) -> list[str];
+    # Checker-resolved trigger type names from `Ability.event_triggers`
+    # (mangled keys; `type[X]` unwrapped, unions split). None when the
+    # checker recorded no resolution (fall back to the trigger AST).
+    def _event_trigger_type_names(method: uni.Ability) -> (list[str] | None);
+    # Member struct names an event ability fires on: checker-resolved
+    # triggers filtered to known structs, with AST-flattening fallback.
+    def _trigger_struct_names(method: uni.Ability) -> list[str];
     # Validate that every field common to all union members lives at the same
     # index and type; returns the first divergent field name, or None if the
     # members share a consistent layout (so any member's layout is usable).
@@ -579,7 +590,6 @@ obj NaIRGenPass(ModuleCodegenPass) {
         coll_name: (str | None), coll_node: (object | None)
     ) -> (ir.Type | None);
 
-    def _resolve_ptr_elem_cast_type(type_node: (object | None)) -> (ir.Type | None);
     def _infer_unpack_struct_ptr(nd: object) -> (ir.Type | None);
     # Phase 7: String Methods and Builtins
     def _codegen_string_index(

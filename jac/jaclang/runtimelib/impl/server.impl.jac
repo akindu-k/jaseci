@@ -1581,6 +1581,16 @@ impl ExecutionHandler.spawn_walker(
 impl JacAPIServer.postinit -> None {
     import from jaclang.runtimelib.scheduler { Scheduler }
     self.user_manager = Jac.get_user_manager(base_path=self.base_path);
+    # Back `root.shared`: map the internal guest user to its root id, creating
+    # the guest account on first use (request paths create it lazily too).
+    _um = self.user_manager;
+    def _shared_root_id -> (str | None) {
+        if not _um.user_exists(Con.GUEST.value) {
+            _um.create_user(Con.GUEST.value, '__no_password__');
+        }
+        return _um.get_root_id(Con.GUEST.value);
+    }
+    Jac.set_shared_root_resolver(_shared_root_id);
     self.introspector = ModuleIntrospector(self.module_name, self.base_path);
     self.execution_manager = ExecutionManager(
         base_path=self.base_path, user_manager=self.user_manager

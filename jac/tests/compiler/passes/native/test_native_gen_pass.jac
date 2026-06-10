@@ -2003,14 +2003,21 @@ test "clib struct value-type coercion" {
     # --- Small struct (Color: 32-bit, integer fields) ABI coercion ---
     # Color struct type should be defined
     assert '%"Color" = type {i8, i8, i8, i8}' in llvm_ir_str , "Color struct type not found";
-    # Extern draw should have Color param ABI-coerced to i32
-    assert 'declare void @"draw"(i32 %"x", i32 %"y", i32 %"color")' in llvm_ir_str , "draw should use i32 for Color param (ABI coercion)";
     # Jac test_draw function should use Color pointer internally
     assert 'define void @"test_draw"' in llvm_ir_str;
-    # System V ABI coercion at the call site: the Color value is reinterpreted
-    # as its register coerce type ({i32}) and the eightbyte is loaded out.
-    assert "clib.arg.cast" in llvm_ir_str , "Missing struct-to-ABI bitcast";
+    # Struct-by-value coercion at the call site: the small struct is passed in
+    # an integer register, loaded out of the struct slot.
     assert "clib.arg.load" in llvm_ir_str , "Missing struct ABI register load";
+    import platform;
+    if "x86_64" in platform.machine() or "AMD64" in platform.machine() {
+        # System V AMD64: the 4-byte Color eightbyte coerces to i32 and the
+        # value is reinterpreted via a struct-to-ABI bitcast.
+        assert 'declare void @"draw"(i32 %"x", i32 %"y", i32 %"color")' in llvm_ir_str , "draw should use i32 for Color param (SysV ABI coercion)";
+        assert "clib.arg.cast" in llvm_ir_str , "Missing struct-to-ABI bitcast";
+    } elif platform.machine() in ("arm64", "aarch64") {
+        # AAPCS64: composites are rounded up to the 8-byte register size.
+        assert 'declare void @"draw"(i32 %"x", i32 %"y", i64 %"color")' in llvm_ir_str , "draw should use i64 for Color param (AAPCS64 coercion)";
+    }
 }
 
 test "clib System V AMD64 ABI lowering" {
