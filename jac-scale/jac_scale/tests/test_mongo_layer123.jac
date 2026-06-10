@@ -745,6 +745,42 @@ test "_put_node_atomic written document round-trips correctly after fix (issue #
 }
 
 
+test "_put_node_atomic persists a cleared-to-{} dict field on mongo >= 6.1 (#6294)" {
+    _reset_mongo();
+    (client, uri) = _get_mongo();
+    backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
+
+    assert not backend._strip_pipeline_empty_dicts , (
+        "mongo:latest (>= 6.1) accepts empty embedded objects in pipeline "
+        "$set, so empty-dict stripping must be disabled by version detection; "
+        f"got _strip_pipeline_empty_dicts={backend._strip_pipeline_empty_dicts}"
+    );
+
+    inst = _MongoEmptyDictNode(label="seed", settings={"keep": 1});
+    anchor = cast(NodeAnchor, inst.__jac__);
+    anchor.persistent = True;
+    backend._write_to_db(anchor);
+
+    inst.settings = {};
+    inst.__dict__['__jac_dirty_fields__'] = {'settings'};
+    fake_edge_id = str(uuid4());
+    backend._put_node_atomic(anchor, [fake_edge_id], []);
+
+    col = client["jac_test_l123"]["_anchors"];
+    doc = col.find_one({'_id': str(anchor.id)});
+    assert doc is not None , "document must exist after seed + atomic update";
+    arch_data = cast(dict, doc.get('data', {}).get('archetype', {}));
+    assert arch_data.get('settings') == {} , (
+        "clearing a non-empty dict field to {} on the atomic path must "
+        "persist the empty dict on mongo >= 6.1 (no strip); stale value "
+        "means the clear was silently swallowed. Got settings="
+        f"{arch_data.get('settings')!r}"
+    );
+
+    backend.close();
+}
+
+
 # mongo:6.0 is the production image and the only version where pipeline $set
 # rejects empty dicts (40180); 7.0+ accepts them. See issue #6167.
 glob _MONGO_40180_IMAGE = "mongo:6.0";

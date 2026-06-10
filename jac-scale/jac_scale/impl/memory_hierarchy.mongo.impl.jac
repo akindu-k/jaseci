@@ -907,10 +907,8 @@ impl MongoBackend._put_node_atomic(
                 else serialized
         );
 
-        # Non-archetype, non-edge top-level data fields (e.g. access control).
-        # Strip empty nested dicts before including in the aggregation-pipeline
-        # $set: MongoDB rejects empty embedded documents (error 40180) in that
-        # context.  access.roots.anchors defaults to {} and is the common trigger.
+        # Non-archetype top-level fields (e.g. access.roots.anchors={}): strip empty dicts to avoid 40180.
+        # Unconditional (unlike the archetype strip) — whole-object replace + defaults-on-load lose nothing.
         full = dict(Serializer.serialize(anchor, include_type=True));
         non_arch_top = {
             k: _strip_empty_dicts(v)
