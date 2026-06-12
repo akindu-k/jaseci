@@ -745,16 +745,10 @@ test "_put_node_atomic written document round-trips correctly after fix (issue #
 }
 
 
-test "_put_node_atomic persists a cleared-to-{} dict field on mongo >= 6.1 (#6294)" {
+test "_put_node_atomic persists a cleared-to-{} dict field on mongo:latest (#6294)" {
     _reset_mongo();
     (client, uri) = _get_mongo();
     backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
-
-    assert not backend._strip_pipeline_empty_dicts , (
-        "mongo:latest (>= 6.1) accepts empty embedded objects in pipeline "
-        "$set, so empty-dict stripping must be disabled by version detection; "
-        f"got _strip_pipeline_empty_dicts={backend._strip_pipeline_empty_dicts}"
-    );
 
     inst = _MongoEmptyDictNode(label="seed", settings={"keep": 1});
     anchor = cast(NodeAnchor, inst.__jac__);
@@ -772,8 +766,8 @@ test "_put_node_atomic persists a cleared-to-{} dict field on mongo >= 6.1 (#629
     arch_data = cast(dict, doc.get('data', {}).get('archetype', {}));
     assert arch_data.get('settings') == {} , (
         "clearing a non-empty dict field to {} on the atomic path must "
-        "persist the empty dict on mongo >= 6.1 (no strip); stale value "
-        "means the clear was silently swallowed. Got settings="
+        "persist the empty dict via the $literal wrap; stale value means "
+        "the clear was silently swallowed. Got settings="
         f"{arch_data.get('settings')!r}"
     );
 
@@ -781,8 +775,9 @@ test "_put_node_atomic persists a cleared-to-{} dict field on mongo >= 6.1 (#629
 }
 
 
-# mongo:6.0 is the production image and the only version where pipeline $set
-# rejects empty dicts (40180); 7.0+ accepts them. See issue #6167.
+# mongo:6.0 is the production image and the only supported version where a bare
+# empty dict in a pipeline $set is rejected (40180); 6.1+ accepts them. The
+# $literal wrap makes clear-to-{} persist identically on every version. See #6167.
 glob _MONGO_40180_IMAGE = "mongo:6.0";
 
 
@@ -819,7 +814,6 @@ test "put_partial path is unaffected by 40180 (classic $set tolerates empty dict
     _reset_mongo_40180();
     _process_cache.pop('mongo_client', None);
     _process_cache.pop('mongo_available', None);
-    _process_cache.pop('mongo_strip_empty_dicts', None);
     (client, uri) = _get_mongo_40180();
     backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
 
@@ -850,61 +844,41 @@ test "put_partial path is unaffected by 40180 (classic $set tolerates empty dict
 }
 
 
-test "_put_node_atomic strips empty-dict archetype fields (reproduces 40180 on mongo:6.0)" {
-    # Without the fix, the pipeline $set raises 40180, the error is swallowed,
-    # and nothing persists — so find_one returns None.
+test "_put_node_atomic persists a cleared-to-{} dict field on mongo:6.0 via $literal (#6167/#6294)" {
+    # mongo:6.0 rejects a bare {} in a pipeline $set with 40180. The $literal
+    # wrap lets the write through AND stores a real empty object, so a
+    # deliberate clear-to-{} persists here exactly as it does on mongo:latest —
+    # the previous version-gated strip silently swallowed it on this image.
     _reset_mongo_40180();
     _process_cache.pop('mongo_client', None);
     _process_cache.pop('mongo_available', None);
-    _process_cache.pop('mongo_strip_empty_dicts', None);
     (client, uri) = _get_mongo_40180();
     backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
 
-    assert backend._strip_pipeline_empty_dicts , (
-        "mongo:6.0 (< 6.1) rejects empty embedded objects in pipeline $set, "
-        "so empty-dict stripping must be enabled by version detection; got "
-        f"_strip_pipeline_empty_dicts={backend._strip_pipeline_empty_dicts}"
-    );
-
-    inst = _MongoEmptyDictNode(label="test-atomic");
+    inst = _MongoEmptyDictNode(label="seed", settings={"keep": 1});
     anchor = cast(NodeAnchor, inst.__jac__);
     anchor.persistent = True;
+    backend._write_to_db(anchor);
 
-    # Mirror the __setattr__ hook: force the empty-dict fields through partial_data.
-    inst.__dict__['__jac_dirty_fields__'] = {'label', 'settings', 'metadata'};
-
+    # Mirror the __setattr__ hook: clear the dict field and force it dirty.
+    inst.settings = {};
+    inst.__dict__['__jac_dirty_fields__'] = {'settings'};
     fake_edge_id = str(uuid4());
     backend._put_node_atomic(anchor, [fake_edge_id], []);
 
     col = client["jac_test_l123"]["_anchors"];
     doc = col.find_one({'_id': str(anchor.id)});
     assert doc is not None , (
-        "None document means the pipeline $set raised 40180 on an empty "
-        "dict (regression: _strip_empty_dicts not applied)."
+        "None document means the pipeline $set raised 40180 — the $literal "
+        "wrap must let an empty dict through on mongo:6.0."
     );
 
-    data_field = cast(dict, doc.get('data', {}));
-    arch_data = cast(dict, data_field.get('archetype', {}));
-    assert arch_data.get('label') == 'test-atomic' , (
-        f"mutated scalar field must survive the atomic write; got: {arch_data}"
-    );
-
-    def _has_empty_dict(v: object) -> bool {
-        if isinstance(v, dict) {
-            if not v {
-                return True;
-            }
-            return bool(any(_has_empty_dict(vv) for vv in v.values()));
-        }
-        if isinstance(v, list) {
-            return bool(any(_has_empty_dict(item) for item in v));
-        }
-        return False;
-    }
-    assert not _has_empty_dict(data_field) , (
-        "_put_node_atomic partial_data path must strip empty dicts — "
-        "MongoDB aggregation-pipeline $set rejects them (error 40180). "
-        f"Offending data: {data_field}"
+    arch_data = cast(dict, doc.get('data', {}).get('archetype', {}));
+    assert arch_data.get('settings') == {} , (
+        "clearing a non-empty dict field to {} on the atomic path must "
+        "persist a real empty object on mongo:6.0 (via $literal); stale value "
+        "means the clear was silently swallowed. Got settings="
+        f"{arch_data.get('settings')!r}"
     );
 
     backend.close();

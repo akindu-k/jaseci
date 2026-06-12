@@ -118,8 +118,7 @@ obj MongoBackend(PersistentMemory) {
         _l1_id: (str | None) = None,
         fetch_count: int = 0,
         put_count: int = 0,
-        _atomic_written: set by postinit,
-        _strip_pipeline_empty_dicts: bool by postinit;
+        _atomic_written: set[UUID] by postinit;
 
     def postinit -> None;
     def set_memory_ref(mem: dict[UUID, Anchor]) -> None;

@@ -53,9 +53,6 @@ impl MongoBackend.postinit -> None {
             logger.debug(f"MongoBackend: quarantine auto-retry skipped: {e}");
         }
     }
-    # Detect once whether the server needs empty-dict stripping on the
-    # aggregation-pipeline $set path (see _put_node_atomic).
-    self._strip_pipeline_empty_dicts = _pipeline_requires_empty_dict_strip(self.client);
 }
 
 
@@ -100,16 +97,7 @@ def _anchor_has_structural_change(anchor: Anchor) -> bool {
     return anchor.hash == 0;
 }
 
-"""Recursively remove empty-dict leaves from a serialized value.
-
-MongoDB's aggregation-pipeline $set (used in _put_node_atomic) rejects any
-embedded empty document with error 40180 (EmptyObjectInUpdate).  The default
-Permission / Access values always produce `access.roots.anchors = {}`, so
-every NodeAnchor update fails unless we strip those leaves before building
-the set_doc.  The Serializer restores default empty dicts on deserialize via
-field(default_factory=dict), so stripping them from the stored document is
-safe and lossless.
-"""
+"""Recursively drop empty-dict leaves (lossless for whole-object-replace fields restored by defaults on load)."""
 def _strip_empty_dicts(v: object) -> object {
     if isinstance(v, dict) {
         cleaned = {k: _strip_empty_dicts(vv) for (k, vv) in v.items()};
@@ -126,44 +114,18 @@ def _strip_empty_dicts(v: object) -> object {
 }
 
 
-"""First MongoDB version accepting empty embedded objects in pipeline $set (SERVER-54046)."""
-glob _MIN_EMPTY_EMBEDDED_PIPELINE_VERSION: tuple = (6, 1, 0);
-
-
-"""True when the server (< 6.1.0, or version unreadable) needs empty-dict stripping on pipeline $set."""
-def _pipeline_requires_empty_dict_strip(client: any) -> bool {
-    if client is None {
-        return True;
-    }
-    if 'mongo_strip_empty_dicts' in _process_cache {
-        return cast(bool, _process_cache['mongo_strip_empty_dicts']);
-    }
-    required = True;
-    try {
-        info = client.server_info();
-        version = tuple((info.get('versionArray') or [])[:3]);
-        if version {
-            required = version < _MIN_EMPTY_EMBEDDED_PIPELINE_VERSION;
-            logger.info(
-                f"MongoDB server {info.get('version', '?')} detected; "
-                "pipeline empty-dict strip "
-                f"{'enabled' if required else 'disabled'}."
-            );
-        } else {
-            logger.warning(
-                "MongoDB version unreadable (empty versionArray); enabling "
-                "pipeline empty-dict strip as a safe default."
-            );
+"""Recursively wrap empty-dict leaves in `{'$literal': {}}` so a pipeline $set stores `{}` instead of erroring 40180 (works on all server versions, preserving clear-to-{})."""
+def _wrap_empty_dicts_literal(v: object) -> object {
+    if isinstance(v, dict) {
+        if not v {
+            return {'$literal': {}};
         }
-    } except Exception as e {
-        logger.warning(
-            f"MongoDB version detection failed ({e}); enabling pipeline "
-            "empty-dict strip as a safe default."
-        );
-        required = True;
+        return {k: _wrap_empty_dicts_literal(vv) for (k, vv) in v.items()};
     }
-    _process_cache['mongo_strip_empty_dicts'] = required;
-    return required;
+    if isinstance(v, list) {
+        return [_wrap_empty_dicts_literal(item) for item in v];
+    }
+    return v;
 }
 
 
@@ -979,14 +941,12 @@ impl MongoBackend._put_node_atomic(
         dirty = setattr_dirty | hash_dirty;
 
         serialized: dict = Serializer.serialize_fields(anchor, dirty) if dirty else {};
-        partial_data: dict[str, object] = (
-            cast(dict, _strip_empty_dicts(serialized))
-                if self._strip_pipeline_empty_dicts
-                else serialized
+        # Wrap empty-dict leaves so a deliberate clear-to-{} persists (not strips) on every server version.
+        partial_data: dict[str, object] = cast(
+            dict, _wrap_empty_dicts_literal(serialized)
         );
 
-        # Non-archetype top-level fields (e.g. access.roots.anchors={}): strip empty dicts to avoid 40180.
-        # Unconditional (unlike the archetype strip) — whole-object replace + defaults-on-load lose nothing.
+        # Non-archetype top-level fields (e.g. access): strip empty dicts; whole-object replace + defaults-on-load lose nothing.
         full = dict(Serializer.serialize(anchor, include_type=True));
         non_arch_top = {
             k: _strip_empty_dicts(v)
