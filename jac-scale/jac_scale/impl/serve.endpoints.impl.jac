@@ -121,11 +121,13 @@ impl JacAPIServerEndpoints.create_walker_callback(
                 meta=Meta(extra={'http_status': 401})
             );
         }
+        walker_cls = self.get_walkers()[walker_name];
+        fields = filter_declared_kwargs(walker_cls, kwargs);
         if nd {
-            kwargs['_jac_spawn_node'] = nd;
+            fields['_jac_spawn_node'] = nd;
         }
         result = await self.execution_manager.spawn_walker(
-            self.get_walkers()[walker_name], kwargs, (username or Con.GUEST.value)
+            walker_cls, fields, (username or Con.GUEST.value)
         );
         if (isgenerator(result) or isinstance(result, AsyncGenerator)) {
             import from jac_scale.microservices.gateway_internals.middleware.sse {
@@ -254,9 +256,11 @@ impl JacAPIServerEndpoints.create_function_callback(
                 meta=Meta(extra={'http_status': 401})
             );
         }
-        console.print(f"Executing function '{func_name}' with params: {kwargs}");
+        func_obj = self.get_functions()[func_name];
+        params = filter_declared_kwargs(func_obj, kwargs);
+        console.print(f"Executing function '{func_name}' with params: {params}");
         result = await self.execution_manager.execute_function(
-            self.get_functions()[func_name], kwargs, (username or Con.GUEST.value)
+            func_obj, params, (username or Con.GUEST.value)
         );
         # Handle streaming responses (generators/async generators).
         # Wrap in sse_frame_stream so each yield becomes a properly
