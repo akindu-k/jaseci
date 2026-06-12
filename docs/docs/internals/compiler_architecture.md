@@ -476,6 +476,20 @@ rm -rf ~/.cache/jac/jir/modules/
 
 ---
 
+### The JIR-carries-semantics decision (Phase 10 gate)
+
+Measured 2026-06-11 on the chess fixture (3 runs each): warm cache-hit
+runs ~4.9s with the analysis pipeline fully skipped (bytecode and LLVM
+sections load directly); cold compiles ~182s with inference vs ~76s
+with inference disabled - inference is ~59% of a cold compile and ~0%
+of a warm one. Decision: semantic annotations (`Expr.type`,
+`callee_decl`, ownership facts) stay **recompute-on-load**; serializing
+them as JIR TLV sections would not improve warm compiles (already
+analysis-free) and cannot help the changed module on a miss (its
+analysis must run regardless). The actionable cost is typeshed stub
+processing inside cold-compile inference - an incremental-checking
+workstream, not a cache-format one.
+
 ## Key Files
 
 A short index, organised by the role each file plays in the pipeline.
