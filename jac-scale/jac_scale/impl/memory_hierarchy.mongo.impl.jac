@@ -941,9 +941,8 @@ impl MongoBackend._put_node_atomic(
         dirty = setattr_dirty | hash_dirty;
 
         serialized: dict = Serializer.serialize_fields(anchor, dirty) if dirty else {};
-        # Wrap empty-dict leaves so a deliberate clear-to-{} persists (not strips) on every server version.
         partial_data: dict[str, object] = cast(
-            dict, _wrap_empty_dicts_literal(serialized)
+            dict, {k: _wrap_empty_dicts_literal(v) for (k, v) in serialized.items()}
         );
 
         # Non-archetype top-level fields (e.g. access): strip empty dicts; whole-object replace + defaults-on-load lose nothing.
