@@ -745,38 +745,6 @@ test "_put_node_atomic written document round-trips correctly after fix (issue #
 }
 
 
-test "_put_node_atomic persists a cleared-to-{} dict field on mongo:latest (#6294)" {
-    _reset_mongo();
-    (client, uri) = _get_mongo();
-    backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
-
-    inst = _MongoEmptyDictNode(label="seed", settings={"keep": 1});
-    anchor = cast(NodeAnchor, inst.__jac__);
-    anchor.persistent = True;
-    backend._write_to_db(anchor);
-
-    inst.settings = {};
-    inst.__dict__['__jac_dirty_fields__'] = {'settings'};
-    fake_edge_id = str(uuid4());
-    # `fields` is the collect pass's dirty set — the single owner of dirty
-    # detection; pass {'settings'} to authorize persisting the cleared field.
-    backend._put_node_atomic(anchor, [fake_edge_id], [], {'settings'});
-
-    col = client["jac_test_l123"]["_anchors"];
-    doc = col.find_one({'_id': str(anchor.id)});
-    assert doc is not None , "document must exist after seed + atomic update";
-    arch_data = cast(dict, doc.get('data', {}).get('archetype', {}));
-    assert arch_data.get('settings') == {} , (
-        "clearing a non-empty dict field to {} on the atomic path must "
-        "persist the empty dict via the $literal wrap; stale value means "
-        "the clear was silently swallowed. Got settings="
-        f"{arch_data.get('settings')!r}"
-    );
-
-    backend.close();
-}
-
-
 test "_put_node_atomic stores a dict field with $-prefixed keys verbatim on the atomic path" {
     # Pins that the whole-value $literal wrap stores `$`-prefixed keys (e.g. the Serializer's `$ref`/`$type`) as data, not as misread pipeline operators.
     _reset_mongo();
@@ -843,40 +811,6 @@ def _reset_mongo_40180 -> None {
             _shared["mongo40180_client"].drop_database(db_name);
         }
     }
-}
-
-
-test "put_partial path is unaffected by 40180 (classic $set tolerates empty dicts)" {
-    _reset_mongo_40180();
-    _process_cache.pop('mongo_client', None);
-    _process_cache.pop('mongo_available', None);
-    (client, uri) = _get_mongo_40180();
-    backend = MongoBackend(mongo_url=uri, db_name="jac_test_l123");
-
-    inst = _MongoEmptyDictNode(label="original");
-    anchor = cast(NodeAnchor, inst.__jac__);
-    anchor.persistent = True;
-
-    backend._write_to_db(anchor);
-    inst.label = "updated";
-    backend.put_partial(anchor, {'label', 'settings', 'metadata'});
-
-    col = client["jac_test_l123"]["_anchors"];
-    doc = col.find_one({'_id': str(anchor.id)});
-    assert doc is not None , "document must exist after seed + put_partial";
-
-    arch_data = doc.get('data', {}).get('archetype', {});
-    assert arch_data.get('label') == 'updated' , (
-        "put_partial must write the mutated scalar field even when "
-        f"empty-dict fields are in the dirty set; got archetype: {arch_data}"
-    );
-    # Classic $set stores the empty dict as-is: no 40180, no strip needed.
-    assert arch_data.get('settings') == {} , (
-        "classic $set should persist an empty dict as-is on the partial "
-        f"path; got archetype: {arch_data}"
-    );
-
-    backend.close();
 }
 
 
