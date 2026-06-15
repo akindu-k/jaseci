@@ -681,23 +681,13 @@ test "_put_node_atomic persists node despite default empty access.roots.anchors 
         f"added edge must appear in data.edges; got: {stored_edges}"
     );
 
-    def _has_empty_dict(v: object) -> bool {
-        if isinstance(v, dict) {
-            if not v {
-                return True;
-            }
-            return bool(any(_has_empty_dict(vv) for vv in v.values()));
-        }
-        if isinstance(v, list) {
-            return bool(any(_has_empty_dict(item) for item in v));
-        }
-        return False;
-    }
-    data_field = doc.get('data', {});
-    assert not _has_empty_dict(data_field) , (
-        "stored document must not contain any empty dicts — "
-        "MongoDB aggregation-pipeline $set rejects them (error 40180). "
-        f"Offending data: {data_field}"
+    # The default empty access dict must be persisted, not rejected: the
+    # $literal wrap lets a pipeline $set store empty dicts (it would otherwise
+    # raise 40180). A non-None access proves the write went through intact.
+    stored_access = doc.get('data', {}).get('access');
+    assert stored_access is not None , (
+        "access (which carries the default empty roots.anchors dict) must be "
+        f"persisted through the atomic pipeline $set; got data: {doc.get('data', {})}"
     );
 
     backend.close();

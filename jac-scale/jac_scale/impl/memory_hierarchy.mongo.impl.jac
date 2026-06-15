@@ -96,23 +96,6 @@ def _anchor_has_structural_change(anchor: Anchor) -> bool {
     return anchor.hash == 0;
 }
 
-"""Recursively drop empty-dict leaves (lossless for whole-object-replace fields restored by defaults on load)."""
-def _strip_empty_dicts(v: object) -> object {
-    if isinstance(v, dict) {
-        cleaned = {k: _strip_empty_dicts(vv) for (k, vv) in v.items()};
-        return {
-            k: vv
-            for (k, vv) in cleaned.items()
-            if not (isinstance(vv, dict) and not vv)
-        };
-    }
-    if isinstance(v, list) {
-        return [_strip_empty_dicts(item) for item in v];
-    }
-    return v;
-}
-
-
 # Field-hash dirty detection lives in jaclang.runtimelib.changeset — one
 # shared implementation for the runtime's collect pass and every backend.
 """Build a stored document for an anchor, including Layer 2 fingerprint
@@ -813,32 +796,35 @@ impl MongoBackend._put_node_atomic(
     }
     _id = str(to_uuid(anchor.id));
     try {
-        arch = anchor.archetype if anchor.is_populated() else None;
-
         # Serialize only the intent's archetype fields. `fields` comes from the
         # collect pass — the single owner of dirty detection.
         partial_data: dict[str, object] = Serializer.serialize_fields(anchor, fields)
             if fields
             else {};
 
-        # Non-archetype top-level fields (e.g. access): strip empty dicts; whole-object replace + defaults-on-load lose nothing.
+        # Non-archetype top-level fields (e.g. access), whole-object replaced.
         full = dict(Serializer.serialize(anchor, include_type=True));
         non_arch_top = {
-            k: _strip_empty_dicts(v)
+            k: v
             for (k, v) in full.items()
             if k not in ('edges', 'archetype')
         };
 
-        # Build a flat $set document:
+        # Build a flat $set document. This is an aggregation-pipeline $set, so
+        # every value is evaluated as an expression — which rejects bare empty
+        # dicts (error 40180) and misreads `$`-prefixed keys (e.g. a Serializer
+        # `$ref`/`$type`). One rule keeps it safe: `data.edges` is the only
+        # expression; every serialized data value is wrapped in `$literal` and
+        # stored verbatim. (`type`/`updated_at` are hardcoded literals.)
         #   data.<k>               — non-arch top-level fields (e.g. access)
-        #   data.archetype.<field> — only dirty scalar fields (concurrent-safe)
+        #   data.archetype.<field> — the intent's dirty archetype fields
         #   data.edges             — atomic $setUnion/$setDifference expression
         set_doc: dict[str, object] = {
             'type': 'NodeAnchor',
             'updated_at': datetime.now(timezone.utc).isoformat()
         };
         for (k, v) in non_arch_top.items() {
-            set_doc[f"data.{k}"] = v;
+            set_doc[f"data.{k}"] = {'$literal': v};
         }
         for (k, v) in partial_data.items() {
             set_doc[f"data.archetype.{k}"] = {'$literal': v};
