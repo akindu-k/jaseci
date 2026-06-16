@@ -50,7 +50,7 @@ def get_unique_indexes -> list[UniqueIndexSpec] {
 
 
 """Clear the registry (test isolation; not used by production code)."""
-def clear_unique_indexes -> None {
+def clear_unique_indexes {
     _unique_indexes.clear();
 }
 

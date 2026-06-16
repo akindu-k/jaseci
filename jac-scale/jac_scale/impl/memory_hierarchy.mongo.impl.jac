@@ -118,13 +118,11 @@ impl MongoBackend._ensure_unique_indexes(ascending: int) -> None {
                 background=True
             );
         } except Exception as e {
-            code = getattr(e, 'code', None);
+            code = e?.code;
             if code in (85, 86) {
-                hint = "an index of the same name has a different spec; "
-                    + "drop the stale index, then redeploy";
+                hint = "an index of the same name has a different spec; " + "drop the stale index, then redeploy";
             } elif code == 11000 or 'duplicate key' in str(e).lower() {
-                hint = "existing duplicates block the unique index; "
-                    + "run a dedupe migration, then redeploy";
+                hint = "existing duplicates block the unique index; " + "run a dedupe migration, then redeploy";
             } else {
                 hint = "index creation failed";
             }

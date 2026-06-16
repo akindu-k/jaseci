@@ -1149,7 +1149,9 @@ test "unique: root-scoped index is created from the registry" {
     register_unique_index(_UniqProfile, scope="root");
     try {
         backend = MongoBackend(mongo_url=uri, db_name="jac_test_uniq");
-        names = {ix['name'] for ix in client["jac_test_uniq"]["_anchors"].list_indexes()};
+        names = {
+            ix['name'] for ix in client["jac_test_uniq"]["_anchors"].list_indexes()
+        };
         assert "uniq_root__UniqProfile" in names;
         backend.close();
     } finally {
@@ -1290,8 +1292,7 @@ test "unique: misconfigured index spec change fails startup loudly" {
     import from pymongo { ASCENDING }
     import from jaclang.runtimelib.exceptions { IndexMigrationRequired }
     client["jac_test_uniq"]["_anchors"].create_index(
-        [('data.archetype.user_id', ASCENDING)],
-        name="uniq_root__UniqProfile"
+        [('data.archetype.user_id', ASCENDING)], name="uniq_root__UniqProfile"
     );
     register_unique_index(_UniqProfile, scope="root");
     raised = False;
