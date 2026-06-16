@@ -145,9 +145,9 @@ impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
     }
     self._post_apply(apply_report);
     self.changes.clear();
-    # Surface a uniqueness conflict (409) after re-baselining applied siblings.
-    if apply_report.violations {
-        raise apply_report.violations[0];
+    # Surface uniqueness conflicts (409) after re-baselining applied intents.
+    if (uv := apply_report.primary_violation()) {
+        raise uv;
     }
 }
 

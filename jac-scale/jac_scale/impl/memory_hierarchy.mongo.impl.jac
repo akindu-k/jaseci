@@ -4,7 +4,7 @@ import from jac_scale.microservices.runtime.tracing {
     start_memory_span,
     end_memory_span
 }
-import from jaclang.runtimelib.exceptions { UniqueViolation }
+import from jaclang.runtimelib.exceptions { IndexMigrationRequired, UniqueViolation }
 
 """Post-initialization: connect to MongoDB and load DB-resident aliases.
 
@@ -41,6 +41,10 @@ impl MongoBackend.postinit -> None {
         }
         try {
             self.ensure_indexes();
+        } except IndexMigrationRequired {
+            # A declared unique index could not be created: refuse to serve
+            # unprotected rather than silently re-enable duplicate creation.
+            raise;
         } except Exception as e {
             logger.debug(f"MongoBackend: index creation skipped: {e}");
         }
@@ -102,6 +106,9 @@ impl MongoBackend._ensure_unique_indexes(ascending: int) -> None {
                 "_" + "_".join(spec.fields) if spec.fields else ""
             )
         );
+        # create_index is a no-op when an identical index already exists, so
+        # any exception here means the declared constraint is NOT enforced.
+        # Fail loudly (operator-actionable) rather than start up unprotected.
         try {
             self.collection.create_index(
                 keys,
@@ -111,7 +118,19 @@ impl MongoBackend._ensure_unique_indexes(ascending: int) -> None {
                 background=True
             );
         } except Exception as e {
-            logger.warning(f"MongoBackend: unique index {index_name} not created: {e}");
+            code = getattr(e, 'code', None);
+            if code in (85, 86) {
+                hint = "an index of the same name has a different spec; "
+                    + "drop the stale index, then redeploy";
+            } elif code == 11000 or 'duplicate key' in str(e).lower() {
+                hint = "existing duplicates block the unique index; "
+                    + "run a dedupe migration, then redeploy";
+            } else {
+                hint = "index creation failed";
+            }
+            raise IndexMigrationRequired(
+                detail=f"MongoBackend: unique index {index_name} not enforced ({hint}): {e}"
+            );
         }
     }
 }
@@ -808,9 +827,13 @@ impl MongoBackend.apply(changeset: ChangeSet) -> ApplyReport {
                 } except UniqueViolation as uv {
                     # Poison like any failed create (skips the edge + refs),
                     # but carry the typed conflict for commit() to raise as 409.
+                    # DEBUG, not ERROR: a losing racer is expected, not noise.
                     poisoned.add(intent.anchor.id);
                     apply_report.failed[intent.anchor.id] = uv.message();
                     apply_report.violations.append(uv);
+                    logger.debug(
+                        f"MongoDB apply: unique conflict on {intent.anchor.id}: {uv.message()}"
+                    );
                 } except Exception as e {
                     poisoned.add(intent.anchor.id);
                     apply_report.failed[intent.anchor.id] = str(e);

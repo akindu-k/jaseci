@@ -93,6 +93,18 @@ obj ApplyReport {
     def ok -> bool {
         return not self.failed and not self.skipped;
     }
+
+    """First uniqueness conflict with the rest attached as siblings, or None."""
+    def primary_violation -> (UniqueViolation | None) {
+        if not self.violations {
+            return None;
+        }
+        primary = self.violations[0];
+        if len(self.violations) > 1 {
+            primary.siblings = self.violations[1:];
+        }
+        return primary;
+    }
 }
 
 

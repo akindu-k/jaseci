@@ -49,6 +49,12 @@ def get_unique_indexes -> list[UniqueIndexSpec] {
 }
 
 
+"""Clear the registry (test isolation; not used by production code)."""
+def clear_unique_indexes -> None {
+    _unique_indexes.clear();
+}
+
+
 """Scope declared for `arch_type` covering `field`, or "global" if none."""
 def lookup_scope(arch_type: str, field: str) -> str {
     for spec in _unique_indexes {

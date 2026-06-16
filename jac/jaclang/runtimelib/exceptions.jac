@@ -9,7 +9,9 @@ obj UniqueViolation(Exception) {
         fields: list[str],
         values: dict[str, object],
         scope: str = "global",
-        existing_id: (UUID | None) = None;
+        existing_id: (UUID | None) = None,
+        # Other conflicts from the same unit of work (set by commit()).
+        siblings: (list | None) = None;
 
     def postinit {
         super.init(self.message());
@@ -27,11 +29,25 @@ obj UniqueViolation(Exception) {
 
     """Serializable form for the API error envelope."""
     def to_dict -> dict[str, object] {
-        return {
+        out: dict[str, object] = {
             "archetype": self.archetype_type,
             "fields": self.fields,
             "values": self.values,
             "scope": self.scope
         };
+        if self.siblings {
+            out["also_conflicting"] = [s.to_dict() for s in self.siblings];
+        }
+        return out;
+    }
+}
+
+
+"""Raised at startup when a declared unique index cannot be put in place."""
+obj IndexMigrationRequired(Exception) {
+    has detail: str;
+
+    def postinit {
+        super.init(self.detail);
     }
 }

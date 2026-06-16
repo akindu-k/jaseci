@@ -27,6 +27,12 @@ import from jaclang.jac0core.archetype {
     NodeArchetype
 }
 import from jaclang.runtimelib.serializer { Serializer }
+import from jaclang.runtimelib.changeset { ChangeSet }
+import from jaclang.runtimelib.exceptions { UniqueViolation }
+import from jaclang.runtimelib.index_registry {
+    clear_unique_indexes,
+    register_unique_index
+}
 import from jac_scale.memory_hierarchy {
     _process_cache,
     MongoBackend,
@@ -1112,4 +1118,190 @@ test "apply writes exactly the intent's fields, never re-derived dirtiness" {
     assert str(edge_id) in doc['data']['edges'] , "edge delta must still land";
 
     backend.close();
+}
+
+
+# ============================================================================
+# Declared archetype uniqueness (issue #6266)
+# ============================================================================
+obj _UniqProfile(Root) {
+    has user_id: str = "";
+}
+
+obj _UniqEmail(Root) {
+    has email: str = "";
+}
+
+
+"""Build a persistent node anchor of `arch` owned by `root_id`."""
+def _make_uniq_node(arch: NodeArchetype, root_id: UUID) -> NodeAnchor {
+    anchor = arch.__jac__;
+    anchor.persistent = True;
+    setattr(anchor, 'root', root_id);
+    return anchor;
+}
+
+
+test "unique: root-scoped index is created from the registry" {
+    _reset_mongo();
+    clear_unique_indexes();
+    (client, uri) = _get_mongo();
+    register_unique_index(_UniqProfile, scope="root");
+    try {
+        backend = MongoBackend(mongo_url=uri, db_name="jac_test_uniq");
+        names = {ix['name'] for ix in client["jac_test_uniq"]["_anchors"].list_indexes()};
+        assert "uniq_root__UniqProfile" in names;
+        backend.close();
+    } finally {
+        clear_unique_indexes();
+    }
+}
+
+
+test "unique: duplicate root-scoped node raises UniqueViolation, one doc persists" {
+    _reset_mongo();
+    clear_unique_indexes();
+    (client, uri) = _get_mongo();
+    register_unique_index(_UniqProfile, scope="root");
+    try {
+        backend = MongoBackend(mongo_url=uri, db_name="jac_test_uniq");
+        root_id = uuid4();
+        first = _make_uniq_node(_UniqProfile(user_id=str(uuid4())), root_id);
+        backend._write_to_db(first);
+        second = _make_uniq_node(_UniqProfile(user_id=str(uuid4())), root_id);
+        raised = False;
+        try {
+            backend._write_to_db(second);
+        } except UniqueViolation as uv {
+            raised = True;
+            assert uv.archetype_type == "_UniqProfile";
+            assert uv.scope == "root";
+        }
+        assert raised;
+        count = client["jac_test_uniq"]["_anchors"].count_documents(
+            {'arch_type': '_UniqProfile'}
+        );
+        assert count == 1;
+        backend.close();
+    } finally {
+        clear_unique_indexes();
+    }
+}
+
+
+test "unique: global field-scoped duplicate carries field and value" {
+    _reset_mongo();
+    clear_unique_indexes();
+    (client, uri) = _get_mongo();
+    register_unique_index(_UniqEmail, fields=["email"], scope="global");
+    try {
+        backend = MongoBackend(mongo_url=uri, db_name="jac_test_uniq");
+        first = _make_uniq_node(_UniqEmail(email="a@a.com"), uuid4());
+        backend._write_to_db(first);
+        # Different owning root, same email: global scope still collides.
+        second = _make_uniq_node(_UniqEmail(email="a@a.com"), uuid4());
+        captured: (UniqueViolation | None) = None;
+        try {
+            backend._write_to_db(second);
+        } except UniqueViolation as uv {
+            captured = uv;
+        }
+        assert captured is not None;
+        assert captured.scope == "global";
+        assert "email" in captured.fields;
+        assert captured.values.get("email") == "a@a.com";
+        backend.close();
+    } finally {
+        clear_unique_indexes();
+    }
+}
+
+
+test "unique: apply records the violation instead of inserting a duplicate" {
+    _reset_mongo();
+    clear_unique_indexes();
+    (client, uri) = _get_mongo();
+    register_unique_index(_UniqProfile, scope="root");
+    try {
+        backend = MongoBackend(mongo_url=uri, db_name="jac_test_uniq");
+        root_id = uuid4();
+        first = _make_uniq_node(_UniqProfile(user_id=str(uuid4())), root_id);
+        cs1 = ChangeSet();
+        cs1.record_create(first);
+        backend.apply(cs1);
+        second = _make_uniq_node(_UniqProfile(user_id=str(uuid4())), root_id);
+        cs2 = ChangeSet();
+        cs2.record_create(second);
+        rep = backend.apply(cs2);
+        assert len(rep.violations) == 1;
+        assert rep.violations[0].archetype_type == "_UniqProfile";
+        count = client["jac_test_uniq"]["_anchors"].count_documents(
+            {'arch_type': '_UniqProfile'}
+        );
+        assert count == 1;
+        backend.close();
+    } finally {
+        clear_unique_indexes();
+    }
+}
+
+
+test "unique: commit raises UniqueViolation when two creates collide in one unit" {
+    _reset_mongo();
+    clear_unique_indexes();
+    _process_cache.clear();
+    (client, uri) = _get_mongo();
+    register_unique_index(_UniqProfile, scope="root");
+    os.environ["MONGODB_URI"] = str(uri);
+    try {
+        mem = ScaleTieredMemory();
+        mem.postinit();
+        assert mem.l3 is not None , "MongoDB backend must be available";
+        root_id = uuid4();
+        a = _make_uniq_node(_UniqProfile(user_id=str(uuid4())), root_id);
+        b = _make_uniq_node(_UniqProfile(user_id=str(uuid4())), root_id);
+        mem.put(a);
+        mem.put(b);
+        raised = False;
+        try {
+            mem.commit();
+        } except UniqueViolation as uv {
+            raised = True;
+            assert uv.scope == "root";
+            assert uv.archetype_type == "_UniqProfile";
+        }
+        assert raised , "commit must surface the duplicate as UniqueViolation";
+        count = mem.l3.collection.count_documents({'arch_type': '_UniqProfile'});
+        assert count == 1;
+    } finally {
+        os.environ.pop("MONGODB_URI", None);
+        clear_unique_indexes();
+        _process_cache.clear();
+    }
+}
+
+
+test "unique: misconfigured index spec change fails startup loudly" {
+    _reset_mongo();
+    clear_unique_indexes();
+    _process_cache.clear();
+    (client, uri) = _get_mongo();
+    # Pre-create an index under the generated name with a conflicting spec.
+    import from pymongo { ASCENDING }
+    import from jaclang.runtimelib.exceptions { IndexMigrationRequired }
+    client["jac_test_uniq"]["_anchors"].create_index(
+        [('data.archetype.user_id', ASCENDING)],
+        name="uniq_root__UniqProfile"
+    );
+    register_unique_index(_UniqProfile, scope="root");
+    raised = False;
+    try {
+        backend = MongoBackend(mongo_url=uri, db_name="jac_test_uniq");
+        backend.close();
+    } except IndexMigrationRequired {
+        raised = True;
+    } finally {
+        clear_unique_indexes();
+    }
+    assert raised , "a conflicting existing index must fail startup, not be swallowed";
 }
