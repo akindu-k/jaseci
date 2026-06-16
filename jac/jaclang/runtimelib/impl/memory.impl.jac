@@ -2007,6 +2007,10 @@ impl TieredMemory.commit(anchor: (Anchor | None) = None) -> None {
     apply_report = self.l3.apply(self.changes);
     self._post_apply(apply_report);
     self.changes.clear();
+    # Surface a uniqueness conflict (409) after re-baselining applied siblings.
+    if apply_report.violations {
+        raise apply_report.violations[0];
+    }
 }
 
 """Collect the working set's dirtiness into the unit of work. This is the

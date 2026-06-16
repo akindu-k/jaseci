@@ -2,6 +2,7 @@ import from jaclang.cli.console { console }
 import from jaclang.cli.banners { JAC_DISCORD_URL }
 import from jaclang.runtimelib.serializer { Serializer }
 import from jaclang.runtimelib.client_bundle { _ensure_js_generated }
+import from jaclang.runtimelib.exceptions { UniqueViolation }
 import from jaclang.runtimelib.auth_models {
     IdentityType,
     LoginRequest,
@@ -393,6 +394,15 @@ impl ExecutionManager.execute_function_sync(
             result = await result;
         }
         return await self._finalize_call_response(call_state, result);
+    } except UniqueViolation as uv {
+        # Lost a check-then-create race: surface a typed 409, not a 500.
+        ctx.mem.abort();
+        return {
+            'error': uv.message(),
+            'error_code': 'unique_violation',
+            'http_status': 409,
+            'detail': uv.to_dict()
+        };
     } except Exception as e {
         # Abort-on-error: a failed call must not half-mutate the graph.
         # Discard its uncommitted unit of work instead of leaving it in
@@ -423,6 +433,15 @@ impl ExecutionManager.execute_function_async(
         _deserialize_wire_args(args);
         result = await func(**args);
         return await self._finalize_call_response(call_state, result);
+    } except UniqueViolation as uv {
+        # Lost a check-then-create race: surface a typed 409, not a 500.
+        ctx.mem.abort();
+        return {
+            'error': uv.message(),
+            'error_code': 'unique_violation',
+            'http_status': 409,
+            'detail': uv.to_dict()
+        };
     } except Exception as e {
         # Abort-on-error: a failed call must not half-mutate the graph.
         # Discard its uncommitted unit of work instead of leaving it in
@@ -487,6 +506,15 @@ impl ExecutionManager.spawn_walker_sync(
             result = await result;
         }
         return await self._finalize_call_response(call_state, result);
+    } except UniqueViolation as uv {
+        # Lost a check-then-create race: surface a typed 409, not a 500.
+        ctx.mem.abort();
+        return {
+            'error': uv.message(),
+            'error_code': 'unique_violation',
+            'http_status': 409,
+            'detail': uv.to_dict()
+        };
     } except Exception as e {
         import traceback;
         # Abort-on-error: a failed walker must not half-mutate the graph.
@@ -534,6 +562,15 @@ impl ExecutionManager.spawn_walker_async(
             result = spawn_result;
         }
         return await self._finalize_call_response(call_state, result);
+    } except UniqueViolation as uv {
+        # Lost a check-then-create race: surface a typed 409, not a 500.
+        ctx.mem.abort();
+        return {
+            'error': uv.message(),
+            'error_code': 'unique_violation',
+            'http_status': 409,
+            'detail': uv.to_dict()
+        };
     } except Exception as e {
         import traceback;
         # Abort-on-error: a failed walker must not half-mutate the graph.

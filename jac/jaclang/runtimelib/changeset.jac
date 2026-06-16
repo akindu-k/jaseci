@@ -30,6 +30,7 @@ import from uuid { UUID }
 import from jaclang.jac0core.archetype { Anchor, EdgeAnchor, NodeAnchor }
 import from jaclang.runtimelib.serializer { Serializer }
 import from jaclang.runtimelib.typecache { get_field_types }
+import from jaclang.runtimelib.exceptions { UniqueViolation }
 
 
 enum WriteOp {
@@ -78,12 +79,15 @@ error, and which were skipped because a dependency failed (id -> reason)."""
 obj ApplyReport {
     has applied: list[UUID] by postinit,
         failed: dict[UUID, str] by postinit,
-        skipped: dict[UUID, str] by postinit;
+        skipped: dict[UUID, str] by postinit,
+        # Typed uniqueness conflicts; commit() raises these as a 409.
+        violations: list[UniqueViolation] by postinit;
 
     def postinit {
         self.applied = [];
         self.failed = {};
         self.skipped = {};
+        self.violations = [];
     }
 
     def ok -> bool {
@@ -123,7 +127,17 @@ obj ChangeSet {
         if existing is not None {
             existing.op = op;
         } else {
-            self.intents[anchor.id] = WriteIntent(op=op, anchor=anchor);
+            existing = WriteIntent(op=op, anchor=anchor);
+            self.intents[anchor.id] = existing;
+        }
+        # An edge can't be written before its endpoints exist: a failed
+        # endpoint create poisons it (mirrors the delete-direction wiring).
+        if isinstance(anchor, EdgeAnchor) and anchor.is_populated() {
+            for endp in (anchor.source, anchor.target) {
+                if endp is not None {
+                    existing.depends_on.add(endp.id);
+                }
+            }
         }
     }
 
@@ -164,11 +178,14 @@ obj ChangeSet {
                 existing.edges_removed.remove(eid);
             } elif eid not in existing.edges_added {
                 existing.edges_added.append(eid);
+                # The list-add depends on the edge's create; a failed edge skips it.
+                existing.depends_on.add(eid);
             }
         }
         for eid in removed {
             if eid in existing.edges_added {
                 existing.edges_added.remove(eid);
+                existing.depends_on.discard(eid);
             } elif eid not in existing.edges_removed {
                 existing.edges_removed.append(eid);
             }

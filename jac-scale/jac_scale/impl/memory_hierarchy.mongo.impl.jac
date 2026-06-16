@@ -4,6 +4,7 @@ import from jac_scale.microservices.runtime.tracing {
     start_memory_span,
     end_memory_span
 }
+import from jaclang.runtimelib.exceptions { UniqueViolation }
 
 """Post-initialization: connect to MongoDB and load DB-resident aliases.
 
@@ -79,6 +80,40 @@ impl MongoBackend.ensure_indexes -> None {
     self.collection.create_index(
         [('updated_at', DESCENDING)], name='updated_at_-1', background=True
     );
+    self._ensure_unique_indexes(ASCENDING);
+}
+
+"""Create one unique partial index per registered archetype constraint."""
+impl MongoBackend._ensure_unique_indexes(ascending: int) -> None {
+    import from jaclang.runtimelib.index_registry { get_unique_indexes }
+    for spec in get_unique_indexes() {
+        arch_name = spec.arch_name();
+        keys: list = [];
+        if spec.scope == "root" {
+            keys.append(('data.root', ascending));
+        }
+        keys.append(('arch_type', ascending));
+        for f in spec.fields {
+            keys.append((f'data.archetype.{f}', ascending));
+        }
+        index_name = spec.name
+        or (
+            f"uniq_{spec.scope}_{arch_name}" + (
+                "_" + "_".join(spec.fields) if spec.fields else ""
+            )
+        );
+        try {
+            self.collection.create_index(
+                keys,
+                name=index_name,
+                unique=True,
+                partialFilterExpression={'arch_type': arch_name},
+                background=True
+            );
+        } except Exception as e {
+            logger.warning(f"MongoBackend: unique index {index_name} not created: {e}");
+        }
+    }
 }
 
 """Get the `_quarantine` companion collection."""
@@ -123,6 +158,32 @@ def _anchor_to_doc(anchor: Anchor) -> dict {
         'format_version': 1,
         'updated_at': datetime.now(timezone.utc).isoformat()
     };
+}
+
+"""Translate a Mongo DuplicateKeyError into a typed UniqueViolation."""
+def _translate_duplicate(err: object, anchor: Anchor) -> UniqueViolation {
+    details = err?.details or {};
+    key_value = details.get('keyValue', {}) or {};
+    arch_type = type(anchor.archetype).__name__
+        if anchor.is_populated() and anchor.archetype is not None
+        else type(anchor).__name__;
+    fields: list[str] = [];
+    values: dict[str, object] = {};
+    scope = "root" if 'data.root' in key_value else "global";
+    for (k, v) in key_value.items() {
+        if k.startswith('data.archetype.') {
+            name = k[len('data.archetype.'):];
+            fields.append(name);
+            values[name] = v;
+        }
+    }
+    return UniqueViolation(
+        archetype_type=arch_type,
+        fields=fields,
+        values=values,
+        scope=scope,
+        existing_id=None
+    );
 }
 
 """Persist a read-repaired anchor back to its document (lazy migration).
@@ -455,6 +516,7 @@ impl MongoBackend._write_to_db(anchor: Anchor) -> None {
     if self.client is None or not anchor.persistent {
         return;
     }
+    import from pymongo.errors { DuplicateKeyError }
     self.put_count += 1;
     _id = to_uuid(anchor.id);
     arch = anchor.archetype if anchor.is_populated() else None;
@@ -463,6 +525,8 @@ impl MongoBackend._write_to_db(anchor: Anchor) -> None {
         self.collection.update_one({'_id': str(_id)}, {'$set': doc}, upsert=True);
         anchor.hash = Serializer._compute_hash(anchor);
         snapshot_field_hashes(anchor);
+    } except DuplicateKeyError as dke {
+        raise _translate_duplicate(dke, anchor);
     } except Exception as e {
         # Propagate: apply() must know a structural write failed so it can
         # poison dependents instead of minting a dangling reference.
@@ -476,6 +540,7 @@ impl MongoBackend.put_partial(anchor: Anchor, field_names: set[str]) -> None {
     if self.client is None or not anchor.persistent or not field_names {
         return;
     }
+    import from pymongo.errors { DuplicateKeyError }
     _id = to_uuid(anchor.id);
     try {
         # Classic operator $set (below) accepts empty dicts; no strip needed.
@@ -490,6 +555,8 @@ impl MongoBackend.put_partial(anchor: Anchor, field_names: set[str]) -> None {
         self.collection.update_one({'_id': str(_id)}, {'$set': update});
         anchor.hash = Serializer._compute_hash(anchor);
         snapshot_field_hashes(anchor);
+    } except DuplicateKeyError as dke {
+        raise _translate_duplicate(dke, anchor);
     } except Exception as e {
         logger.error(f"MongoDB put_partial failed: {e}");
         raise;
@@ -738,6 +805,12 @@ impl MongoBackend.apply(changeset: ChangeSet) -> ApplyReport {
                 try {
                     self._apply_one(intent);
                     apply_report.applied.append(intent.anchor.id);
+                } except UniqueViolation as uv {
+                    # Poison like any failed create (skips the edge + refs),
+                    # but carry the typed conflict for commit() to raise as 409.
+                    poisoned.add(intent.anchor.id);
+                    apply_report.failed[intent.anchor.id] = uv.message();
+                    apply_report.violations.append(uv);
                 } except Exception as e {
                     poisoned.add(intent.anchor.id);
                     apply_report.failed[intent.anchor.id] = str(e);
@@ -794,6 +867,7 @@ impl MongoBackend._put_node_atomic(
     if self.client is None {
         return;
     }
+    import from pymongo.errors { DuplicateKeyError }
     _id = str(to_uuid(anchor.id));
     try {
         # Serialize the intent's dirty archetype fields (`fields` = collect pass's dirty set, the sole owner of dirty detection).
@@ -876,6 +950,8 @@ impl MongoBackend._put_node_atomic(
                 f"MongoDB _put_node_atomic _snapshot_field_hashes failed: {shf_err}"
             );
         }
+    } except DuplicateKeyError as dke {
+        raise _translate_duplicate(dke, anchor);
     } except Exception as e {
         logger.error(f"MongoDB _put_node_atomic failed: {e}");
         raise;

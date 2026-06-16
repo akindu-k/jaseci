@@ -157,6 +157,7 @@ obj MongoBackend(PersistentMemory) {
     def execute_plan(plan: QueryPlan) -> Generator[Anchor, None, None];
     # One-time index setup (idempotent). Called from postinit.
     def ensure_indexes -> None;
+    def _ensure_unique_indexes(ascending: int) -> None;
     def apply(changeset: ChangeSet) -> ApplyReport;
     def _apply_one(intent: WriteIntent) -> None;
     # Layer 1+2+3 operator surface
