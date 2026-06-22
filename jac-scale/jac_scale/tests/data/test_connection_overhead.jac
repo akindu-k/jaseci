@@ -154,10 +154,22 @@ test "authenticated requests reuse the pooled MongoDB connection" {
 
         baseline = mongo_total_created(admin_client);
 
+        served = 0;
         for _ in range(REQUEST_COUNT) {
-            call_walker(base_url, "ListItems", token);
+            resp = cast(dict, extract(call_walker(base_url, "ListItems", token)));
+            if resp.get("reports") {
+                served += 1;
+            }
         }
         time.sleep(0.3);
+
+        # Liveness: every request must have actually reached the server and run
+        # the walker, else a delta of 0 would be vacuously within budget.
+        assert served == REQUEST_COUNT , (
+            f"SERVER DID NO WORK: {served}/{REQUEST_COUNT} ListItems calls returned a "
+            f"walker report; the connection-reuse check below would be vacuous. The "
+            f"server may have crashed or the token expired after warm-up."
+        );
 
         delta = mongo_total_created(admin_client) - baseline;
 
