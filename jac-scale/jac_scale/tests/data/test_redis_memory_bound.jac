@@ -1,12 +1,10 @@
-"""Proof test: L2 Redis cache has no TTL — anchor keys never expire.
+"""Verifies the L2 Redis cache keeps its own memory bounded.
 
-Every anchor written through ScaleTieredMemory is stored in Redis with
-redis_client.set(key, data) when redis_default_ttl is 0 (the default).
-Keys have TTL = -1 (never expire). As the graph grows, Redis memory grows
-monotonically. There is no application-level eviction policy.
-
-Expected on current main: FAILS (keys have TTL=-1, dbsize never shrinks).
-Expected after fix: PASSES (TTL > 0 or LRU eviction configured).
+The guarantee is not "every key has a TTL"; it is "memory cannot grow without
+bound". That holds when either anchor keys expire (redis_default_ttl > 0) or the
+server evicts under pressure (maxmemory > 0 with an evicting policy). These tests
+assert that guarantee against an unconfigured redis:latest, which the cache must
+bound itself via CONFIG SET on first connect.
 """
 
 import contextlib;
@@ -106,110 +104,28 @@ def start_server(fixtures_dir: Path, jac_file: Path, port: int) -> subprocess.Po
     raise RuntimeError(f"server failed\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}");
 }
 
-test "L2 Redis: anchor keys have no TTL (default config — memory leak)" {
-    """Every anchor is cached in Redis with redis_client.set(key, value) when
-    redis_default_ttl is 0. TTL = -1 means the key never expires. Redis memory
-    grows without bound as more anchors are written.
+"""True when the server reports maxmemory > 0 with an evicting policy."""
+def server_memory_bounded(client: redis.Redis) -> bool {
+    maxmemory = int(client.config_get("maxmemory").get("maxmemory", 0));
+    policy = client.config_get("maxmemory-policy").get(
+        "maxmemory-policy", "noeviction"
+    );
+    return maxmemory > 0 and policy != "noeviction";
+}
 
-    This test creates BATCH_SIZE nodes, then inspects every anchor key in Redis
-    and asserts that all keys have TTL = -1 (i.e., will never expire).
-    """;
-    BATCH_SIZE = 20;
-
-    data_dir = FIXTURES_DIR / ".jac" / "data";
+"""Remove the fixture data directory if it exists."""
+def clear_data_dir(data_dir: Path) {
     if data_dir.exists() {
         import shutil;
         shutil.rmtree(data_dir);
-    }
-
-    redis_container = RedisContainer("redis:latest");
-    redis_container.start();
-    redis_host = redis_container.get_container_host_ip();
-    redis_port = redis_container.get_exposed_port(6379);
-    redis_url = f"redis://{redis_host}:{redis_port}/0";
-    os.environ["REDIS_URL"] = redis_url;
-
-    mongo_container = MongoDbContainer("mongo:latest");
-    mongo_container.start();
-    mongo_uri = mongo_container.get_connection_url();
-    os.environ["MONGODB_URI"] = mongo_uri;
-
-    redis_client = redis.from_url(redis_url);
-    port = get_free_port();
-    base_url = f"http://localhost:{port}";
-    server = start_server(FIXTURES_DIR, JAC_FILE, port);
-
-    try {
-        token = register_user(base_url, "leak_tester");
-        # Seed: create BATCH_SIZE Item nodes in a single walker call.
-        call_walker(base_url, "BulkCreate", token, {"count": BATCH_SIZE});
-        # Small pause to allow async commit to complete.
-        time.sleep(0.5);
-
-        # Inspect every key Redis holds.
-        all_keys = redis_client.keys("*");
-        assert len(all_keys) > 0 , (
-            "Redis is empty after BulkCreate — "
-            "either the server didn't use Redis or commit path is broken."
-        );
-
-        no_ttl_keys: list = [];
-        for key in all_keys {
-            ttl = redis_client.ttl(key);
-            # TTL -1 == no expiry set; TTL -2 == key doesn't exist (shouldn't happen).
-            if ttl == -1 {
-                no_ttl_keys.append(key);
-            }
-        }
-
-        assert len(no_ttl_keys) == 0 , (
-            f"MEMORY LEAK: {len(no_ttl_keys)}/{len(all_keys)} Redis keys have "
-            f"TTL=-1 (never expire). "
-            f"redis_default_ttl defaults to 0 in _get_db_config(), which causes "
-            f"redis_client.set(key, value) with no expiry. "
-            f"Every anchor ever written accumulates permanently in Redis. "
-            f"Sample keys with no TTL: {[k.decode() for k in no_ttl_keys[:5]]}. "
-            f"See memory_hierarchy.redis.impl.jac:71-79."
-        );
-    } finally {
-        with contextlib.suppress(Exception) {
-            redis_client.close();
-        }
-        if server {
-            server.terminate();
-            with contextlib.suppress(Exception) {
-                server.wait(timeout=2);
-            }
-        }
-        os.environ.pop("REDIS_URL", None);
-        os.environ.pop("MONGODB_URI", None);
-        mongo_container.stop();
-        redis_container.stop();
-        time.sleep(0.3);
-        gc.collect();
-        if data_dir.exists() {
-            import shutil;
-            shutil.rmtree(data_dir);
-        }
     }
 }
 
-test "L2 Redis: dbsize grows monotonically — no eviction across request batches" {
-    """Send three batches of BATCH_SIZE creates each, measuring Redis dbsize after
-    each batch. Redis should grow. With a correct eviction policy it would plateau;
-    with no TTL and no maxmemory-policy it grows without bound.
-
-    This test proves the monotonic growth path — fixing it requires either
-    a per-anchor TTL or an LRU eviction policy.
-    """;
-    BATCH_SIZE = 10;
-    BATCHES = 3;
-
+"""With redis_default_ttl defaulting to 3600, every cached key must expire."""
+test "L2 Redis: anchor keys carry a TTL under default config" {
+    BATCH_SIZE = 20;
     data_dir = FIXTURES_DIR / ".jac" / "data";
-    if data_dir.exists() {
-        import shutil;
-        shutil.rmtree(data_dir);
-    }
+    clear_data_dir(data_dir);
 
     redis_container = RedisContainer("redis:latest");
     redis_container.start();
@@ -220,8 +136,7 @@ test "L2 Redis: dbsize grows monotonically — no eviction across request batche
 
     mongo_container = MongoDbContainer("mongo:latest");
     mongo_container.start();
-    mongo_uri = mongo_container.get_connection_url();
-    os.environ["MONGODB_URI"] = mongo_uri;
+    os.environ["MONGODB_URI"] = mongo_container.get_connection_url();
 
     redis_client = redis.from_url(redis_url);
     port = get_free_port();
@@ -229,45 +144,23 @@ test "L2 Redis: dbsize grows monotonically — no eviction across request batche
     server = start_server(FIXTURES_DIR, JAC_FILE, port);
 
     try {
-        token = register_user(base_url, "growth_tester");
-        sizes: list[int] = [];
-
-        for batch in range(BATCHES) {
-            call_walker(base_url, "BulkCreate", token, {"count": BATCH_SIZE});
-            time.sleep(0.3);
-            sizes.append(redis_client.dbsize());
-        }
-
-        # Each batch should add keys — Redis size must strictly increase.
-        for i in range(1, len(sizes)) {
-            assert sizes[i] > sizes[i - 1] , (
-                f"Redis dbsize did not grow after batch {i}: "
-                f"{sizes}. This batch's anchors may not have been cached."
-            );
-        }
-
-        # Flush Redis and verify keys are gone — then re-run a batch and confirm
-        # they come back: proves the cache is the leak source, not MongoDB.
-        redis_client.flushall();
-        assert redis_client.dbsize() == 0;
+        token = register_user(base_url, "ttl_tester");
         call_walker(base_url, "BulkCreate", token, {"count": BATCH_SIZE});
-        time.sleep(0.3);
-        size_after_flush = redis_client.dbsize();
-        assert size_after_flush > 0 , (
-            "After flushall+BulkCreate Redis is still empty — "
-            "commit path is not writing to Redis."
+        time.sleep(0.5);
+
+        all_keys = redis_client.keys("*");
+        assert len(all_keys) > 0 , (
+            "Redis is empty after BulkCreate; commit path is not using Redis."
         );
 
-        # The key assertion: none of these re-added keys have a TTL.
-        keys = redis_client.keys("*");
-        no_ttl = [
+        no_ttl_keys = [
             k
-            for k in keys
+            for k in all_keys
             if redis_client.ttl(k) == -1
         ];
-        assert no_ttl , (
-            f"All {len(keys)} keys have a TTL set after reflush — "
-            f"this test is no longer relevant; the leak may already be fixed."
+        assert len(no_ttl_keys) == 0 , (
+            f"{len(no_ttl_keys)}/{len(all_keys)} keys have no TTL despite "
+            f"redis_default_ttl=3600. Sample: {[k.decode() for k in no_ttl_keys[:5]]}."
         );
     } finally {
         with contextlib.suppress(Exception) {
@@ -285,9 +178,64 @@ test "L2 Redis: dbsize grows monotonically — no eviction across request batche
         redis_container.stop();
         time.sleep(0.3);
         gc.collect();
-        if data_dir.exists() {
-            import shutil;
-            shutil.rmtree(data_dir);
+        clear_data_dir(data_dir);
+    }
+}
+
+"""A bare redis:latest starts unbounded; after the cache connects it must
+report maxmemory > 0 with an evicting policy, so memory cannot grow forever.
+"""
+test "L2 Redis: cache self-enforces a memory bound on an unconfigured server" {
+    BATCH_SIZE = 10;
+    data_dir = FIXTURES_DIR / ".jac" / "data";
+    clear_data_dir(data_dir);
+
+    redis_container = RedisContainer("redis:latest");
+    redis_container.start();
+    redis_host = redis_container.get_container_host_ip();
+    redis_port = redis_container.get_exposed_port(6379);
+    redis_url = f"redis://{redis_host}:{redis_port}/0";
+    os.environ["REDIS_URL"] = redis_url;
+
+    mongo_container = MongoDbContainer("mongo:latest");
+    mongo_container.start();
+    os.environ["MONGODB_URI"] = mongo_container.get_connection_url();
+
+    redis_client = redis.from_url(redis_url);
+    assert not server_memory_bounded(redis_client) , (
+        "Precondition failed: redis:latest should start unbounded (maxmemory=0)."
+    );
+
+    port = get_free_port();
+    base_url = f"http://localhost:{port}";
+    server = start_server(FIXTURES_DIR, JAC_FILE, port);
+
+    try {
+        token = register_user(base_url, "bound_tester");
+        call_walker(base_url, "BulkCreate", token, {"count": BATCH_SIZE});
+        time.sleep(0.5);
+
+        assert server_memory_bounded(redis_client) , (
+            "Cache did not bound Redis memory: maxmemory="
+            f"{redis_client.config_get('maxmemory')}, policy="
+            f"{redis_client.config_get('maxmemory-policy')}."
+        );
+    } finally {
+        with contextlib.suppress(Exception) {
+            redis_client.close();
         }
+        if server {
+            server.terminate();
+            with contextlib.suppress(Exception) {
+                server.wait(timeout=2);
+            }
+        }
+        os.environ.pop("REDIS_URL", None);
+        os.environ.pop("MONGODB_URI", None);
+        mongo_container.stop();
+        redis_container.stop();
+        time.sleep(0.3);
+        gc.collect();
+        clear_data_dir(data_dir);
     }
 }

@@ -49,6 +49,7 @@ impl RedisBackend.is_available -> bool {
     }
     try {
         self.redis_client.ping();
+        _ensure_redis_memory_bound(self.redis_client, _get_db_config());
         _process_cache['redis_available'] = True;
         return True;
     } except Exception as e {
@@ -100,15 +101,9 @@ impl RedisBackend.put(anchor: Anchor) -> None {
     try {
         data = Serializer.serialize(anchor, include_type=True);
         key = storage_key(anchor.id);
-
-        # Get TTL from config
-        db_config = _get_db_config();
-        ttl = db_config.get('redis_default_ttl', 0);
-
-        # Apply TTL if configured (ttl > 0)
+        ttl = _resolve_write_ttl(_get_db_config());
         if ttl > 0 {
             self.redis_client.setex(key, ttl, json.dumps(data));
-            logger.debug(f"Stored anchor {anchor.id} in Redis with TTL={ttl}s");
         } else {
             self.redis_client.set(key, json.dumps(data));
         }
@@ -342,8 +337,7 @@ impl RedisBackend.aput(anchor: Anchor) -> None {
     try {
         data = Serializer.serialize(anchor, include_type=True);
         key = storage_key(anchor.id);
-        db_config = _get_db_config();
-        ttl = db_config.get('redis_default_ttl', 0);
+        ttl = _resolve_write_ttl(_get_db_config());
         if ttl > 0 {
             await self._async_redis.setex(key, ttl, json.dumps(data));
         } else {

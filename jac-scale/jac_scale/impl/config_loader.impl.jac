@@ -25,6 +25,7 @@ impl JacScaleConfig.get_default_config(self: JacScaleConfig) -> dict[str, any] {
             'redis_max_memory': '200mb',
             'redis_eviction_policy': 'allkeys-lru',
             'redis_eviction_samples': 5,
+            'redis_enforce_eviction': True,
             'redis_default_ttl': 3600,
             'redis_max_connections': 20,
             'redis_enable_keyspace_notifications': False,
@@ -210,6 +211,7 @@ impl JacScaleConfig.get_database_config(self: JacScaleConfig) -> dict[str, any] 
         'redis_max_memory': db_config.get('redis_max_memory', '200mb'),
         'redis_eviction_policy': db_config.get('redis_eviction_policy', 'allkeys-lru'),
         'redis_eviction_samples': int(db_config.get('redis_eviction_samples', 5)),
+        'redis_enforce_eviction': bool(db_config.get('redis_enforce_eviction', True)),
         'redis_default_ttl': int(db_config.get('redis_default_ttl', 3600)),
         'redis_max_connections': int(db_config.get('redis_max_connections', 20)),
         'redis_enable_keyspace_notifications': db_config.get(
