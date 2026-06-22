@@ -42,6 +42,9 @@ impl RedisBackend.postinit -> None {
 """Check if Redis is available and connected."""
 impl RedisBackend.is_available -> bool {
     if _process_cache.get('redis_available') is True {
+        if self.redis_client is not None {
+            _ensure_redis_memory_bound(self.redis_client);
+        }
         return True;
     }
     if self.redis_client is None {
@@ -49,7 +52,7 @@ impl RedisBackend.is_available -> bool {
     }
     try {
         self.redis_client.ping();
-        _ensure_redis_memory_bound(self.redis_client, _get_db_config());
+        _ensure_redis_memory_bound(self.redis_client);
         _process_cache['redis_available'] = True;
         return True;
     } except Exception as e {

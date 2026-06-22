@@ -11,6 +11,7 @@ Falls back to jaclang's SqliteMemory when MongoDB is unavailable.
 """
 import json;
 import logging;
+import time;
 import from collections.abc { Callable, Generator, Iterable }
 import from datetime { datetime, timezone }
 import from pickle { dumps, loads }
@@ -54,7 +55,9 @@ glob logger = logging.getLogger(__name__),
      # Keys: 'mongo_client', 'redis_client', 'mongo_available', 'redis_available', 'system_root'
      _process_cache: dict[str, any] = {};
 
-glob DEFAULT_REDIS_TTL = 3600;
+glob DEFAULT_REDIS_TTL = 3600,
+     # Recheck interval so a Redis restart that drops runtime config is re-bounded.
+     REDIS_BOUND_RECHECK_SECONDS = 300;
 
 """Get fresh database config to support dynamic env var changes (e.g., testcontainers)."""
 def _get_db_config -> dict {
@@ -81,34 +84,46 @@ def _apply_redis_eviction(
 ) -> tuple[int, str] {
     max_memory = db_config.get('redis_max_memory', '200mb');
     policy = db_config.get('redis_eviction_policy', 'allkeys-lru');
+    # Policy before cap so a partial failure never leaves a cap with noeviction.
     try {
-        client.config_set('maxmemory', max_memory);
         client.config_set('maxmemory-policy', policy);
-        new_max = int(_redis_config_value(client, 'maxmemory', '0'));
-        logger.info(
-            f"Applied Redis memory bound maxmemory={max_memory}, policy={policy}."
-        );
-        return (new_max, policy);
     } except Exception as e {
-        logger.debug(f"Could not apply Redis eviction policy (managed instance?): {e}");
+        logger.debug(f"Could not set Redis eviction policy (managed instance?): {e}");
         return (cur_max, cur_policy);
     }
+    try {
+        client.config_set('maxmemory', max_memory);
+    } except Exception as e {
+        logger.debug(f"Could not set Redis maxmemory (managed instance?): {e}");
+    }
+    new_max = int(_redis_config_value(client, 'maxmemory', '0'));
+    new_policy = _redis_config_value(client, 'maxmemory-policy', 'noeviction');
+    if new_max > 0 and new_policy != 'noeviction' {
+        logger.info(
+            f"Applied Redis memory bound maxmemory={new_max}, policy={new_policy}."
+        );
+    }
+    return (new_max, new_policy);
 }
 
-"""Guarantee the connected Redis bounds its own memory; self-configure or warn once."""
-def _ensure_redis_memory_bound(client: any, db_config: dict) -> None {
-    if _process_cache.get('redis_bound_checked') {
+"""Guarantee the connected Redis bounds its own memory; self-configure or warn, rechecked periodically."""
+def _ensure_redis_memory_bound(client: any) -> None {
+    now = time.monotonic();
+    last = cast(float, _process_cache.get('redis_bound_checked_at', 0.0));
+    if last and now - last < REDIS_BOUND_RECHECK_SECONDS {
         return;
     }
-    _process_cache['redis_bound_checked'] = True;
+    _process_cache['redis_bound_checked_at'] = now;
     try {
         maxmemory = int(_redis_config_value(client, 'maxmemory', '0'));
         policy = _redis_config_value(client, 'maxmemory-policy', 'noeviction');
     } except Exception as e {
         logger.debug(f"Redis CONFIG GET unavailable, treating as unbounded: {e}");
         _process_cache['redis_evicts_all_keys'] = False;
+        _process_cache['redis_bound_checked_at'] = 0.0;
         return;
     }
+    db_config = _get_db_config();
     bounded = maxmemory > 0 and policy != 'noeviction';
     if not bounded and db_config.get('redis_enforce_eviction', True) {
         (maxmemory, policy) = _apply_redis_eviction(
@@ -133,6 +148,14 @@ def _resolve_write_ttl(db_config: dict) -> int {
     }
     if _process_cache.get('redis_evicts_all_keys', False) {
         return 0;
+    }
+    if not _process_cache.get('redis_ttl_fallback_warned') {
+        _process_cache['redis_ttl_fallback_warned'] = True;
+        logger.warning(
+            f"redis_default_ttl=0 ignored: the server does not evict all keys "
+            f"(needs an allkeys-* policy); writing keys with fallback "
+            f"TTL={DEFAULT_REDIS_TTL}s so memory stays bounded."
+        );
     }
     return DEFAULT_REDIS_TTL;
 }
