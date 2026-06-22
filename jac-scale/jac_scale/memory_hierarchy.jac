@@ -118,9 +118,9 @@ def _ensure_redis_memory_bound(client: any) -> None {
         maxmemory = int(_redis_config_value(client, 'maxmemory', '0'));
         policy = _redis_config_value(client, 'maxmemory-policy', 'noeviction');
     } except Exception as e {
+        # Keep the throttle so a CONFIG-blocked managed Redis is not probed per request.
         logger.debug(f"Redis CONFIG GET unavailable, treating as unbounded: {e}");
         _process_cache['redis_evicts_all_keys'] = False;
-        _process_cache['redis_bound_checked_at'] = 0.0;
         return;
     }
     db_config = _get_db_config();
