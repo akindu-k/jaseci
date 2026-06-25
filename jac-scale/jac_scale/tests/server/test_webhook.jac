@@ -610,10 +610,11 @@ def _stop_shared_mongo {
 """Drop jac_db so each test starts from clean Mongo state in the shared container."""
 def _reset_shared_mongo(uri: str) {
     client = MongoClient(uri);
-    with contextlib.suppress(Exception) {
+    try {
         client.drop_database('jac_db');
+    } finally {
+        client.close();
     }
-    client.close();
 }
 
 """Run a webhook test against a fresh server backed by the shared MongoDB container."""
