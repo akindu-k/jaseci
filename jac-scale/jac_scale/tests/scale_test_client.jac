@@ -22,6 +22,11 @@ import from pathlib { Path }
 import from jaclang { JacRuntime as Jac }
 import from jaclang.jac0core.constant { Constants as Con }
 
+# Hash throwaway fixture credentials at minimum bcrypt cost so it does not dominate test time.
+with entry {
+    os.environ.setdefault('JAC_SCALE_BCRYPT_ROUNDS', '4');
+}
+
 """Create an isolated ScaleTestClient with temp dir from a fixture file."""
 def make_client(fixture_file: str = "test_api.jac") -> ScaleTestClient {
     fixtures_dir = Path(__file__).parent / "fixtures";

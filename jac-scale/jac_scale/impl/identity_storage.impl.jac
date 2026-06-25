@@ -5,8 +5,11 @@ public methods implemented by MongoIdentityStorage / SqliteIdentityStorage.
 """
 
 impl IdentityStorage.hash_password(password: str) -> str {
+    rounds = get_scale_config().get_auth_config()['password_hash_rounds'];
     return str(
-        bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt(rounds=rounds)).decode(
+            'utf-8'
+        )
     );
 }
 

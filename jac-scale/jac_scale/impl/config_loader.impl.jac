@@ -147,7 +147,8 @@ impl JacScaleConfig.get_default_config(self: JacScaleConfig) -> dict[str, any] {
             'verify_token_ttl_seconds': 86400,
             'reset_url_template': '',
             'verify_url_template': '',
-            'token_collection': 'auth_tokens'
+            'token_collection': 'auth_tokens',
+            'password_hash_rounds': 12
         },
         'microservices': {
             # `enabled` is intentionally NOT defaulted here. Its absence is
@@ -401,6 +402,11 @@ impl reset_scale_config -> None {
     _scale_config_instance = None;
 }
 
+impl resolve_password_hash_rounds(configured_rounds: int) -> int {
+    rounds = int(os.environ.get('JAC_SCALE_BCRYPT_ROUNDS') or configured_rounds);
+    return max(4, min(31, rounds));
+}
+
 """Get telemetry configuration from jac.toml."""
 impl JacScaleConfig.get_telemetry_config(self: JacScaleConfig) -> dict[str, any] {
     config = self.load();
@@ -467,6 +473,9 @@ impl JacScaleConfig.get_auth_config(self: JacScaleConfig) -> dict[str, Any] {
         'reset_url_template': auth_config.get('reset_url_template', ''),
         'verify_url_template': auth_config.get('verify_url_template', ''),
         'token_collection': auth_config.get('token_collection', 'auth_tokens'),
+        'password_hash_rounds': resolve_password_hash_rounds(
+            int(auth_config.get('password_hash_rounds', 12))
+        ),
         'forgot_password_rate_per_hour': int(
             auth_config.get('forgot_password_rate_per_hour', 3)
         ),
