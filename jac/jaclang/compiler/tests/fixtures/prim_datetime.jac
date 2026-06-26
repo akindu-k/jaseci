@@ -16,6 +16,9 @@ import from datetime { datetime, timezone }
 
 def datetime_py() -> dict {
     dt = datetime.fromtimestamp(1700000000.0, timezone.utc);
+    # A pre-1970 (negative) POSIX timestamp pins the floor-division/modulo path:
+    # 1969-12-30T23:59:59 UTC, a Tuesday (weekday 1).
+    dt_neg = datetime.fromtimestamp(-86401.0, timezone.utc);
     now = datetime.now(timezone.utc);
     return {
         "year": dt.year,
@@ -26,6 +29,14 @@ def datetime_py() -> dict {
         "second": dt.second,
         "weekday": dt.weekday(),
         "iso": dt.isoformat(),
+        "neg_year": dt_neg.year,
+        "neg_month": dt_neg.month,
+        "neg_day": dt_neg.day,
+        "neg_hour": dt_neg.hour,
+        "neg_minute": dt_neg.minute,
+        "neg_second": dt_neg.second,
+        "neg_weekday": dt_neg.weekday(),
+        "neg_iso": dt_neg.isoformat(),
         "now_year_ok": 1 if now.year >= 2024 else 0,
         "now_month_ok": 1 if now.month >= 1 and now.month <= 12 else 0,
         "now_day_ok": 1 if now.day >= 1 and now.day <= 31 else 0,
@@ -46,6 +57,7 @@ cl def datetime_cl() -> dict {
 na {
     def datetime_na() -> dict[str, any] {
         dt: datetime = datetime.fromtimestamp(1700000000.0, timezone.utc);
+        dt_neg: datetime = datetime.fromtimestamp(-86401.0, timezone.utc);
         now: datetime = datetime.now(timezone.utc);
         return {
             "year": dt.year,
@@ -56,6 +68,14 @@ na {
             "second": dt.second,
             "weekday": dt.weekday(),
             "iso": dt.isoformat(),
+            "neg_year": dt_neg.year,
+            "neg_month": dt_neg.month,
+            "neg_day": dt_neg.day,
+            "neg_hour": dt_neg.hour,
+            "neg_minute": dt_neg.minute,
+            "neg_second": dt_neg.second,
+            "neg_weekday": dt_neg.weekday(),
+            "neg_iso": dt_neg.isoformat(),
             "now_year_ok": 1 if now.year >= 2024 else 0,
             "now_month_ok": 1 if now.month >= 1 and now.month <= 12 else 0,
             "now_day_ok": 1 if now.day >= 1 and now.day <= 31 else 0,

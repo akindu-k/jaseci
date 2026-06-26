@@ -44,7 +44,7 @@ obj datetime {
     fromtimestamp). UTC when `tz` is `timezone.utc`."""
     static def fromtimestamp(ts: float, tz: timezone) -> datetime {
         total: int = int(ts) + tz.offset_min * 60;
-        days: int = total // 86400;
+        days: int = _fdiv(total, 86400);  # floor: correct for pre-1970 (ts < 0)
         sod: int = total - days * 86400;  # seconds of the (local) day, 0..86399
         h: int = sod // 3600;
         mi: int = (sod // 60) % 60;
@@ -81,7 +81,7 @@ obj datetime {
     """Day of week, Monday=0 .. Sunday=6 (datetime.weekday). 1970-01-01 was a
     Thursday (epoch day 0 -> 3)."""
     def weekday -> int {
-        return (self.epoch_day + 3) % 7;
+        return _fmod(self.epoch_day + 3, 7);
     }
 
     """ISO 8601 string `YYYY-MM-DDThh:mm:ss+/-hh:mm` (datetime.isoformat)."""
@@ -94,6 +94,28 @@ obj datetime {
             )
         );
     }
+}
+
+
+"""Floor division `a // b` for `b > 0`, matching Python (and CPython `datetime`).
+The na backend lowers `//` to LLVM `sdiv`, which truncates toward zero; this
+nudges the quotient down when the (signed) remainder is non-zero and `a` is
+negative, so a pre-1970 (negative) POSIX timestamp yields the same civil day on
+na as on sv."""
+def _fdiv(a: int, b: int) -> int {
+    q: int = a // b;
+    if a % b != 0 and a < 0 {
+        q = q - 1;
+    }
+    return q;
+}
+
+
+"""Floor modulo `a % b` for `b > 0`, matching Python. The na `%` lowers to LLVM
+`srem` (sign follows the dividend); re-normalising into `[0, b)` keeps `weekday`
+correct for a negative epoch day."""
+def _fmod(a: int, b: int) -> int {
+    return (a % b + b) % b;
 }
 
 
