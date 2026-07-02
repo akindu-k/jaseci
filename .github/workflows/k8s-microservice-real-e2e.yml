@@ -1,8 +1,5 @@
 name: K8s Microservice Real E2E
 
-# Real-app e2e: builds the fixture image, deploys via the microservice
-# K8s pipeline against microk8s, verifies pods + gateway routing,
-# rolling-restart + hammer-for-non-2xx.
 
 on:
   workflow_dispatch:
@@ -13,7 +10,6 @@ on:
     # it won't leave a PR waiting on a check that never reports.
     paths:
       - 'jac/**'
-      - 'jac-scale/**'
       - '.github/workflows/k8s-microservice-real-e2e.yml'
 
 # Cancel superseded PR runs; never cancel a run for a commit on main.
@@ -27,8 +23,8 @@ jobs:
     # Escape hatch: add the 'skip-k8s' label to a PR to skip this job too
     # (matches the test-scale-k8s gate in test-jaseci.yml).
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-k8s') }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 25
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -36,21 +32,75 @@ jobs:
         with:
           submodules: true
 
-      - name: Set up jac (build the binary)
-        uses: ./.github/actions/setup-jac
+      - name: Download the prebuilt dev jac binary (host deploy driver)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          arch="$(uname -m)"   # x86_64 on this runner
+          mkdir -p "$HOME/.local/bin"
+          gh release download dev --repo jaseci-labs/jaseci \
+            --pattern "jac-dev-linux-${arch}" \
+            --output "$HOME/.local/bin/jac" --clobber
+          chmod +x "$HOME/.local/bin/jac"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/jac" --version
 
-      - name: Install jac-scale[deploy] (global so the e2e app can import it)
-        run: jac install -e jac-scale --extras deploy --global
+      - name: Overlay this checkout's jaclang onto the downloaded binary
+        run: |
+          printf '\n[dev]\njaclang_source = "%s/jac"\n' "$GITHUB_WORKSPACE" \
+            >> jac/jaclang/scale/tests/fixtures/k8s_e2e/jac.toml
+
+      - name: Install scale deploy deps (global; scale ships with jaclang)
+        # Scale is built into jaclang (jaclang.scale); install its deploy + data
+        # + serve closure so the e2e app can import it. Pins mirror
+        # jac/jaclang/project/capabilities.jac.
+        run: |
+          jac install \
+            "fastapi>=0.121.3,<0.122.0" "uvicorn[standard]>=0.38.0,<0.39.0" \
+            "pyjwt>=2.10.1,<2.11.0" "fastapi-sso>=0.21.0,<1.0.0" \
+            "python-multipart>=0.0.21,<1.0.0" "bcrypt>=4.0.0,<5.0.0" \
+            "aiohttp>=3.9.0,<4.0.0" "sqlalchemy>=2.0.0,<3.0.0" \
+            "email-validator>=2.3.0,<3.0.0" "python-dotenv>=1.2.1,<2.0.0" \
+            "pymongo>=4.15.4,<5.0.0" "redis>=7.1.0,<8.0.0" \
+            "kubernetes>=34.1.0,<35.0.0" "docker>=7.1.0,<8.0.0" \
+            --global
 
       - name: Set up microk8s
         run: |
           sudo snap install microk8s --classic --channel=1.30/stable
+          sudo microk8s status --wait-ready --timeout 180
+          sudo microk8s enable dns:8.8.8.8,1.1.1.1
+          # hostpath-storage provides the default StorageClass. Without it the
+          # bundle PVC (nil storageClassName -> needs a default SC) never binds
+          # and the bundle-loader pod hangs Pending. Its provisioner also binds
+          # the ReadWriteMany bundle PVC on a single node.
+          sudo microk8s enable hostpath-storage
           sudo microk8s status --wait-ready --timeout 180
           sudo usermod -aG microk8s "$USER"
           mkdir -p "$HOME/.kube"
           sudo microk8s config | sudo tee "$HOME/.kube/config" >/dev/null
           sudo chown "$USER" "$HOME/.kube/config"
           chmod 600 "$HOME/.kube/config"
+          kubectl -n kube-system set env daemonset/calico-node IP_AUTODETECTION_METHOD=can-reach=8.8.8.8
+          kubectl -n kube-system rollout restart daemonset/calico-node
+          kubectl -n kube-system rollout status daemonset/calico-node --timeout=240s || true
+          kubectl -n kube-system wait --for=condition=ready pod -l k8s-app=calico-node --timeout=240s || echo "WARN: calico-node not Ready"
+          kubectl -n kube-system wait --for=condition=ready pod -l k8s-app=kube-dns --timeout=120s || echo "WARN: coredns not Ready"
+
+      - name: Verify pod DNS + egress (fail fast)
+        run: |
+          kubectl run netcheck --image=busybox:1.36 --restart=Never --command -- \
+            sh -c 'nslookup deb.debian.org && wget -q --spider http://deb.debian.org/ && echo NETCHECK_OK'
+          if ! kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/netcheck --timeout=150s; then
+            echo "::error::Pod networking/egress is broken on this runner (DNS or CNI), so no app pod can bootstrap."
+            kubectl logs netcheck || true
+            kubectl describe pod netcheck || true
+            kubectl get pods -n kube-system -o wide || true
+            kubectl delete pod netcheck --ignore-not-found
+            exit 1
+          fi
+          kubectl logs netcheck
+          kubectl delete pod netcheck --ignore-not-found
 
       - name: Pre-pull + enable addons (best-effort)
         # registry.k8s.io has been flaky on GHA. Pre-pulling via
@@ -68,18 +118,6 @@ jobs:
               --selector=name=nginx-ingress-microk8s --timeout=180s \
               || echo "WARN: ingress controller not ready; K10 path will skip"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Restore BuildKit cache (pip wheels + apt downloads)
-        # Exact-key only. Broad restore-keys (`buildkit-${os}-`) can pull
-        # stale layer cache from other PRs and BuildKit reuses the cached
-        # COPY layer even when the new source tree disagrees.
-        uses: actions/cache@v4
-        with:
-          path: /tmp/buildkit-cache
-          key: buildkit-${{ runner.os }}-${{ hashFiles('jac/jac.toml', 'jac-scale/jac.toml', 'jac-scale/scripts/Dockerfile.microservice.exp') }}
-
       - name: Show cluster info
         run: |
           kubectl version
@@ -90,28 +128,33 @@ jobs:
       - name: Run K8s microservice real-app e2e
         env:
           CLUSTER_TYPE: microk8s
-          BUILDX_CACHE_DIR: /tmp/buildkit-cache
         run: |
-          bash jac-scale/scripts/k8s_microservice_real_e2e.sh \
-              jac-scale/jac_scale/tests/fixtures/k8s_e2e
+          bash jac/jaclang/scale/scripts/k8s_microservice_real_e2e.sh \
+              jac/jaclang/scale/tests/fixtures/k8s_e2e
 
       - name: Dump kubectl state on failure
         if: failure()
+        env:
+          NS: jac-e2e
         run: |
-          echo "=== events ==="
-          kubectl get events --sort-by='.lastTimestamp' --all-namespaces || true
-          echo "=== pods ==="
-          kubectl get pods -A -o wide || true
-          echo "=== describe pods (jac-e2e ns) ==="
-          kubectl describe pods -n jac-e2e || true
-          echo "=== gateway logs ==="
-          kubectl logs -n jac-e2e -l app=gateway --tail=100 || true
-          echo "=== service-app logs (sample) ==="
-          for app in cart-app orders-app products-app; do
-              echo "--- $app ---"
-              kubectl logs -n jac-e2e -l app=$app --tail=50 || true
+          echo "=== nodes ==="; kubectl get nodes -o wide || true
+          echo "=== all pods (every namespace) ==="; kubectl get pods -A -o wide || true
+          echo "=== events (${NS}, time-sorted) ==="
+          kubectl get events -n "${NS}" --sort-by='.lastTimestamp' || true
+          echo "=== per-pod status + all container logs (${NS}) ==="
+          for pod in $(kubectl get pods -n "${NS}" -o name 2>/dev/null); do
+            echo "############################## ${pod} ##############################"
+            echo "----- phase + container readiness -----"
+            kubectl get -n "${NS}" "${pod}" -o jsonpath='phase={.status.phase}{"\n"}{range .status.initContainerStatuses[*]}init/{.name}: ready={.ready} restarts={.restartCount} state={.state}{"\n"}{end}{range .status.containerStatuses[*]}main/{.name}: ready={.ready} restarts={.restartCount} state={.state}{"\n"}{end}' 2>/dev/null || true
+            echo ""
+            echo "----- describe (Init Containers -> Events) -----"
+            kubectl describe -n "${NS}" "${pod}" 2>/dev/null | sed -n '/Init Containers:/,/^[^ ]/p;/Events:/,$p' || true
+            for c in $(kubectl get -n "${NS}" "${pod}" -o jsonpath='{range .spec.initContainers[*]}{.name}{"\n"}{end}{range .spec.containers[*]}{.name}{"\n"}{end}' 2>/dev/null); do
+              echo "----- logs ${pod} [${c}] (tail 120) -----"
+              kubectl logs -n "${NS}" "${pod}" -c "${c}" --tail=120 2>&1 | tail -120 || true
+              kubectl logs -n "${NS}" "${pod}" -c "${c}" --previous --tail=60 2>/dev/null | tail -60 || true
+            done
           done
-          echo "=== ingress status ==="
-          kubectl describe ingress -n jac-e2e || true
+          echo "=== ingress status ==="; kubectl describe ingress -n "${NS}" || true
           echo "=== ingress controller logs ==="
           kubectl logs -n ingress -l name=nginx-ingress-microk8s --tail=50 || true
