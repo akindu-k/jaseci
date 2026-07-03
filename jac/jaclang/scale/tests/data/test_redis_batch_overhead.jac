@@ -25,7 +25,7 @@ def get_free_port -> int {
     }
 }
 
-def extract(resp: any) -> any {
+def extract(resp: object) -> object {
     if isinstance(resp, list) and len(resp) == 2 {
         resp = resp[1];
     }
@@ -59,7 +59,7 @@ def register_user(base_url: str, username: str) -> str {
 
 def call_walker(
     base_url: str, walker_name: str, token: str, payload: dict | None = None
-) -> any {
+) -> object {
     res = requests.post(
         f"{base_url}/walker/{walker_name}",
         json=payload or {},
@@ -93,13 +93,18 @@ def start_server(fixtures_dir: Path, jac_file: Path, port: int) -> subprocess.Po
             time.sleep(1);
         }
     }
-    (stdout, stderr) = server.communicate(timeout=2);
+    try {
+        (stdout, stderr) = server.communicate(timeout=2);
+    } except subprocess.TimeoutExpired {
+        server.kill();
+        (stdout, stderr) = server.communicate();
+    }
     raise RuntimeError(f"server failed to start\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}");
 }
 
 """Total call count for the given Redis commands from INFO commandstats."""
-def redis_cmd_calls(r: any, commands: list[str]) -> int {
-    stats = r.info("commandstats");
+def redis_cmd_calls(r: redis.Redis, commands: list[str]) -> int {
+    stats = cast(dict, r.info("commandstats"));
     total = 0;
     for command in commands {
         entry = stats.get(f"cmdstat_{command}");
@@ -112,7 +117,7 @@ def redis_cmd_calls(r: any, commands: list[str]) -> int {
 
 """Seed `count` anchors, then return the MGET and GET deltas of one steady-state read."""
 def measure_l2_reads(
-    base_url: str, token: str, redis_client: any, count: int
+    base_url: str, token: str, redis_client: redis.Redis, count: int
 ) -> dict[str, int] {
     call_walker(base_url, "BulkCreate", token, {"count": count});
     time.sleep(0.3);
@@ -157,7 +162,7 @@ test "batch_get loads N anchors from L2 with a constant number of Redis commands
         mongo_container.start();
         os.environ["MONGODB_URI"] = mongo_container.get_connection_url();
 
-        redis_client = redis.from_url(redis_url);
+        redis_client = cast(redis.Redis, redis.from_url(redis_url));
         port = get_free_port();
         base_url = f"http://localhost:{port}";
         server = start_server(FIXTURES_DIR, JAC_FILE, port);
