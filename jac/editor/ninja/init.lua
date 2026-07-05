@@ -18,12 +18,77 @@ end
 local jac_bin = vim.env.JAC_BIN
 if not jac_bin or jac_bin == "" then jac_bin = "jac" end
 
+-- jac.toml [dev] jaclang_source, mirroring _jac_finder's compiler override:
+-- when this binary is NOT already linked (no baked marker -- the launcher
+-- sets JAC_NINJA_BASE == JAC_NINJA_DIR in that case; the marker wins when
+-- present, same precedence as the compiler) and the project's jac.toml dev-
+-- links the source tree, serve the editor config from <source>/editor/ninja
+-- too. JAC_NO_DEV_SOURCE=1 forces it off, like everywhere else.
+local function toml_dev_ninja()
+  if vim.env.JAC_NO_DEV_SOURCE == "1" then return nil end
+  local base = vim.env.JAC_NINJA_BASE
+  if base and base ~= "" and base ~= ninja_dir then return nil end -- marker already linked
+  local dir = vim.fn.getcwd()
+  for _ = 1, 64 do
+    local f = io.open(dir .. "/jac.toml")
+    if f then
+      local txt = f:read("*a")
+      f:close()
+      local in_dev, src = false, nil
+      for line in txt:gmatch("[^\n]*") do
+        local sec = line:match("^%s*%[([^%]]+)%]")
+        if sec then in_dev = (sec == "dev") end
+        if in_dev then
+          src = line:match('^%s*jaclang_source%s*=%s*"([^"]*)"') or src
+        end
+      end
+      if not src then return nil end
+      if not src:match("^[/~]") then src = dir .. "/" .. src end
+      local candidate = vim.fn.fnamemodify(src, ":p"):gsub("/$", "") .. "/editor/ninja"
+      if candidate ~= ninja_dir and vim.uv.fs_stat(candidate .. "/init.lua") then
+        return candidate
+      end
+      return nil -- nearest jac.toml wins, like find_project_root
+    end
+    local parent = vim.fn.fnamemodify(dir, ":h")
+    if parent == dir then return nil end
+    dir = parent
+  end
+end
+
+local toml_ninja = toml_dev_ninja()
+if toml_ninja then
+  -- Chain-load the live source config; it sees itself as JAC_NINJA_DIR and
+  -- the payload copy (via unchanged JAC_NINJA_BASE) keeps providing the
+  -- build-staged pieces. The candidate ~= ninja_dir check above prevents
+  -- recursion: the chained init resolves its own dir and stops.
+  vim.env.JAC_NINJA_DIR = toml_ninja
+  dofile(toml_ninja .. "/init.lua")
+  return
+end
+
 -- This layer carries queries/, ftplugin/, ftdetect/ -- put it on the rtp; the
 -- AFTER slot keeps $VIMRUNTIME first for core lua modules.
 vim.opt.runtimepath:prepend(ninja_dir)
+-- Linked-source dev builds (-Ddev): ninja_dir is the live source tree; the
+-- payload's copy (JAC_NINJA_BASE) still provides the build-staged pieces --
+-- mini.nvim and the jac queries -- so keep it on the rtp behind the dev dir.
+local base_dir = vim.env.JAC_NINJA_BASE
+if base_dir and base_dir ~= "" and base_dir ~= ninja_dir then
+  vim.opt.runtimepath:append(base_dir)
+end
 -- mini.nvim is staged as a conventional start-package; rtp it directly so
 -- require() works right here instead of after startup.
-vim.opt.runtimepath:append(ninja_dir .. "/pack/ninja/start/mini.nvim")
+local mini_dir = ninja_dir .. "/pack/ninja/start/mini.nvim"
+if not vim.uv.fs_stat(mini_dir) and base_dir and base_dir ~= "" then
+  mini_dir = base_dir .. "/pack/ninja/start/mini.nvim"
+end
+if not vim.uv.fs_stat(mini_dir) then
+  -- The require("mini.*") calls below would die one line later anyway;
+  -- fail with an actionable message instead of a module-not-found trace.
+  error("jac ninja: mini.nvim not found at " .. mini_dir .. " -- payload may be corrupt (try re-running `zig build`)")
+end
+vim.opt.runtimepath:append(mini_dir)
 
 -- ------------------------------------------------------------------ options
 vim.g.mapleader = " "

@@ -362,6 +362,13 @@ pub fn build(b: *std.Build) void {
         // moves the path and correctly invalidates the packed payload.
         if (nvim_tree) |nt| {
             mk.addPrefixedDirectoryArg("--nvim=", nt);
+            // Editable dev loop: like the compiler's --link-source, a linked
+            // binary serves the ninja config layer (init.lua + lua/) live
+            // from the source tree -- mkpayload bakes the marker the
+            // launcher's runNinja resolves at boot.
+            if (link_dir) |d| {
+                mk.addArg(b.fmt("--ninja-link={s}/editor/ninja", .{d}));
+            }
         }
 
         // Seal the runtime (issue #7135): a bundled release payload is fully
