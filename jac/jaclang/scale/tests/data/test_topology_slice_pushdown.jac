@@ -89,6 +89,30 @@ def _make_scale_memory -> tuple {
 }
 
 
+"""Bind a fresh tiered mongo/redis memory to `ctx`, returning its backends."""
+def _bind_scale_memory(ctx: ExecutionContext, persist_root: bool) -> tuple {
+    (mem, mongo, redis_be) = _make_scale_memory();
+    ctx.mem = mem;
+    if persist_root {
+        # The context's root is created against the default memory, so register
+        # it with the tiered memory that actually commits or it is never saved.
+        mem.put(ctx.system_root);
+    }
+    JacRuntime.set_context(ctx);
+    return (mongo, redis_be);
+}
+
+
+def _seed_pushdown_graph -> None {
+    for i in range(100) {
+        root ++> _PushdownLead(idx=i);
+    }
+    for i in range(20) {
+        root ++> _PushdownOther(idx=i);
+    }
+}
+
+
 test "edge-ref slice bounds mongodb fetches" {
     _reset_dbs();
     orig_base = JacRuntime.get_base_path_dir();
@@ -98,25 +122,20 @@ test "edge-ref slice bounds mongodb fetches" {
     JacRuntime.set_base_path("/tmp/_pushdown_mongo");
 
     try {
-        (mem1, mongo1, redis1) = _make_scale_memory();
         ctx1 = ExecutionContext();
-        ctx1.mem = mem1;
-        JacRuntime.set_context(ctx1);
+        (mongo1, redis1) = _bind_scale_memory(ctx1, persist_root=True);
 
-        for i in range(100) {
-            root ++> _PushdownLead(idx=i);
-        }
-        for i in range(20) {
-            root ++> _PushdownOther(idx=i);
-        }
+        _seed_pushdown_graph();
         root_id = root.__jac__.id;
         ctx1.mem.commit();
         ctx1.close();
 
-        (mem2, mongo2, redis2) = _make_scale_memory();
+        # Drop the L2 cache so the slice is served from mongo, making the fetch
+        # count reflect what the database is actually asked to load.
+        _shared["redis_client"].flushall();
+
         ctx2 = ExecutionContext();
-        ctx2.mem = mem2;
-        JacRuntime.set_context(ctx2);
+        (mongo2, redis2) = _bind_scale_memory(ctx2, persist_root=False);
 
         root_anchor = ctx2.mem.get(root_id);
         assert root_anchor is not None;
@@ -150,27 +169,18 @@ test "edge-ref slice bounds redis cache promotions" {
     JacRuntime.set_base_path("/tmp/_pushdown_redis");
 
     try {
-        (mem1, mongo1, redis1) = _make_scale_memory();
         ctx1 = ExecutionContext();
-        ctx1.mem = mem1;
-        JacRuntime.set_context(ctx1);
+        (mongo1, redis1) = _bind_scale_memory(ctx1, persist_root=True);
 
-        for i in range(100) {
-            root ++> _PushdownLead(idx=i);
-        }
-        for i in range(20) {
-            root ++> _PushdownOther(idx=i);
-        }
+        _seed_pushdown_graph();
         root_id = root.__jac__.id;
         ctx1.mem.commit();
         ctx1.close();
 
         _shared["redis_client"].flushall();
 
-        (mem2, mongo2, redis2) = _make_scale_memory();
         ctx2 = ExecutionContext();
-        ctx2.mem = mem2;
-        JacRuntime.set_context(ctx2);
+        (mongo2, redis2) = _bind_scale_memory(ctx2, persist_root=False);
 
         root_anchor = ctx2.mem.get(root_id);
         assert root_anchor is not None;
