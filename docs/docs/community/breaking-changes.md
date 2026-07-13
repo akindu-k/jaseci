@@ -7,6 +7,40 @@ This page documents significant breaking changes in Jac and Jaseci that may affe
 
 ---
 
+### `to cl:` / `to sv:` / `to na:` section markers removed
+
+The module-level colon-section-marker syntax has been removed. A `to cl:` / `to sv:` / `to na:` line used to switch every following statement into the client / server / native context until the next marker or end of file. This is a **clean break** -- writing `to cl:` (or `to sv:` / `to na:`) now fails to parse.
+
+Use the braced block form instead. It compiles to the same node and is now the canonical way to scope a region to a context:
+
+| Old | New |
+|---|---|
+| `to cl:` <br> `<client stmts>` | `cl { <client stmts> }` |
+| `to sv:` <br> `<server stmts>` | `sv { <server stmts> }` (or leave at module top level -- server is the default context) |
+| `to na:` <br> `<native stmts>` | `na { <native stmts> }` |
+
+**Impact:** rewrite any `to cl:` / `to sv:` / `to na:` section into the matching braced block, wrapping exactly the statements that belonged to that section. Single-statement prefixes (`cl def:pub foo() {...}`, `sv ...`, `na ...`) and file-extension contexts (`.cl.jac`, `.na.jac`) are unaffected. The `to` keyword is otherwise unchanged -- it still drives the iter-for loop (`for x = 0 to 10 by 1`).
+
+---
+
+### `jac add` merged into `jac install`
+
+The `jac add` verb has been removed; `jac install <pkg>` absorbs it. This is a **clean break** -- `jac add ...` now fails with a pointer to the new spelling.
+
+| Old | New |
+|---|---|
+| `jac add requests` | `jac install requests` |
+| `jac add pytest --dev` | `jac install pytest --dev` |
+| `jac add --git <url>` | `jac install --git <url>` |
+| `jac add --npm <pkg>` | `jac install --npm <pkg>` |
+| `jac add --shadcn <name>` | `jac install --shadcn <name>` |
+
+**Behavior change:** `jac install <pkg>` now **records the dependency in `jac.toml`** (what `jac add` did) instead of installing without tracking. Pass the new `--no-save` flag for the old untracked behavior; `--global` and `--dry-run` continue to never touch `jac.toml`.
+
+**Impact:** update scripts and CI invocations of `jac add` to `jac install`, and add `--no-save` to any `jac install <pkg>` call that relied on jac.toml staying unmodified. `jac remove` and `jac update` are unchanged.
+
+---
+
 ### Plugin system removed; `[plugins.*]` config flattened
 
 The pluggy-style plugin/hook system has been removed entirely. The `jac plugins` command, the `JAC_DISABLED_PLUGINS` env var, the `[plugins]` `discovery`/`enabled`/`disabled` keys, and entry-point plugin discovery are all gone. Built-in features (byLLM, scale, the client/desktop framework, MCP, shadcn) are now called directly by core, and **external third-party plugins are no longer supported**.
