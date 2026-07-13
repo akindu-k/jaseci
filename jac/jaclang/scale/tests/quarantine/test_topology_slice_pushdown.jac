@@ -1,5 +1,7 @@
 import atexit;
 import os;
+import from typing { cast }
+import from jaclang.jac0core.archetype { Anchor }
 import from pathlib { Path }
 import redis;
 import from pymongo { MongoClient }
@@ -14,6 +16,7 @@ import from jaclang.scale.memory.memory_hierarchy {
     RedisBackend,
     ScaleTieredMemory
 }
+import from jaclang.runtimelib.query_plan { QueryPlan }
 
 
 node _PushdownLead {
@@ -187,6 +190,45 @@ test "edge-ref slice bounds redis cache promotions" {
         );
 
         ctx2.close();
+    } finally {
+        JacRuntime.set_base_path(orig_base);
+        set_config(JacConfig());
+    }
+}
+
+
+test "mongo slice pushdown paginates deterministically" {
+    _reset_dbs();
+    orig_base = JacRuntime.get_base_path_dir();
+    cfg = JacConfig();
+    cfg.run.topology_index = True;
+    set_config(cfg);
+    JacRuntime.set_base_path("/tmp/_pushdown_deterministic");
+
+    try {
+        (mem1, mongo1, redis1) = _make_scale_memory();
+        ctx1 = ExecutionContext();
+        ctx1.mem = mem1;
+        JacRuntime.set_context(ctx1);
+
+        for i in range(100) {
+            root ++> _PushdownLead(idx=i);
+        }
+        ctx1.mem.commit();
+        ctx1.close();
+
+        page1 = QueryPlan(node_type_final="_PushdownLead", slc=slice(0, 50));
+        page2 = QueryPlan(node_type_final="_PushdownLead", slc=slice(50, 100));
+
+        ids1 = [str(cast(Anchor, a).id) for a in mongo1.execute_plan(page1)];
+        ids2 = [str(cast(Anchor, a).id) for a in mongo1.execute_plan(page2)];
+
+        assert len(ids1) == 50 and len(ids2) == 50;
+        assert set(ids1).isdisjoint(set(ids2)) , "pages must not overlap";
+        assert len(set(ids1 + ids2)) == 100 , "pages must cover distinct rows";
+
+        rerun = [str(cast(Anchor, a).id) for a in mongo1.execute_plan(page1)];
+        assert rerun == ids1 , "repeated page must be stable";
     } finally {
         JacRuntime.set_base_path(orig_base);
         set_config(JacConfig());
