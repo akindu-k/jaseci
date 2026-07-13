@@ -7,6 +7,17 @@ This page documents significant breaking changes in Jac and Jaseci that may affe
 
 ---
 
+### `jac create --list_jacpacks` renamed to `jac create --list`
+
+The flag never listed jacpacks. A `.jacpack` is a distributable bundle you produce with `jac create --pack <dir>` and consume with `jac create --use <path|url>`; the flag instead lists the **project kinds** (used with `--kind`) and **named variants** (used with `--use <name>`) registered in the template registry. The name promised one thing and printed another, and its underscore spelling (`--list_jacpacks`, since `--list-jacpacks` was rejected) made it easy to get wrong.
+
+This is a **clean break** -- there is no deprecated alias, and `--list_jacpacks` now fails with `unrecognized arguments`.
+
+| Old | New |
+|---|---|
+| `jac create --list_jacpacks` | `jac create --list` |
+
+**Impact:** replace `--list_jacpacks` with `--list` in scripts, CI, and docs. The short form `-l` is unchanged, so `jac create -l` works before and after. Nothing about the `.jacpack` format, `--pack`, or `--use` changes.
 ### Kubernetes image-build pipeline removed
 
 `jac start --scale` no longer builds, tags, or pushes a Docker image. Copying the

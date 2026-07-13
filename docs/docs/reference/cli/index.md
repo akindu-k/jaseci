@@ -338,7 +338,7 @@ jac create [-h] [-f] [-k KIND] [-u USE] [-l] [name]
 | `-f, --force` | Overwrite existing project | `False` |
 | `-k, --kind` | Project kind: cli, cli-native, native-binary, native-lib, service, service-mesh, py-package, js-package, web-app, web-static, desktop, mobile | `cli` |
 | `-u, --use` | Custom template: file path or URL to a `.jacpack`, or a named variant (e.g. `jac-shadcn`) | `default` |
-| `-l, --list_jacpacks` | List available project kinds and named variants | `False` |
+| `-l, --list` | List available project kinds and named variants | `False` |
 | `--pack DIR` | Bundle a template directory into a distributable `.jacpack` file (absorbs `jac jacpack pack`) | None |
 | `--pack_output F` | Output path for the bundled `.jacpack` (with `--pack`) | `<name>.jacpack` |
 
@@ -369,7 +369,7 @@ jac create myapp --use ./my-template/
 jac create myapp --use https://example.com/template.jacpack
 
 # List available project kinds and named variants
-jac create --list_jacpacks
+jac create --list
 
 # Force overwrite existing
 jac create myapp --force
@@ -1707,14 +1707,14 @@ jac build --client mobile -p android
 
 ### jac jacpack
 
-Template packing has folded into [`jac create`](#jac-create). Bundle a template directory into a distributable `.jacpack` with **`jac create --pack <dir>`** (`--pack_output F` for a custom path), and list available templates/kinds with **`jac create --list_jacpacks`**. The `.jacpack` concept below is unchanged.
+Template packing has folded into [`jac create`](#jac-create). Bundle a template directory into a distributable `.jacpack` with **`jac create --pack <dir>`** (`--pack_output F` for a custom path), and list available kinds/named variants with **`jac create --list`**. The `.jacpack` concept below is unchanged.
 
 ```bash
 # Bundle a template directory into a .jacpack (formerly `jac jacpack pack`)
 jac create --pack <dir> [--pack_output out.jacpack]
 
 # List available project kinds and named variants (formerly `jac jacpack list`)
-jac create --list_jacpacks
+jac create --list
 ```
 
 **Template Directory Structure:**
@@ -1755,8 +1755,8 @@ root_gitignore_entries = [".jac/"]
 **Examples:**
 
 ```bash
-# List available templates / project kinds
-jac create --list_jacpacks
+# List available project kinds and named variants
+jac create --list
 
 # Bundle a template directory
 jac create --pack ./my-template
