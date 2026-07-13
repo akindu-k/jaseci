@@ -60,17 +60,20 @@ test "authenticated requests reuse the pooled MongoDB connection" {
     }
 
     mongo_container = MongoDbContainer("mongo:latest");
-    mongo_container.start();
-    mongo_uri = mongo_container.get_connection_url();
-    os.environ["MONGODB_URI"] = mongo_uri;
-    os.environ.pop("REDIS_URL", None);
-
-    admin_client = MongoClient(mongo_uri);
-    port = get_free_port();
-    base_url = f"http://localhost:{port}";
-    server = start_server(FIXTURES_DIR, JAC_FILE, port);
+    admin_client = None;
+    server = None;
 
     try {
+        mongo_container.start();
+        mongo_uri = mongo_container.get_connection_url();
+        os.environ["MONGODB_URI"] = mongo_uri;
+        os.environ.pop("REDIS_URL", None);
+
+        admin_client = MongoClient(mongo_uri);
+        port = get_free_port();
+        base_url = f"http://localhost:{port}";
+        server = start_server(FIXTURES_DIR, JAC_FILE, port);
+
         token = register_user(base_url, "probe_tester");
 
         # Warm-up: let the server establish its pool and cache the probe result.
@@ -108,7 +111,9 @@ test "authenticated requests reuse the pooled MongoDB connection" {
         );
     } finally {
         with contextlib.suppress(Exception) {
-            admin_client.close();
+            if admin_client {
+                admin_client.close();
+            }
         }
         if server {
             server.terminate();
@@ -117,7 +122,9 @@ test "authenticated requests reuse the pooled MongoDB connection" {
             }
         }
         os.environ.pop("MONGODB_URI", None);
-        mongo_container.stop();
+        with contextlib.suppress(Exception) {
+            mongo_container.stop();
+        }
         time.sleep(0.3);
         gc.collect();
         if data_dir.exists() {
@@ -138,18 +145,21 @@ test "system root is served from process cache, never re-fetched from MongoDB" {
     }
 
     mongo_container = MongoDbContainer("mongo:latest");
-    mongo_container.start();
-    mongo_uri = mongo_container.get_connection_url();
-    os.environ["MONGODB_URI"] = mongo_uri;
-    os.environ.pop("REDIS_URL", None);
-
-    admin_client = MongoClient(mongo_uri);
-    port = get_free_port();
-    base_url = f"http://localhost:{port}";
-    server = start_server(FIXTURES_DIR, JAC_FILE, port);
+    admin_client = None;
+    server = None;
     profiling_on = False;
 
     try {
+        mongo_container.start();
+        mongo_uri = mongo_container.get_connection_url();
+        os.environ["MONGODB_URI"] = mongo_uri;
+        os.environ.pop("REDIS_URL", None);
+
+        admin_client = MongoClient(mongo_uri);
+        port = get_free_port();
+        base_url = f"http://localhost:{port}";
+        server = start_server(FIXTURES_DIR, JAC_FILE, port);
+
         token = register_user(base_url, "sysroot_tester");
 
         # Warm-up seeds _process_cache['system_root'] in the server process.
@@ -193,7 +203,9 @@ test "system root is served from process cache, never re-fetched from MongoDB" {
             }
         }
         with contextlib.suppress(Exception) {
-            admin_client.close();
+            if admin_client {
+                admin_client.close();
+            }
         }
         if server {
             server.terminate();
@@ -202,7 +214,9 @@ test "system root is served from process cache, never re-fetched from MongoDB" {
             }
         }
         os.environ.pop("MONGODB_URI", None);
-        mongo_container.stop();
+        with contextlib.suppress(Exception) {
+            mongo_container.stop();
+        }
         time.sleep(0.3);
         gc.collect();
         if data_dir.exists() {
