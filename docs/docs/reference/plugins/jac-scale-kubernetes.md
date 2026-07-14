@@ -896,8 +896,8 @@ This eliminates the need for manual `kubectl create secret` commands after deplo
 
 `jac-scale` ships **no application image**, so there is no registry to configure
 and nothing to push. This is what makes a deploy work the same way against a
-local cluster (kind, k3d, Minikube, Docker Desktop) and a remote one (EKS, GKE,
-AKS) -- neither needs to pull an image you built.
+local cluster (MicroK8s, kind, k3d, Minikube, Docker Desktop) and a remote one
+(EKS, GKE, AKS) -- neither needs to pull an image you built.
 
 Instead, a deploy:
 
@@ -966,7 +966,7 @@ Each entry is an [array of tables](https://toml.io/en/v1.0.0#array-of-tables) (n
 | `size` | yes (PVC mode) | Requested storage, e.g. `10Gi`. |
 | `access_mode` | yes (PVC mode) | One of `ReadWriteMany` (most common for cross-pod), `ReadWriteOnce`, `ReadOnlyMany`. ReadWriteMany requires an RWX-capable storage class. |
 | `storage_class` | yes (PVC mode) | The StorageClass to bind to. Cloud providers' RWX classes: AWS `efs-sc`, GCP Filestore CSI, Azure Files. |
-| `host_path` | yes (hostPath mode) | Local-cluster-only alternative; binds the volume to a directory on the host node. Use only on k3d / kind / Minikube; will not survive a pod move on multi-node clusters. |
+| `host_path` | yes (hostPath mode) | Local-cluster-only alternative; binds the volume to a directory on the host node. Use only on MicroK8s / k3d / kind / Minikube; will not survive a pod move on multi-node clusters. |
 
 PVC mode and hostPath mode are mutually exclusive per entry. K-track applies PVCs before Deployments so pods do not crash-loop on "PVC not found".
 
@@ -1081,7 +1081,35 @@ A **Pod Logs** dashboard is added to Grafana automatically, with two panels: log
 
 ## Setting Up Kubernetes
 
-### Docker Desktop (Easiest)
+### MicroK8s (Recommended on Ubuntu)
+
+Official docs: [MicroK8s Getting Started](https://microk8s.io/docs/getting-started)
+
+```bash
+# Install MicroK8s
+sudo snap install microk8s --classic
+
+# Allow current user to run microk8s without sudo (re-login required)
+sudo usermod -a -G microk8s $USER
+newgrp microk8s
+
+# Wait until the cluster is ready
+microk8s status --wait-ready
+
+# Enable the addons the deploy needs
+microk8s enable dns hostpath-storage
+
+# Expose kubectl and the kubeconfig -- the deploy tooling needs both
+sudo snap alias microk8s.kubectl kubectl
+mkdir -p ~/.kube && microk8s config > ~/.kube/config
+chmod 600 ~/.kube/config
+```
+
+The last two steps are required, not cosmetic: `jac start --scale` reads `~/.kube/config` to reach the cluster and shells out to a real `kubectl` binary to seed the source bundle. A shell alias (`alias kubectl='microk8s kubectl'`) is not enough because subprocesses cannot see it. You do not need the MicroK8s `ingress` addon -- the deploy ships its own NGINX ingress controller.
+
+After `jac start --scale`, the app is reachable at `http://localhost:30080` (see [Ports](#ports)).
+
+### Docker Desktop
 
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 2. Open Settings > Kubernetes
@@ -1091,24 +1119,15 @@ A **Pod Logs** dashboard is added to Grafana automatically, with two panels: log
 ### Minikube
 
 ```bash
-# Install
+# Install -- see https://minikube.sigs.k8s.io/docs/start/
 brew install minikube  # macOS
-# or see https://minikube.sigs.k8s.io/docs/start/
 
-# Start cluster
+# Start cluster with the ingress addon
 minikube start
-
-# Access your app via minikube service
-minikube service jaseci -n default
+minikube addons enable ingress
 ```
 
-### MicroK8s (Linux)
-
-```bash
-sudo snap install microk8s --classic
-microk8s enable dns storage
-alias kubectl='microk8s kubectl'
-```
+With minikube the ingress NodePort is reachable on the VM's address, not localhost: use `http://$(minikube ip):30080`.
 
 ---
 
@@ -1123,8 +1142,8 @@ kubectl get pods
 # Check service
 kubectl get svc
 
-# For minikube, use tunnel
-minikube service jaseci
+# Default local ingress access (minikube: http://$(minikube ip):30080)
+# http://localhost:30080
 ```
 
 ### Database Connection Issues
