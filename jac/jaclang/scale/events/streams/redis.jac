@@ -24,8 +24,8 @@ def _to_str(value: any) -> str {
     return str(value);
 }
 
-glob _logger = logging.getLogger(__name__);
-glob _CONSUME_ERROR_BACKOFF: float = 0.5;
+glob _logger = logging.getLogger(__name__),
+     _CONSUME_ERROR_BACKOFF: float = 0.5;
 
 obj RedisEventStream(EventStreamBroker) {
     has config: dict[str, any] = {},
@@ -305,7 +305,7 @@ obj RedisEventStream(EventStreamBroker) {
 
         broker = self;
         def _loop {
-            consumer_loop(broker, topic, grp, handler, retry_policy);
+            consumer_loop(broker, topic, grp, handler, retry_policy, start_from);
         }
 
         thread = Thread(
