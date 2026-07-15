@@ -389,6 +389,35 @@ test "list methods" {
     assert "Created 5 items." in stdout_value;
 }
 
+test "introspection lists archetypes" {
+    # Guards JacIntrospection._list_members_of, which calls inspect.getmembers:
+    # runtime.jac must keep `import inspect` (a bare `from inspect import getfile`
+    # does not bind the module) or list_walkers/nodes/edges raise NameError.
+    import from jaclang.jac0core.archetype {
+        WalkerArchetype,
+        NodeArchetype,
+        EdgeArchetype
+    }
+    import types;
+
+    mod = types.ModuleType("_introspect_probe");
+    class ProbeWalk(WalkerArchetype) {}
+    class ProbeNode(NodeArchetype) {}
+    class ProbeEdge(EdgeArchetype) {}
+    for cls in [ProbeWalk, ProbeNode, ProbeEdge] {
+        cls.__module__ = "_introspect_probe";
+        setattr(mod, cls.__name__, cls);
+    }
+    Jac.loaded_modules["_introspect_probe"] = mod;
+    try {
+        assert Jac.list_walkers("_introspect_probe") == ["ProbeWalk"];
+        assert Jac.list_nodes("_introspect_probe") == ["ProbeNode"];
+        assert Jac.list_edges("_introspect_probe") == ["ProbeEdge"];
+    } finally {
+        Jac.loaded_modules.pop("_introspect_probe", None);
+    }
+}
+
 test "walker dynamic update" {
     _tmpdir = tempfile.mkdtemp();
     Jac.set_base_path(_tmpdir);
@@ -455,32 +484,64 @@ test "walker dynamic update" {
     }
 }
 
-test "import from site packages" {
+test "import jac module from a site-packages dir on sys.path" {
+    # A project's .jac/venv site-packages is placed on sys.path (as _jac_finder
+    # does), so a .jac module installed there must be importable. This is the
+    # hermetic replacement for the old site.getsitepackages() lookup.
     Jac.attach_program(JacProgram());
     with tempfile.TemporaryDirectory() as tmpdir {
-        # Simulate site-packages directory structure
         mock_site_dir = os.path.join(tmpdir, "site-packages");
         os.makedirs(mock_site_dir);
-        # Create a module within the simulated site-packages
         site_mod_content = 'with entry { "Site package module loaded!" |> print; }';
         create_temp_jac_file(site_mod_content, mock_site_dir, "site_pkg_mod.jac");
-        # Create the importing script in the main temp directory
         importer_content = "import site_pkg_mod;";
         _ = create_temp_jac_file(importer_content, tmpdir, "importer_site.jac");
-        with patch("site.getsitepackages", return_value=[mock_site_dir]) {
-            captured = io.StringIO();
-            old_stdout = sys.stdout;
-            sys.stdout = captured;
-            original_cwd = os.getcwd();
+        sys.path.insert(0, mock_site_dir);
+        captured = io.StringIO();
+        old_stdout = sys.stdout;
+        sys.stdout = captured;
+        original_cwd = os.getcwd();
+        try {
+            Jac.jac_import("importer_site", base_path=tmpdir);
+        } finally {
+            os.chdir(original_cwd);
+            sys.stdout = old_stdout;
+            if mock_site_dir in sys.path {
+                sys.path.remove(mock_site_dir);
+            }
+        }
+        stdout_value = captured.getvalue();
+        assert "Site package module loaded!" in stdout_value;
+    }
+}
+
+test "host site-packages are NOT consulted for jac imports" {
+    # Hermeticity: a .jac module reachable only via the host's system/user
+    # site-packages (and NOT on sys.path) must be unresolvable -- third-party
+    # code lives only in the project venv.
+    Jac.attach_program(JacProgram());
+    with tempfile.TemporaryDirectory() as tmpdir {
+        host_site = os.path.join(tmpdir, "host-site-packages");
+        os.makedirs(host_site);
+        create_temp_jac_file(
+            'with entry { "LEAKED!" |> print; }', host_site, "host_only_mod.jac"
+        );
+        importer_content = "import host_only_mod;";
+        _ = create_temp_jac_file(importer_content, tmpdir, "importer_host.jac");
+        original_cwd = os.getcwd();
+        raised = False;
+        with patch("site.getsitepackages", return_value=[host_site]), patch(
+            "site.getusersitepackages", return_value=host_site
+        ) {
             try {
-                Jac.jac_import("importer_site", base_path=tmpdir);
+                Jac.jac_import("importer_host", base_path=tmpdir);
+            } except Exception {
+                raised = True;
             } finally {
                 os.chdir(original_cwd);
-                sys.stdout = old_stdout;
             }
-            stdout_value = captured.getvalue();
-            assert "Site package module loaded!" in stdout_value;
         }
+        assert raised , "Module in host site-packages should NOT be importable";
     }
 }
 
@@ -576,8 +637,8 @@ test "by operator" {
     assert result == 1;
     stdout_value = captured_output.getvalue();
     assert "by" in stdout_value.lower();
-    assert "not" in stdout_value.lower();
-    assert "implemented" in stdout_value.lower();
+    assert "requires" in stdout_value.lower();
+    assert "visitable" in stdout_value.lower();
 }
 
 # -- read_file_with_encoding tests --

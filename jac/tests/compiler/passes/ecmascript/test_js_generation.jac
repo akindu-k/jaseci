@@ -169,6 +169,7 @@ test "core fixture emits expected constructs" {
         "for (const i of array)",
         "for (let i = 0; (i < limit); i += 1)",
         "while ((counter > 0))",
+        "while (true)",
 
     ] {
         assert pattern in js_code;
@@ -337,7 +338,7 @@ test "cli js command outputs js" {
     env["PYTHONPATH"] = f"{project_root}:{existing}" if existing else project_root;
 
     result = subprocess.run(
-        [sys.executable, "-m", "jaclang.cli.cli", "js", fixture_file_path],
+        [sys.executable, "-m", "jaclang.cli.cli", "tool", "jac2js", fixture_file_path],
         capture_output=True,
         text=True,
         env=env,
@@ -357,7 +358,15 @@ test "cl only js command outputs js" {
     env["PYTHONPATH"] = f"{project_root}:{existing}" if existing else project_root;
 
     result = subprocess.run(
-        [sys.executable, "-m", "jaclang.cli.cli", "js", fixture_file_path, ],
+        [
+            sys.executable,
+            "-m",
+            "jaclang.cli.cli",
+            "tool",
+            "jac2js",
+            fixture_file_path,
+
+        ],
         capture_output=True,
         text=True,
         env=env,
@@ -1356,7 +1365,8 @@ test "issue 5508 case2 str methods on untyped receivers" {
     # Pluck out the user-compiled function bodies (slice from each function
     # so the injected _jac runtime is not scanned).
     user_chunks = [];
-    for fn_name in ["case2_props_upper", "case2_props_strip", "case2_props_lower"] {
+    # Lowercase components are declared PascalCase (react-refresh contract)
+    for fn_name in ["Case2_props_upper", "Case2_props_strip", "Case2_props_lower"] {
         idx = js_code.find("function " + fn_name);
         assert idx >= 0 , (f"missing compiled function {fn_name}");
         user_chunks.append(js_code[idx:idx + 400]);
@@ -1996,6 +2006,76 @@ test "user-defined exception except is not a catch-all" {
 }
 
 
+test "exception archetype subclassing a builtin extends _jac.exc.X" {
+    jac_code = "\"\"\"custom exception base test.\"\"\"\n\nobj MyError(Exception) {}\ncl def boom() -> int {\n    try { raise MyError(\"x\"); } except Exception { return 1; }\n    return 0;\n}\n";
+
+    temp_path = write_temp_jac(jac_code);
+    try {
+        js_code = compile_fixture_to_js(temp_path);
+        assert "class MyError extends _jac.exc.Exception" in js_code , (
+            "custom exception base must extend `_jac.exc.Exception`, got:\n"
+            f"{js_code}"
+        );
+        assert "class MyError extends Exception" not in js_code , (
+            "base class must not reference the bare (undefined) `Exception` "
+            f"global, got:\n{js_code}"
+        );
+        wrapper = (
+            '"use strict";\n' + js_code + "\nif (boom() !== 1)" + " { throw new Error('custom exception must load and be caught by except Exception'); }" + "\nconsole.log('ok');\n"
+        );
+        result = subprocess.run(
+            ["node", "--input-type=module", "-e", wrapper],
+            capture_output=True,
+            text=True,
+            timeout=30
+        );
+        assert result.returncode == 0 , (
+            "custom exception subclassing a builtin failed to load/catch (#6663):\n"
+            f"stderr={result.stderr!r}\njs:\n{js_code}"
+        );
+        assert "ok" in result.stdout;
+        assert_balanced_syntax(js_code, temp_path);
+    } finally {
+        os.unlink(temp_path);
+    }
+}
+
+
+test "exception archetype subclassing ValueError extends _jac.exc.ValueError" {
+    jac_code = "\"\"\"custom ValueError base test.\"\"\"\n\nobj MyValueError(ValueError) {}\ncl def parse_int(s: str) -> int {\n    try { raise MyValueError(\"bad\"); } except ValueError { return -1; }\n    return 0;\n}\n";
+
+    temp_path = write_temp_jac(jac_code);
+    try {
+        js_code = compile_fixture_to_js(temp_path);
+        assert "class MyValueError extends _jac.exc.ValueError" in js_code , (
+            "custom ValueError base must extend `_jac.exc.ValueError`, got:\n"
+            f"{js_code}"
+        );
+        assert "class MyValueError extends ValueError" not in js_code , (
+            "base class must not reference the bare (undefined) `ValueError` "
+            f"global, got:\n{js_code}"
+        );
+        wrapper = (
+            '"use strict";\n' + js_code + "\nif (parse_int('x') !== -1)" + " { throw new Error('custom ValueError subclass must be caught by except ValueError'); }" + "\nconsole.log('ok');\n"
+        );
+        result = subprocess.run(
+            ["node", "--input-type=module", "-e", wrapper],
+            capture_output=True,
+            text=True,
+            timeout=30
+        );
+        assert result.returncode == 0 , (
+            "custom exception subclassing ValueError failed to load/catch (#6663):\n"
+            f"stderr={result.stderr!r}\njs:\n{js_code}"
+        );
+        assert "ok" in result.stdout;
+        assert_balanced_syntax(js_code, temp_path);
+    } finally {
+        os.unlink(temp_path);
+    }
+}
+
+
 test "in/not in on unknown-typed containers matches Python semantics" {
     # `opaque()` returns `any`, so the backend cannot statically prove the
     # container types. Membership must still behave like Python: substring
@@ -2333,6 +2413,77 @@ test "isinstance/issubclass against builtin types, user class, and tuples (#6458
     );
 
     assert_balanced_syntax(js_code, "isinstance_builtin.cl.jac");
+}
+
+test "builtin type used as a value lowers to a callable (#7454)" {
+    # Regression for jaseci-labs/jaseci#7454. A builtin type in value position
+    # (`map(int, xs)`, `key=int`, `f = int`, an element of a list) lowered to a
+    # bare JS string tag, so calling it threw `TypeError: "int" is not a
+    # function` in the browser -- only direct calls (`int(x)`) were coerced.
+    js_code = compile_fixture_to_js("builtin_type_as_value.cl.jac", FIXTURES);
+
+    # Scope the string-tag assertions to the compiled user code: the injected
+    # _jac runtime legitimately carries the type names as strings (the
+    # `__jac_type__` tags isinstance compares against).
+    fn_idx = js_code.find("function parse_all");
+    assert fn_idx >= 0 , "compiled function parse_all must be present";
+    user_js = js_code[fn_idx:];
+    for tag in ["\"int\"", "\"str\"", "\"bool\""] {
+        assert tag not in user_js , (
+            "builtin type lowered to the bare string " + tag + ", which throws "
+            "when called; user code:\n" + user_js
+        );
+    }
+    # The direct-call path must stay inline (no runtime round-trip).
+    assert "Math.trunc(Number(x))" in user_js , (
+        "direct `int(x)` must still coerce inline:\n" + user_js
+    );
+
+    wrapper = (
+        js_code + "\nconsole.log(JSON.stringify({" + "  parse_all: parse_all([\"1\", \"2\", \"3\"])," + "  keep_truthy: keep_truthy([0, 1, \"\", \"a\", 2])," + "  sort_numerically: sort_numerically([\"10\", \"9\", \"2\"])," + "  alias_call: alias_call(\"42\")," + "  coerce_all: coerce_all(5)," + "  direct_call: direct_call(\"7\")," + "  classify: [classify(true), classify(3), classify(\"x\"), classify(1.5)]," + "  subclass: subclass_probe()" + "}));\n"
+    );
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", wrapper],
+        capture_output=True,
+        text=True,
+        timeout=30
+    );
+    assert result.returncode == 0 , (
+        "builtin-type-as-value codegen crashed in Node:\n"
+        f"stderr={result.stderr!r}\njs:\n{js_code}"
+    );
+    got = json.loads(result.stdout.strip());
+
+    # `map`/`filter` must keep Python's one-argument call contract: JS passes
+    # (value, index, array), so a leaked index would land in `int`'s `base`
+    # parameter and turn ["1", "2", "3"] into [1, NaN, NaN].
+    assert got["parse_all"] == [1, 2, 3] , (
+        f"map(int, xs) mismatch: {got['parse_all']}\njs:\n{js_code}"
+    );
+    assert got["keep_truthy"] == [1, "a", 2] , (
+        f"filter(bool, xs) mismatch: {got['keep_truthy']}\njs:\n{js_code}"
+    );
+    assert got["sort_numerically"] == ["2", "9", "10"] , (
+        f"sorted(key=int) mismatch: {got['sort_numerically']}\njs:\n{js_code}"
+    );
+    assert got["alias_call"] == 42 , (
+        f"alias `f = int; f(x)` mismatch: {got['alias_call']}\njs:\n{js_code}"
+    );
+    assert got["coerce_all"] == ["5", 5, True] , (
+        f"builtin types out of a list mismatch: {got['coerce_all']}\njs:\n{js_code}"
+    );
+    assert got["direct_call"] == 7 , (
+        f"direct int(x) mismatch: {got['direct_call']}\njs:\n{js_code}"
+    );
+    # Classinfo position keeps working (guards the #6458 contract).
+    assert got["classify"] == ["kind:bool", "kind:int", "kind:seq", "kind:other"] , (
+        f"isinstance mismatch: {got['classify']}\njs:\n{js_code}"
+    );
+    assert got["subclass"] == [True, False] , (
+        f"issubclass mismatch: {got['subclass']}\njs:\n{js_code}"
+    );
+
+    assert_balanced_syntax(js_code, "builtin_type_as_value.cl.jac");
 }
 
 test "getattr default with or/and emits parenthesized nullish coalescing (#6562)" {
