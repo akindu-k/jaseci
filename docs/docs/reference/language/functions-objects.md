@@ -922,6 +922,8 @@ impl Calculator.multiply {
 
 A single logical module can be split across *variant files* that target different execution contexts. Variant suffixes are `.sv.jac` (server), `.cl.jac` (client), and `.na.jac` (native). All files sharing the same base name are automatically discovered and compiled together.
 
+Variant files are an *explicit* placement mechanism, and for the client side they are optional: the compiler infers client placement from client-only syntax (JSX, npm imports) in plain `.jac` files, so splitting a module into `.cl.jac` variants is a style choice rather than a requirement. Native code, by contrast, is never inferred -- the `.na.jac` variant (or an `na {}` block) is how native code is declared.
+
 **Head module precedence:** `.jac` > `.sv.jac` > `.cl.jac` > `.na.jac`. The highest-precedence file that exists on disk becomes the *head module*; all lower-precedence variants are attached as variant annexes. If no plain `.jac` file exists, the next available variant acts as head.
 
 ```

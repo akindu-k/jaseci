@@ -560,7 +560,7 @@ impl NaIRGenPass._extract_import_module_name(imp: uni.Import) -> (str | None) {
     if imp.clib_decls {
         return None;
     }
-    if imp.from_loc.path and isinstance(imp.from_loc.path[0], uni.String) {
+    if imp.from_loc.string_path_value is not None {
         return None;
     }
     mod_name = imp.from_loc?.dot_path_str;

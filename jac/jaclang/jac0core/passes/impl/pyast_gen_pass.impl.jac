@@ -1081,12 +1081,11 @@ impl PyastGenPass.exit_import(nd: uni.Import) -> None {
         }
     }
 
-    src_token = nd._source_context_token();
     if (
         nd.from_loc
         and nd.items
-        and src_token is not None
-        and src_token.name == Tok.KW_SERVER
+        and nd.is_sv_marked
+        and nd.code_context != CodeContext.CLIENT
         and self._generate_sv_to_sv_stubs(nd)
     ) {
         return;
@@ -1167,10 +1166,10 @@ impl PyastGenPass.exit_import(nd: uni.Import) -> None {
 }
 
 impl PyastGenPass.exit_module_path(nd: uni.ModulePath) -> None {
-    if (nd.path and (len(nd.path) == 1) and isinstance(nd.path[0], uni.String)) {
+    if nd.string_path_value is not None {
         import_node = nd.parent_of_type(uni.Import);
         if (import_node and (import_node.code_context != CodeContext.CLIENT)) {
-            self.emit(E5001, node_override=nd, path=str(nd.path[0].lit_value));
+            self.emit(E5001, node_override=nd, path=str(nd.string_path_value));
         }
     }
     nd.gen.py_ast = [

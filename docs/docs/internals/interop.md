@@ -36,11 +36,14 @@ Every interop edge is one of two fundamentally different things:
 The compiler decides which is which automatically. Two analysis passes do
 the discovery:
 
-- **`BoundaryAnalysisPass`** detects an explicitly-tagged cross-runtime
-  import (`sv import` inside a `.cl.jac`, a `clib` import in native code,
-  etc.) and re-reads the *provider* module's AST to extract the public
-  surface -- walker `has`-fields, `def` signatures, struct layouts -- into an
-  `InteropBinding`.
+- **`BoundaryAnalysisPass`** detects a cross-runtime import (`sv import`
+  in client-placed code -- whether that placement is inferred or comes from
+  a `.cl.jac` extension -- a `clib` import in native code, etc.) and
+  re-reads the *provider* module's AST to extract the public surface --
+  walker `has`-fields, `def` signatures, struct layouts -- into an
+  `InteropBinding`. On an import, the `sv` marker is a boundary fact (the
+  target stays server-side); the import's own `code_context` is its
+  placement, which determines the caller side of the binding.
 - **`InteropAnalysisPass`** walks call sites, records the caller's and
   callee's `CodeContext` plus the boundary types, and accumulates them into
   an `InteropManifest`.

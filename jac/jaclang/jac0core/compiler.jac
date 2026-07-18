@@ -31,6 +31,7 @@ import from jaclang.jac0core.constant { CodeContext, Tokens as Tok }
 import from jaclang.jac0core.passes {
     ASTValidationPass,
     BoundaryAnalysisPass,
+    CodespacePullPass,
     DeclImplMatchPass,
     JacAnnexPass,
     PyastGenPass,
@@ -42,7 +43,7 @@ import from jaclang.jac0core.passes {
 import from jaclang.jac0core.program { JacProgram }
 
 def get_symtab_ir_sched -> list[type[Transform[uni.Module, uni.Module]]] {
-    return [ASTValidationPass, SymTabBuildPass, DeclImplMatchPass];
+    return [ASTValidationPass, SymTabBuildPass, DeclImplMatchPass, CodespacePullPass];
 }
 
 glob _ir_sched_loading = ContextVar('jac_ir_sched_loading', default=False),
@@ -118,6 +119,7 @@ def get_ir_gen_sched(
         }
         passes.append(CapabilityCheckPass);
         passes.append(JsxIntrinsicGuardPass);
+        passes.append(CodespacePullPass);
         return passes;
     } except ImportError {
         if is_internal {
@@ -315,7 +317,7 @@ def _coerce_module(
             continue;
         }
         if isinstance(elem, uni.ContextAwareNode) {
-            if skip_token is not None {
+            if (skip_token is not None and not isinstance(elem, uni.Import)) {
                 context_token = elem._source_context_token();
                 if (context_token is not None and context_token.name == skip_token) {
                     continue;
@@ -366,6 +368,63 @@ def _coerce_native_module(module: uni.Module) {
         skip_types=(uni.ServerBlock, uni.ClientBlock),
         context=CodeContext.NATIVE
     );
+}
+
+def _module_top_element(module: uni.Module, nd: uni.UniNode) -> (uni.UniNode | None) {
+    cur: (uni.UniNode | None) = nd;
+    while (cur is not None and cur.parent is not module) {
+        cur = cur.parent;
+    }
+    return cur;
+}
+
+def _stamp_client_element(elem: uni.UniNode) {
+    if not isinstance(elem, uni.ContextAwareNode) {
+        return;
+    }
+    elem.code_context = CodeContext.CLIENT;
+    if (isinstance(elem, uni.ModuleCode) and elem.body) {
+        for inner in elem.body {
+            if isinstance(inner, uni.ContextAwareNode) {
+                inner.code_context = CodeContext.CLIENT;
+            }
+        }
+    }
+}
+
+def _seed_module_codespace(module: uni.Module) {
+    signal_top_ids: set[int] = set();
+    for jsx in module.get_all_sub_nodes(uni.JsxElement) {
+        top = _module_top_element(module, jsx);
+        if top is not None {
+            signal_top_ids.add(id(top));
+        }
+    }
+    for imp in module.get_all_sub_nodes(uni.Import) {
+        if imp.has_string_path {
+            top = _module_top_element(module, imp);
+            if top is not None {
+                signal_top_ids.add(id(top));
+            }
+        }
+    }
+    if not signal_top_ids {
+        return;
+    }
+    for stmt in module.body {
+        if (
+            not isinstance(stmt, uni.ContextAwareNode) or id(stmt) not in signal_top_ids
+        ) {
+            continue;
+        }
+        if (
+            stmt._source_context_token() is not None
+            or stmt.code_context != CodeContext.SERVER
+        ) {
+            continue;
+        }
+        _stamp_client_element(stmt);
+    }
 }
 
 obj JacCompiler {

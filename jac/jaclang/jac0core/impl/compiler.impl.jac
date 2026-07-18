@@ -646,6 +646,7 @@ impl JacCompiler.parse_str(
     cancel_token: (Event | None) = None
 ) -> uni.Module {
     had_error = False;
+    run_codespace_infer = False;
     if (file_path.endswith('.py') or file_path.endswith('.pyi')) {
         import from jaclang.compiler.passes.main.pyast_load_pass { PyastBuildPass }
         parsed_ast = py_ast.parse(source_str);
@@ -669,6 +670,8 @@ impl JacCompiler.parse_str(
             _coerce_server_module(mod);
         } elif (codespace == 'native') {
             _coerce_native_module(mod);
+        } else {
+            run_codespace_infer = True;
         }
     }
     if had_error {
@@ -683,6 +686,9 @@ impl JacCompiler.parse_str(
     target_program.mod.hub[str(_HubPath(mod.loc.mod_path).resolve())] = mod;
 
     JacAnnexPass(ir_in=mod, prog=target_program);
+    if run_codespace_infer {
+        _seed_module_codespace(mod);
+    }
     return mod;
 }
 
@@ -910,10 +916,7 @@ impl JacCompiler.compile(
                     continue;
                 }
 
-                cb_tgt = cb_imp.from_loc.dot_path_str
-                    if cb_imp.from_loc?.dot_path_str
-                    else '';
-                if cb_tgt.startswith('@jac/') {
+                if cb_imp.is_virtual_jac {
                     continue;
                 }
                 try {
@@ -922,7 +925,15 @@ impl JacCompiler.compile(
                     continue;
                 }
                 import from jaclang.jac0core.ext_registry { is_client_module }
-                if not (isinstance(cb_src, str) and is_client_module(cb_src)) {
+                cb_is_client_dep = isinstance(cb_src, str)
+                and (
+                    is_client_module(cb_src)
+                    or (
+                        cb_imp.code_context == CodeContext.CLIENT
+                        and cb_src.endswith('.jac')
+                    )
+                );
+                if not cb_is_client_dep {
                     continue;
                 }
                 cb_src = _cb_os.path.abspath(cb_src);

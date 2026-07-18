@@ -16,6 +16,7 @@ jac nacompile app.jac -o app               # standalone zero-dependency binary
 - `--autonative` prints `[Module 'app.jac' executed natively]` when a plain `.jac` is promoted; a file using walkers/async just runs on Python with no message.
 - A standalone binary REQUIRES `with entry { }` - otherwise: *"No entry point found."*
 - `jac nacompile --target wasm32|windows|macos` cross-targets; `--shared` builds a C-ABI library (see the sibling skills); `--gc cycles|rc|none` picks the memory-management runtime (see `jac-native-memory`).
+- **Native placement is NEVER inferred - by design.** Client placement is (see `jac-codespaces`); native is not: code that happens to fit the native subset is not the same as code that *should* be built natively, so nothing is silently promoted. An `na { }` block, a `.na.jac` file, or an explicit verb (`jac nacompile`, `jac run --autonative`) is always required.
 
 ## Headline example - a CLI tool
 

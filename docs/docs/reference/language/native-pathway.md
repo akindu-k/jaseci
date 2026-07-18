@@ -37,6 +37,12 @@ Native compilation is ideal for:
 
 ## Quick Reference
 
+Native placement is always **explicit** -- unlike the client codespace,
+which the compiler infers from JSX and npm imports, code is never routed to
+the native backend by inference. Whether native-compatible code *should* be
+compiled natively is a build decision, so one of the selectors below is
+required:
+
 | Aspect | Details |
 |--------|---------|
 | **Inline section** | `na { }` block (or `na` prefix) in any `.jac` file |

@@ -7,13 +7,14 @@ targets, called **codespaces**:
 
 | Codespace | Selector | Backend output | Runs on |
 |-----------|----------|----------------|---------|
-| **Server** (`sv`) | `sv { }` block, `sv` prefix, `.sv.jac` file, or default | Python AST → CPython bytecode | CPython |
-| **Client** (`cl`) | `cl { }` block, `cl` prefix, or `.cl.jac` file | ESTree → JavaScript | Browsers / Node |
-| **Native** (`na`) | `na { }` block, `na` prefix, or `.na.jac` file | LLVM IR → object code → executable | Bare machine (Linux / macOS, x86_64 / arm64) |
+| **Server** (`sv`) | Default for unmarked code; explicit `sv { }` block, `sv` prefix, or `.sv.jac` file | Python AST → CPython bytecode | CPython |
+| **Client** (`cl`) | **Inferred** from client-only syntax (JSX, string-path npm imports) and symbol references; explicit `cl { }` block, `cl` prefix, or `.cl.jac` file | ESTree → JavaScript | Browsers / Node |
+| **Native** (`na`) | Always explicit: `na { }` block, `na` prefix, or `.na.jac` file (never inferred) | LLVM IR → object code → executable | Bare machine (Linux / macOS, x86_64 / arm64) |
 
-A single `.jac` file can mix all three codespaces. The compiler routes each
-declaration to the correct backend, synthesises the interop bridges at the
-boundary, and emits the appropriate artefact per codespace.
+A single `.jac` file can mix all three codespaces, with or without markers.
+The compiler routes each declaration to the correct backend, synthesises the
+interop bridges at the boundary, and emits the appropriate artefact per
+codespace. Explicit markers always take precedence over inference.
 
 This document is the architectural map of how that pipeline is wired
 together. It is intended for compiler contributors. For language-level
@@ -174,6 +175,38 @@ tags each `ContextAwareNode` inside it with its `code_context`. From this
 point on, every declaration carries a `CodeContext` enum value that
 downstream passes use to dispatch to the correct backend.
 
+### Codespace inference (markerless modules)
+
+Plain `.jac` files with no explicit markers get their client placement
+**inferred** in two stages:
+
+1. **Seeding** (`compiler.jac:_seed_module_codespace`, invoked from
+   `parse_str` right where extension coercion runs): any top-level element
+   whose subtree contains structurally client-only syntax -- a `JsxElement`
+   or a string-path (npm/asset) import -- is stamped `CodeContext.CLIENT`.
+   Seeds run at parse time because the stamps gate schedule selection
+   itself (`declares_codespace` decides which pipelines a module gets).
+2. **Propagation** (`CodespacePullPass` in
+   [`jac0core/passes/codespace_pull_pass.jac`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/jac0core/passes/codespace_pull_pass.jac),
+   scheduled in both `get_symtab_ir_sched` and `get_ir_gen_sched`): once
+   symbol tables exist, CLIENT placement flows across resolved symbol
+   references between top-level elements to a fixpoint. Resolution is
+   scope-aware, so locals shadowing module-level names produce no edge.
+   Pulls skip element kinds the backends already bridge across the
+   boundary: top-level archetypes (auto-shared into the bundle),
+   access-tagged abilities and globals (auto-RPC endpoints), and type
+   aliases (erased in JS output).
+
+Import classification has a single source of truth as computed getters on
+`uni.Import` (`has_string_path`, `is_sv_marked`, `is_virtual_jac`,
+`ecosystem`) plus `ModulePath.string_path_value`. On imports,
+`code_context` means **placement** (which side consumes the import) while
+the `sv` marker is a **boundary fact** (the target stays server-side):
+client-consumed `sv import`s become RPC stubs, server-consumed ones become
+server-to-server microservice calls. Native contexts are never inferred;
+`na` markers or `nacompile` auto-promotion remain the only native paths.
+Explicit markers of any kind are never overridden by inference.
+
 ---
 
 ## Stage 3: Shared Frontend Analysis
@@ -192,6 +225,7 @@ These passes run regardless of codespace and are collected by
 | `CFGBuildPass` | [`compiler/passes/main/cfg_build_pass.jac`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/compiler/passes/main/cfg_build_pass.jac) | Builds control-flow graphs |
 | `MTIRGenPass` | [`compiler/passes/main/mtir_gen_pass.jac`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/compiler/passes/main/mtir_gen_pass.jac) | Generates Meaning-Typed IR for `by llm` calls |
 | `CapabilityCheckPass` | [`compiler/passes/main/capability_check_pass.jac`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/compiler/passes/main/capability_check_pass.jac) | Stamps capability/portability facts (native auto-promotion eligibility) on module nodes |
+| `CodespacePullPass` | [`jac0core/passes/codespace_pull_pass.jac`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/jac0core/passes/codespace_pull_pass.jac) | Propagates inferred CLIENT placement through scope-aware symbol references (see Stage 2) |
 | `TypeCheckPass` | [`compiler/passes/main/type_checker_pass.jac`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/compiler/passes/main/type_checker_pass.jac) | Static type checking against the type registry |
 | `PortabilityWarnPass` | [`compiler/passes/main/capability_check_pass.jac`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/compiler/passes/main/capability_check_pass.jac) | Emits portability warnings (W6001-W6004) for JS-idiom violations; diagnostic-only, runs in the check-extras schedule |
 

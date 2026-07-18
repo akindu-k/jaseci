@@ -12,40 +12,28 @@ This page focuses on the three concepts that Jac adds beyond traditional program
 
 ## 1. How can one language target frontends, backends, and native binaries at the same time?
 
-Similar to namespaces, the Jac language introduces the concept of **codespaces**. A Jac program can contain code that runs in different environments. You denote the codespace with a **braced block** (or **statement prefix**) inside a file, or with a **file extension**:
+Similar to namespaces, the Jac language introduces the concept of **codespaces**. A Jac program can contain code that runs in different environments -- and you don't mark where each piece runs: the compiler derives it from what the code contains.
 
 ```mermaid
 graph LR
     JAC["main.jac"] --> SV["Server (PyPI Ecosystem)
-    sv { }"]
+    sv"]
     JAC --> CL["Client (NPM Ecosystem)
-    cl { }"]
+    cl"]
     JAC --> NA["Native (C ABI)
-    na { }"]
+    na"]
 ```
 
-**Braced blocks** -- bracket a region of a file for one codespace:
+How inference decides:
 
-- `sv { ... }` -- code inside the braces runs on the server (compiles to Python)
-- `cl { ... }` -- code inside the braces runs in the browser (compiles to JavaScript)
-- `na { ... }` -- code inside the braces compiles natively for the host machine (compiles to a native binary)
-- Code outside any block defaults to the server codespace. Blocks also work inside a function or class body.
+- **JSX and npm imports are client signals.** A declaration containing JSX or a string-path npm import (`import from "react-dom" { ... }`) is client-only by construction, so the compiler places it in the client codespace automatically. Placement then propagates through references: helpers, `glob`s, and imports that client code uses join the client bundle too.
+- **Everything else defaults to the server codespace** -- unmarked code compiles to Python, exactly as before.
+- **Native is never inferred.** Compiling natively is a build decision, so the native codespace is always marked explicitly (see below).
 
-**Single-statement prefixes** -- a prefix like `cl def foo() ...` tags one declaration for a codespace, handy for the occasional cross-codespace item in a file.
-
-**File extensions** -- set the default top-level codespace for a file, e.g., for a module `prog`:
-
-- `prog.sv.jac` -- top-level code defaults to server
-- `prog.cl.jac` -- top-level code defaults to client
-- `prog.na.jac` -- top-level code defaults to native
-- `prog.jac` -- defaults to the server codespace
-
-Any `.jac` file can still use all codespace forms regardless of its extension. The extension only changes what the default is for untagged code.
-
-Here's a file that uses two codespaces via a braced block:
+Here's a file that spans two codespaces -- with no markers anywhere:
 
 ```jac
-# Server codespace (default)
+# Inferred server: plain data and logic, no client signals
 node Todo {
     has title: str, done: bool = False;
 }
@@ -55,25 +43,52 @@ def:pub add_todo(title: str) -> dict {
     return {"id": jid(todo), "title": todo.title};
 }
 
-cl {
-    def:pub app -> JsxElement {
-        has items: list = [];
+# Inferred client: the JSX in the body is a client signal
+def:pub app -> JsxElement {
+    has items: list = [];
 
-        async def add -> None {
-            todo = await add_todo("New");
-            items = items + [todo];
-        }
-
-        return <div>
-            <button onClick={lambda -> None { add(); }}>
-                Add
-            </button>
-        </div>;
+    async def add -> None {
+        todo = await add_todo("New");
+        items = items + [todo];
     }
+
+    return <div>
+        <button onClick={lambda -> None { add(); }}>
+            Add
+        </button>
+    </div>;
 }
 ```
 
-The server definitions are visible to the client section. When the client calls `add_todo(...)`, the compiler generates the HTTP call, serialization, and routing between codespaces. You write one language; the compiler produces the interop layer.
+The compiler places `app` in the client codespace because its body contains JSX; `Todo` and `add_todo` stay on the server. The server definitions are visible to the client component -- and `def:pub` functions and walkers are never relocated by inference: they remain server endpoints, so when the client calls `add_todo(...)`, the compiler generates the HTTP call, serialization, and routing between codespaces. Likewise, a top-level `obj` referenced from both sides is shared across the boundary automatically. You write one language; the compiler produces the interop layer.
+
+### Explicit codespace markers
+
+Inference can always be overridden. To pin code to a codespace -- or simply to make the split visible in the source -- you denote the codespace with a **braced block** (or **statement prefix**) inside a file, or with a **file extension**:
+
+**Braced blocks** -- bracket a region of a file for one codespace:
+
+- `sv { ... }` -- code inside the braces runs on the server (compiles to Python)
+- `cl { ... }` -- code inside the braces runs in the browser (compiles to JavaScript)
+- `na { ... }` -- code inside the braces compiles natively for the host machine (compiles to a native binary)
+- Code outside any block is placed by inference (server unless it carries client signals). Blocks also work inside a function or class body.
+
+**Single-statement prefixes** -- a prefix like `cl def foo() ...` tags one declaration for a codespace, handy for the occasional cross-codespace item in a file.
+
+**File extensions** -- set the default top-level codespace for a file, e.g., for a module `prog`:
+
+- `prog.sv.jac` -- top-level code defaults to server
+- `prog.cl.jac` -- top-level code defaults to client
+- `prog.na.jac` -- top-level code defaults to native
+- `prog.jac` -- placement is inferred (server unless client signals say otherwise)
+
+Any `.jac` file can still use all codespace forms regardless of its extension. The extension only changes what the default is for untagged code.
+
+Three rules make the two styles interchangeable:
+
+- **Markers always win.** Inference never moves anything tagged with a block, prefix, or extension -- the most useful pin is `sv` on a declaration you want kept server-side even though client code references it.
+- **Native is explicit-only.** Code that *could* compile natively is not the same as code that *should* -- that call is yours, made via `na { }`, `.na.jac`, or `jac nacompile`.
+- **The two styles compile identically.** A markerless file produces byte-identical output to its marker-annotated equivalent; the example above wrapped in an explicit `cl { ... }` block is the same program.
 
 Codespaces are similar to namespaces, but instead of organizing names, they organize where code executes. Interop between them -- function calls, spawn calls, type sharing -- is handled by the compiler and runtime.
 
