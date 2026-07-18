@@ -55,14 +55,11 @@ impl JacScaleUserManager.create_user_with_identities(
     profile: dict[str, any] | None = None,
     root_id: str | None = None
 ) -> dict[str, any] {
-    return self._identity_storage.create_user(
-        identities, credential, profile, root_id
-    );
+    return self._identity_storage.create_user(identities, credential, profile, root_id);
 }
 
 impl JacScaleUserManager.create_internal_user(
-    username: str, password: str, role: str = 'user',
-    root_id: str | None = None
+    username: str, password: str, role: str = 'user', root_id: str | None = None
 ) -> dict[str, any] {
     result = self.create_user_with_identities(
         identities=[{'type': 'username', 'value': username}],
@@ -129,7 +126,7 @@ impl JacScaleUserManager.get_root_id(user_id: str) -> str | None {
 
 impl JacScaleUserManager.resolve_shared_root_id -> str {
     import from uuid { UUID }
-    import from jaclang import JacRuntime as Jac;
+    import from jaclang { JacRuntime as Jac }
     import from jaclang.jac0core.constructs { Root }
     import from jaclang.scale.identity.guest_root { compute_guest_root_id }
 
