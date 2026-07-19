@@ -79,6 +79,14 @@ glob JS_GLOBALS: dict[str, str] = {
          "`skip` is an object-spatial walker statement; native lowers it only "
          "inside a walker `with` event ability (a body that returns no value). "
          "In a value-returning function, use an explicit `return` to exit early."
+     ),
+     _NATIVE_DECORATOR_HELP: str = (
+         "Native lowers decorators only on module-level, non-generator "
+         "functions, and only when each decorator is a plain name resolving "
+         "to a native function (applied at module glob-init). Method, "
+         "archetype, and dynamically-computed decorators would silently run "
+         "the undecorated body; remove the decorator or move the definition "
+         "to a @sv/Python context."
      );
 
 
@@ -252,6 +260,40 @@ impl native_capability_violations(mod: uni.Module) -> list {
                 continue;
             }
 
+            if isinstance(nd, (uni.Ability, uni.ArchSpec, uni.ImplDef))
+            and nd.decorators {
+                _dec_static_fn = (
+                    isinstance(nd, uni.Ability)
+                    and not isinstance(nd.parent, uni.Archetype)
+                    and nd.find_parent_of_type(uni.Ability) is None
+                    and not nd.get_all_sub_nodes(typ=uni.YieldExpr)
+                );
+                if _dec_static_fn {
+                    for _dexpr in nd.decorators {
+                        if not isinstance(_dexpr, uni.Name) {
+                            _dec_static_fn = False;
+                            break;
+                        }
+                    }
+                }
+                if not _dec_static_fn {
+                    _dec_owner = "?";
+                    if isinstance(nd, uni.Ability) and nd.name_ref {
+                        _dec_owner = nd.name_ref.sym_name;
+                    } elif isinstance(nd, uni.Archetype) and nd.name {
+                        _dec_owner = nd.name.value;
+                    }
+                    out.append(
+                        (
+                            nd.decorators[0],
+                            "decorator",
+                            f"on {_dec_owner}",
+                            _NATIVE_DECORATOR_HELP
+                        )
+                    );
+                }
+            }
+
             if isinstance(nd, uni.ParamVar) and nd.unpack is not None {
                 out.append(
                     (
@@ -283,27 +325,6 @@ impl native_capability_violations(mod: uni.Module) -> list {
                     )
                 );
                 continue;
-            }
-
-            if isinstance(nd, uni.Ability)
-            and nd.find_parent_of_type(uni.Ability) is not None {
-                import from jaclang.compiler.symbol_utils { ability_of_symbol }
-                _data_caps = [
-                    _cs
-                    for _cs in nd.get_enclosing_captures()
-                    if ability_of_symbol(_cs) is None
-                ];
-                if _data_caps {
-                    out.append(
-                        (
-                            nd,
-                            "statement",
-                            "Ability (nested function capturing enclosing locals)",
-                            None
-                        )
-                    );
-                    continue;
-                }
             }
 
             if isinstance(nd, uni.BinaryExpr)

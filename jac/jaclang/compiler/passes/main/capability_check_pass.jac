@@ -10,7 +10,7 @@ glob NATIVE_REJECT_MATCH_PATTERNS: tuple = (
          uni.MatchStar,
 
      ),
-     NATIVE_REJECT_NODES: tuple = (uni.YieldExpr, uni.DisconnectOp, uni.PyInlineCode, );
+     NATIVE_REJECT_NODES: tuple = (uni.DisconnectOp, uni.PyInlineCode, );
 
 def classify_native_import(item: uni.UniNode) -> tuple;
 
