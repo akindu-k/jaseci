@@ -533,6 +533,12 @@ impl Serializer._should_warn_once(key: str) -> bool {
     if key in seen {
         return False;
     }
+    if Serializer._warn_dedup_saturated {
+        if logger.isEnabledFor(logging.DEBUG) {
+            logger.debug(f"Serializer: warning suppressed (dedup cap reached): {key}");
+        }
+        return False;
+    }
     with Serializer._warn_lock {
         if key in seen {
             return False;
@@ -542,7 +548,8 @@ impl Serializer._should_warn_once(key: str) -> bool {
                 Serializer._warn_dedup_saturated = True;
                 logger.warning(
                     f"Serializer: warning dedup cache reached {_MAX_WARNED_CLASS_KEYS} "
-                    "distinct classes; further first-occurrence warnings are suppressed."
+                    "distinct classes; further first-occurrence warnings are suppressed "
+                    "(enable DEBUG to still see suppressed class names)."
                 );
             }
             return False;
