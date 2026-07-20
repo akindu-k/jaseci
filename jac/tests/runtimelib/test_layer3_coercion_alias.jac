@@ -6,6 +6,8 @@ detection: class rename resolution via alias, and value coercion for
 common primitive/container/temporal type changes.
 """
 
+import io;
+import logging;
 import from datetime { date, datetime, time }
 import from enum { Enum }
 import from uuid { UUID, uuid4 }
@@ -59,6 +61,41 @@ test "alias to same qualified name is a no-op (does not self-alias)" {
 test "_get_class returns None for truly unregistered class names" {
     resolved = Serializer._get_class("definitely.not", "Present");
     assert resolved is None;
+}
+
+
+test "unregistered-class warning is emitted once per class, not once per anchor" {
+    # A fresh class name keeps this test independent of the process-wide dedup cache.
+    unique_name = f"Ghost_{uuid4().hex}";
+    module_name = "definitely.not.registered";
+    key = f"{module_name}.{unique_name}";
+    blob = {
+        '__type__': 'NodeAnchor',
+        '__module__': 'jaclang.jac0core.archetype',
+        'id': str(uuid4()),
+        'root': None,
+        'persistent': False,
+        'access': {'all': -1, 'roots': {'anchors': {}}},
+        'archetype': {'__type__': unique_name, '__module__': module_name, 'x': 42},
+        'edges': [],
+        'version': 0
+    };
+    buf = io.StringIO();
+    capture = logging.StreamHandler(buf);
+    logger = logging.getLogger("jaclang.runtimelib.serializer");
+    prev_level = logger.level;
+    logger.setLevel(logging.WARNING);
+    logger.addHandler(capture);
+    try {
+        for _ in range(50) {
+            assert Serializer.deserialize(blob) is None;
+        }
+    } finally {
+        logger.removeHandler(capture);
+        logger.setLevel(prev_level);
+    }
+    count = buf.getvalue().count(key);
+    assert count == 1 , f"expected exactly one warning for {key}, got {count}";
 }
 
 

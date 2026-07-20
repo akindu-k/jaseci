@@ -514,14 +514,37 @@ impl Serializer._get_class(module_name: str, class_name: str) -> (type | None) {
             return cls;
         }
 
-        logger.warning(
-            f"Serializer: alias {key} -> {aliased_key} has no registered "
-            "target; cannot resolve."
-        );
+        if Serializer._should_warn_once(key) {
+            logger.warning(
+                f"Serializer: alias {key} -> {aliased_key} has no registered "
+                "target; cannot resolve."
+            );
+        }
         return None;
     }
-    logger.warning(f"Refused to deserialize unregistered class: {key}");
+    if Serializer._should_warn_once(key) {
+        logger.warning(f"Refused to deserialize unregistered class: {key}");
+    }
     return None;
+}
+
+impl Serializer._should_warn_once(key: str) -> bool {
+    seen = Serializer._warned_class_keys;
+    if key in seen {
+        return False;
+    }
+    if len(seen) >= _MAX_WARNED_CLASS_KEYS {
+        if not Serializer._warn_dedup_saturated {
+            Serializer._warn_dedup_saturated = True;
+            logger.warning(
+                f"Serializer: warning dedup cache reached {_MAX_WARNED_CLASS_KEYS} "
+                "distinct classes; further first-occurrence warnings are suppressed."
+            );
+        }
+        return False;
+    }
+    seen.add(key);
+    return True;
 }
 
 impl Serializer._id_to_stub(anchor_cls: type, id_str: str) -> (Anchor | None) {
@@ -558,11 +581,13 @@ impl Serializer._deserialize_anchor(data: dict[str, object]) -> (Anchor | None) 
             }
             archetype = Serializer._deserialize_archetype(arch_data, anchor);
             if archetype is None {
-                logger.warning(
-                    "Serializer: archetype reconstruction failed for "
-                    f"{arch_data.get('__module__')}.{arch_data.get('__type__')}; "
-                    "dropping anchor (caller should quarantine)."
-                );
+                arch_key = f"{arch_data.get('__module__')}.{arch_data.get('__type__')}";
+                if Serializer._should_warn_once(arch_key) {
+                    logger.warning(
+                        "Serializer: archetype reconstruction failed for "
+                        f"{arch_key}; dropping anchor (caller should quarantine)."
+                    );
+                }
                 return None;
             }
             anchor.archetype = archetype;

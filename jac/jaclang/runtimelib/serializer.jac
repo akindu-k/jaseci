@@ -29,11 +29,14 @@ import from jaclang.jac0core.constructs {
 }
 
 glob logger = logging.getLogger(__name__),
-     FINGERPRINT_LENGTH: int = 16;
+     FINGERPRINT_LENGTH: int = 16,
+     _MAX_WARNED_CLASS_KEYS: int = 1024;
 
 obj Serializer {
     static has _registry: dict[str, type] = {},
-        _aliases: dict[str, str] = {};
+        _aliases: dict[str, str] = {},
+        _warned_class_keys: set[str] = set(),
+        _warn_dedup_saturated: bool = False;
 
     static def register(cls: type) -> None;
     static def register_alias(old_name: str, cls: type) -> None;
@@ -68,6 +71,7 @@ obj Serializer {
     static def _deserialize_value(val: object) -> object;
     static def _deserialize_jac_ref(data: dict[str, object]) -> (object | None);
     static def _get_class(module_name: str, class_name: str) -> (type | None);
+    static def _should_warn_once(key: str) -> bool;
     static def _id_to_stub(anchor_cls: type, id_str: str) -> (object | None);
     static def _deserialize_anchor(data: dict[str, object]) -> (object | None);
     static def _deserialize_permission(data: object) -> object;
