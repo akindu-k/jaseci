@@ -64,8 +64,7 @@ test "_get_class returns None for truly unregistered class names" {
 }
 
 
-test "unregistered-class warning is emitted once per class, not once per anchor" {
-    # A fresh class name keeps this test independent of the process-wide dedup cache.
+test "unregistered-class warnings are emitted once per class, not once per anchor" {
     unique_name = f"Ghost_{uuid4().hex}";
     module_name = "definitely.not.registered";
     key = f"{module_name}.{unique_name}";
@@ -86,6 +85,7 @@ test "unregistered-class warning is emitted once per class, not once per anchor"
     prev_level = logger.level;
     logger.setLevel(logging.WARNING);
     logger.addHandler(capture);
+    Serializer._reset_warn_cache();
     try {
         for _ in range(50) {
             assert Serializer.deserialize(blob) is None;
@@ -93,9 +93,13 @@ test "unregistered-class warning is emitted once per class, not once per anchor"
     } finally {
         logger.removeHandler(capture);
         logger.setLevel(prev_level);
+        Serializer._reset_warn_cache();
     }
-    count = buf.getvalue().count(key);
-    assert count == 1 , f"expected exactly one warning for {key}, got {count}";
+    out = buf.getvalue();
+    # The two failure modes are namespaced separately, so each fires exactly
+    # once across all 50 reads rather than once per read.
+    assert out.count(f"Refused to deserialize unregistered class: {key}") == 1 , out;
+    assert out.count(f"archetype reconstruction failed for {key}") == 1 , out;
 }
 
 
@@ -207,6 +211,37 @@ test "_deserialize_archetype coerces str to int when stored type changed" {
     assert isinstance(getattr(arch, 'ratio'), float);
     assert getattr(arch, 'label') == "7";
     assert isinstance(getattr(arch, 'label'), str);
+}
+
+
+test "per-field coercion-fallback warning is emitted once per field, not once per anchor" {
+    # Class is registered, so _get_class succeeds and the dedup on the
+    # unregistered path never runs; the per-field warnings must dedup on their own.
+    original = _Typed(count=42, ratio=3.14, label="seven");
+    raw = Serializer.serialize(original, include_type=True);
+    assert isinstance(raw, dict);
+    raw['count'] = 'not-a-number';  # cannot coerce to int -> coercion fallback
+    buf = io.StringIO();
+    capture = logging.StreamHandler(buf);
+    logger = logging.getLogger("jaclang.runtimelib.serializer");
+    prev_level = logger.level;
+    logger.setLevel(logging.WARNING);
+    logger.addHandler(capture);
+    Serializer._reset_warn_cache();
+    try {
+        for _ in range(50) {
+            anchor = NodeAnchor.__new__(NodeAnchor);
+            arch = Serializer._deserialize_archetype(raw, anchor);
+            assert arch is not None;
+            assert getattr(arch, 'count') == 'not-a-number';
+        }
+    } finally {
+        logger.removeHandler(capture);
+        logger.setLevel(prev_level);
+        Serializer._reset_warn_cache();
+    }
+    count = buf.getvalue().count("coercion fallback");
+    assert count == 1 , f"expected one coercion-fallback warning, got {count}";
 }
 
 
