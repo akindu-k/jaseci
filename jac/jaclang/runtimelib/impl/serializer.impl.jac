@@ -533,18 +533,23 @@ impl Serializer._should_warn_once(key: str) -> bool {
     if key in seen {
         return False;
     }
-    if len(seen) >= _MAX_WARNED_CLASS_KEYS {
-        if not Serializer._warn_dedup_saturated {
-            Serializer._warn_dedup_saturated = True;
-            logger.warning(
-                f"Serializer: warning dedup cache reached {_MAX_WARNED_CLASS_KEYS} "
-                "distinct classes; further first-occurrence warnings are suppressed."
-            );
+    with Serializer._warn_lock {
+        if key in seen {
+            return False;
         }
-        return False;
+        if len(seen) >= _MAX_WARNED_CLASS_KEYS {
+            if not Serializer._warn_dedup_saturated {
+                Serializer._warn_dedup_saturated = True;
+                logger.warning(
+                    f"Serializer: warning dedup cache reached {_MAX_WARNED_CLASS_KEYS} "
+                    "distinct classes; further first-occurrence warnings are suppressed."
+                );
+            }
+            return False;
+        }
+        seen.add(key);
+        return True;
     }
-    seen.add(key);
-    return True;
 }
 
 impl Serializer._id_to_stub(anchor_cls: type, id_str: str) -> (Anchor | None) {

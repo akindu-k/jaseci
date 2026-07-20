@@ -1,4 +1,5 @@
 import logging;
+import threading;
 import from dataclasses { fields, is_dataclass, MISSING }
 import from datetime { date, datetime, time }
 import from enum { Enum }
@@ -36,7 +37,8 @@ obj Serializer {
     static has _registry: dict[str, type] = {},
         _aliases: dict[str, str] = {},
         _warned_class_keys: set[str] = set(),
-        _warn_dedup_saturated: bool = False;
+        _warn_dedup_saturated: bool = False,
+        _warn_lock: any = threading.Lock();
 
     static def register(cls: type) -> None;
     static def register_alias(old_name: str, cls: type) -> None;
