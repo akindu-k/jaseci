@@ -1,5 +1,6 @@
 import json;
 import logging;
+import threading;
 import from collections.abc { Callable, Generator, Iterable }
 import from datetime { datetime, timezone }
 import from pickle { dumps, loads }
@@ -38,7 +39,8 @@ import from jaclang.scale.memory.l1_invalidation {
 import from jaclang { JacRuntimeInterface as Jac }
 
 glob logger = logging.getLogger(__name__),
-     _process_cache: dict[str, any] = {};
+     _process_cache: dict[str, any] = {},
+     _super_root_template_lock = threading.Lock();
 
 def _get_db_config -> dict {
     return get_scale_config().get_database_config();

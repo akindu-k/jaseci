@@ -8,7 +8,7 @@ impl ScaleTieredMemory._refresh_super_root_template(applied: list) -> None {
     if not isinstance(anchor, NodeAnchor) {
         return;
     }
-    # Never regress a newer snapshot published by a concurrent committer.
+    # Skip the serialize cost early if a newer snapshot is already published.
     current = _process_cache.get('system_root');
     if isinstance(current, NodeAnchor) and current.version > anchor.version {
         return;
@@ -23,11 +23,15 @@ impl ScaleTieredMemory._refresh_super_root_template(applied: list) -> None {
     if not isinstance(snapshot, NodeAnchor) {
         return;
     }
-    latest = _process_cache.get('system_root');
-    if isinstance(latest, NodeAnchor) and latest.version > snapshot.version {
-        return;
+    # Compare-and-publish atomically so a concurrent committer's newer snapshot
+    # is never regressed between the check and the assignment.
+    with _super_root_template_lock {
+        latest = _process_cache.get('system_root');
+        if isinstance(latest, NodeAnchor) and latest.version > snapshot.version {
+            return;
+        }
+        _process_cache['system_root'] = snapshot;
     }
-    _process_cache['system_root'] = snapshot;
 }
 
 impl ScaleTieredMemory.postinit -> None {
