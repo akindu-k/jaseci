@@ -1,3 +1,26 @@
+"""Refresh the warm super root template with the committed snapshot."""
+def _refresh_super_root_template(mem: ScaleTieredMemory, applied: list) -> None {
+    import from jaclang.jac0core.constant { Constants as Con }
+    sr_id = UUID(Con.SUPER_ROOT_UUID);
+    if sr_id not in applied {
+        return;
+    }
+    anchor = mem.__mem__.get(sr_id);
+    if not isinstance(anchor, NodeAnchor) {
+        return;
+    }
+    try {
+        snapshot = Serializer.deserialize(
+            Serializer.serialize(anchor, include_type=True)
+        );
+    } except Exception {
+        return;
+    }
+    if isinstance(snapshot, NodeAnchor) {
+        _process_cache['system_root'] = snapshot;
+    }
+}
+
 impl ScaleTieredMemory.postinit -> None {
     self.__mem__ = {};
 
@@ -134,6 +157,7 @@ impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
     }
     self._post_apply(apply_report);
     self.changes.clear();
+    _refresh_super_root_template(self, apply_report.applied);
 
     if (conflict := apply_report.primary_conflict()) {
         raise conflict;

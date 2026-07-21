@@ -118,3 +118,20 @@ impl ExecutionContext.aset_user_root(root_id: str) -> None {
     self.user_root = await self._aget_anchor(root_id);
     self.entry_node = self.user_root;
 }
+
+impl ExecutionContext.arefresh_system_root -> None {
+    sr_id = UUID(Con.SUPER_ROOT_UUID);
+    self.mem.__mem__.pop(sr_id, None);
+    fresh = await self.mem.aget(sr_id);
+    if not isinstance(fresh, NodeAnchor) {
+        return;
+    }
+    prev_id = self.system_root.id;
+    self.system_root = fresh;
+    if self.user_root.id == prev_id {
+        self.user_root = fresh;
+    }
+    if self.entry_node.id == prev_id {
+        self.entry_node = fresh;
+    }
+}
