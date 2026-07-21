@@ -1,4 +1,4 @@
-"""Refresh the warm super root template with the committed snapshot."""
+"""Publish the committed super root snapshot as the warm template, never regressing its version."""
 def _refresh_super_root_template(mem: ScaleTieredMemory, applied: list) -> None {
     import from jaclang.jac0core.constant { Constants as Con }
     sr_id = UUID(Con.SUPER_ROOT_UUID);
@@ -9,6 +9,13 @@ def _refresh_super_root_template(mem: ScaleTieredMemory, applied: list) -> None 
     if not isinstance(anchor, NodeAnchor) {
         return;
     }
+    # A concurrent committer may have already published a newer version; never
+    # overwrite it with an older snapshot or new contexts would miss committed
+    # edges and race a stale root (#7605).
+    current = _process_cache.get('system_root');
+    if isinstance(current, NodeAnchor) and current.version > anchor.version {
+        return;
+    }
     try {
         snapshot = Serializer.deserialize(
             Serializer.serialize(anchor, include_type=True)
@@ -16,9 +23,14 @@ def _refresh_super_root_template(mem: ScaleTieredMemory, applied: list) -> None 
     } except Exception {
         return;
     }
-    if isinstance(snapshot, NodeAnchor) {
-        _process_cache['system_root'] = snapshot;
+    if not isinstance(snapshot, NodeAnchor) {
+        return;
     }
+    latest = _process_cache.get('system_root');
+    if isinstance(latest, NodeAnchor) and latest.version > snapshot.version {
+        return;
+    }
+    _process_cache['system_root'] = snapshot;
 }
 
 impl ScaleTieredMemory.postinit -> None {
@@ -157,11 +169,13 @@ impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
     }
     self._post_apply(apply_report);
     self.changes.clear();
-    _refresh_super_root_template(self, apply_report.applied);
 
     if (conflict := apply_report.primary_conflict()) {
         raise conflict;
     }
+    # Only a clean commit publishes the warm template; a partially applied but
+    # conflicted changeset must not expose its local topology (#7605).
+    _refresh_super_root_template(self, apply_report.applied);
     self._mark_committed(anchor);
 }
 
