@@ -289,7 +289,7 @@ impl Serializer.deserialize(data: dict[str, object]) -> (object | None) {
             return instance;
         } except Exception as e {
             if Serializer._should_warn_once(
-                "deserialize-failed", f"{type_name}:{type(e).__name__}"
+                "deserialize-failed", f"{cls.__module__}.{type_name}:{type(e).__name__}"
             ) {
                 logger.error(f"Failed to deserialize {type_name}: {e}");
             }
@@ -605,7 +605,8 @@ impl Serializer._deserialize_anchor(data: dict[str, object]) -> (Anchor | None) 
         if (arch_data := data.get('archetype')) {
             if not isinstance(arch_data, dict) {
                 if Serializer._should_warn_once(
-                    "archetype-not-dict", type(arch_data).__name__
+                    "archetype-not-dict",
+                    f"{data.get('__type__', 'anchor')}.{type(arch_data).__name__}"
                 ) {
                     logger.warning(
                         "Serializer: archetype field is not a dict "
@@ -671,8 +672,14 @@ impl Serializer._deserialize_anchor(data: dict[str, object]) -> (Anchor | None) 
         anchor.hash = Serializer._compute_hash(anchor);
         return anchor;
     } except Exception as e {
+        failed_arch = data.get('archetype');
+        arch_id = (
+            f"{failed_arch.get('__module__')}.{failed_arch.get('__type__')}"
+                if isinstance(failed_arch, dict)
+                else data.get('__type__', 'anchor')
+        );
         if Serializer._should_warn_once(
-            "anchor-failed", f"{data.get('__type__', 'anchor')}:{type(e).__name__}"
+            "anchor-failed", f"{arch_id}:{type(e).__name__}"
         ) {
             logger.error(f"Failed to deserialize anchor: {e}");
         }
@@ -850,7 +857,7 @@ impl Serializer._deserialize_archetype(
         return arch;
     } except Exception as e {
         if Serializer._should_warn_once(
-            "archetype-error", f"{type_name}:{type(e).__name__}"
+            "archetype-error", f"{module_name}.{type_name}:{type(e).__name__}"
         ) {
             logger.error(f"Failed to deserialize archetype {type_name}: {e}");
         }
