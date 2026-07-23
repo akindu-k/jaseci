@@ -60,6 +60,12 @@ def _publish_super_root_template(snapshot: any) -> None {
     }
 }
 
+def _reset_super_root_template {
+    with _super_root_template_lock {
+        _process_cache.pop('system_root', None);
+    }
+}
+
 obj RedisBackend(CacheMemory) {
     has redis_url: (str | None) = None,
         redis_client: (Any | None) = None,
