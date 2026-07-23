@@ -1,4 +1,3 @@
-"""Detach a copy of the shared super root so contexts never share one anchor."""
 def _independent_super_root(template: any) -> any {
     import from jaclang.jac0core.constructs { NodeAnchor }
     import from jaclang.runtimelib.serializer { Serializer }
@@ -24,7 +23,6 @@ impl JScaleExecutionContext.init(self: JScaleExecutionContext) -> None {
     self.read_versions = {};
     self.custom: any = MISSING;
 
-    # Per-request super root copy; a shared mutable anchor corrupts CAS tracking.
     system_root_anchor = _independent_super_root(_process_cache.get('system_root'));
     if system_root_anchor is not None {
         self.mem.__mem__[system_root_anchor.id] = system_root_anchor;
@@ -37,7 +35,6 @@ impl JScaleExecutionContext.init(self: JScaleExecutionContext) -> None {
             system_root_anchor.id = UUID(Con.SUPER_ROOT_UUID);
             self.mem.put(system_root_anchor);
         }
-        # Warm template is a detached snapshot, never this request's live anchor.
         _publish_super_root_template(_independent_super_root(system_root_anchor));
     }
 

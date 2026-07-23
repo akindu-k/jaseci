@@ -8,7 +8,7 @@ impl ScaleTieredMemory._refresh_super_root_template(applied: list) -> None {
     if not isinstance(anchor, NodeAnchor) {
         return;
     }
-    # Skip the serialize cost early if a newer snapshot is already published.
+
     current = _process_cache.get('system_root');
     if isinstance(current, NodeAnchor) and current.version > anchor.version {
         return;
@@ -163,7 +163,7 @@ impl ScaleTieredMemory.commit(anchor: (Anchor | None) = None) -> None {
     if (conflict := apply_report.primary_conflict()) {
         raise conflict;
     }
-    # Publish the warm template only from a clean commit, never a conflicted one.
+
     self._refresh_super_root_template(apply_report.applied);
     self._mark_committed(anchor);
 }
