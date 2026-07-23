@@ -1,4 +1,4 @@
-"""Regression test for #7605: concurrent find-or-create on system_root must converge on one node."""
+"""Regression test: concurrent find-or-create on system_root must converge on one node."""
 
 import contextlib;
 import gc;
@@ -38,7 +38,7 @@ def _linked_hub_count(base_url: str) -> int {
 }
 
 
-def _assert_converges(base_url: str, label: str) -> None {
+def _assert_converges(base_url: str, label: str) {
     results: list = [];
     with ThreadPoolExecutor(max_workers=CONCURRENCY) as pool {
         futures = [pool.submit(_touch, base_url) for i in range(CONCURRENCY)];
