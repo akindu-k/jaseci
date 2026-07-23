@@ -53,7 +53,7 @@ def _publish_super_root_template(snapshot: any) -> None {
     }
     with _super_root_template_lock {
         latest = _process_cache.get('system_root');
-        if isinstance(latest, NodeAnchor) and latest.version > snapshot.version {
+        if isinstance(latest, NodeAnchor) and latest.version >= snapshot.version {
             return;
         }
         _process_cache['system_root'] = snapshot;
