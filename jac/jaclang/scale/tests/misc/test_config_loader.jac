@@ -1,6 +1,5 @@
 import os;
 import shutil;
-import subprocess;
 import tempfile;
 import from pathlib { Path }
 import from jaclang.comptime { fields }
@@ -246,41 +245,17 @@ test "a configured monitoring namespace with nothing usable falls back to the de
 }
 
 
+test "a non-string monitoring namespace is coerced before it is sanitized" {
+    got = _monitoring_namespace('[scale.monitoring]\nnamespace = 2024\n');
+    assert got == "_2024";
+}
+
+
 test "an empty monitoring namespace still derives from the kubernetes namespace" {
     got = _monitoring_namespace(
         '[scale.kubernetes]\nnamespace = "jac-shop-prod"\n\n[scale.monitoring]\nnamespace = ""\n'
     );
     assert got == "jac_shop_prod";
-}
-
-
-test "a rewritten monitoring namespace warns, so the metric rename is not silent" {
-    import from jaclang.scale.runtime.context.util { jac_executable }
-    project_dir = tempfile.mkdtemp(prefix="jac-cfg-warn-");
-    try {
-        (Path(project_dir) / "jac.toml").write_text(
-            '[project]\nname = "repro"\nentry-point = "main.jac"\n\n[scale.monitoring]\nnamespace = "jac--shop"\n'
-        );
-        (Path(project_dir) / "main.jac").write_text(
-            'import from jaclang.scale.config.config_loader { get_scale_config }\n'
-            'with entry { print(get_scale_config().get_monitoring_config()["namespace"]); }\n'
-        );
-        result = subprocess.run(
-            [jac_executable(), "run", "main.jac"],
-            capture_output=True,
-            text=True,
-            cwd=str(project_dir),
-            timeout=300
-        );
-    } finally {
-        shutil.rmtree(project_dir, ignore_errors=True);
-    }
-    combined = result.stdout + result.stderr;
-    assert result.returncode == 0 , f"jac run failed:\n{combined}";
-    assert "jac_shop" in result.stdout , f"namespace was not sanitized:\n{combined}";
-    assert "jac--shop" in combined and "dashboards" in combined , (
-        f"no warning that the configured namespace was rewritten:\n{combined}"
-    );
 }
 
 
@@ -301,6 +276,16 @@ def _namespace_load_logs(configured: str) -> str {
         root_logger.setLevel(previous_level);
     }
     return stream.getvalue();
+}
+
+
+test "a rewritten monitoring namespace warns, so the metric rename is not silent" {
+    logged = _namespace_load_logs("jac--shop");
+    assert "jac--shop" in logged and "jac_shop" in logged , (
+        f"the warning does not name both the old and the new prefix:\n{logged}"
+    );
+    assert "dashboards" in logged , f"the warning does not tell the user what to update:\n{logged}";
+    assert _namespace_load_logs("myapp_prod") == "" , "a valid namespace must not warn";
 }
 
 

@@ -240,6 +240,7 @@ impl sanitize_prometheus_namespace(name: str) -> str {
 }
 
 impl _resolve_prometheus_namespace(configured: str | None, k8s_namespace: str) -> str {
+    configured = "" if configured is None else str(configured);
     if not configured {
         return sanitize_prometheus_namespace(k8s_namespace);
     }
