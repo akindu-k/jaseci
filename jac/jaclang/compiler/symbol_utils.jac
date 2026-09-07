@@ -1,10 +1,11 @@
 import from pathlib { Path }
-import from jaclang.jac0core.unitree {
+import from jaclang.compiler.frontend.unitree {
     Ability,
     Archetype,
     Assignment,
     AstSymbolNode,
     AtomTrailer,
+    BinaryExpr,
     ContextAwareNode,
     ElementStmt,
     Enum as UniEnum,
@@ -23,18 +24,23 @@ import from jaclang.jac0core.unitree {
     ParamVar,
     SubTag,
     Symbol,
+    Token,
     UniNode,
     UniScopeNode
 }
-import from jaclang.jac0core.constant { CodeContext, Tokens as Tok, SymbolType }
-import from jaclang.jac0core.diagnostics { E5082, E5084, W6006, W6007 }
-import from jaclang.jac0core.compiler {
+import from jaclang.compiler.frontend.constant {
+    CodeContext,
+    Tokens as Tok,
+    SymbolType
+}
+import from jaclang.compiler.frontend.diagnostics { E5082, E5084, W6006, W6007 }
+import from jaclang.compiler.driver.boundary_classify {
     ClientImportVerdict,
-    ability_of_symbol,
     classify_client_import_item,
     is_client_boundary_import,
     symbol_linked_source_module
 }
+import from jaclang.compiler.frontend.unitree { ability_of_symbol }
 import from jaclang.compiler.expr_keys {
     classify_condition_key,
     collect_assigned_symbols,
@@ -56,7 +62,7 @@ enum CallKind {
 }
 
 def erased_import_binds(nd: UniNode, name: str) -> bool {
-    import from jaclang.jac0core.codeinfo { NATIVE_ERASED_IMPORTS }
+    import from jaclang.compiler.frontend.codeinfo { NATIVE_ERASED_IMPORTS }
     mod = nd.find_parent_of_type(Module);
     if mod is None {
         return False;
@@ -83,7 +89,7 @@ def erased_import_binds(nd: UniNode, name: str) -> bool {
 }
 
 def erased_identity_call_arg(nd: FuncCall) -> (Expr | None) {
-    import from jaclang.jac0core.codeinfo { NATIVE_ERASED_IDENTITY_CALLS }
+    import from jaclang.compiler.frontend.codeinfo { NATIVE_ERASED_IDENTITY_CALLS }
     tgt = nd.target;
     if not isinstance(tgt, Name) or tgt.sym_name not in NATIVE_ERASED_IDENTITY_CALLS {
         return None;
@@ -101,7 +107,7 @@ def erased_identity_call_arg(nd: FuncCall) -> (Expr | None) {
 }
 
 def is_erased_field_marker(nd: FuncCall) -> bool {
-    import from jaclang.jac0core.codeinfo { NATIVE_ERASED_FIELD_MARKERS }
+    import from jaclang.compiler.frontend.codeinfo { NATIVE_ERASED_FIELD_MARKERS }
     owner = nd.parent;
     if not isinstance(owner, HasVar) or owner.value is not nd {
         return False;
@@ -160,23 +166,6 @@ def _is_user_symbol(sym: Symbol) -> bool {
     return False;
 }
 
-def _symbol_defining_module(sym: Symbol) -> (Module | None) {
-    decl = sym.decl;
-    if decl is None {
-        return None;
-    }
-    return decl.find_parent_of_type(Module);
-}
-
-def _is_local_user_shadow(sym: Symbol, call: FuncCall) -> bool {
-    if not _is_user_symbol(sym) {
-        return False;
-    }
-    call_mod = call.find_parent_of_type(Module);
-    sym_mod = _symbol_defining_module(sym);
-    return call_mod is not None and sym_mod is call_mod;
-}
-
 def intrinsic_registry_if_ready -> object | None {
     import sys;
     _mod = sys.modules.get("jaclang.compiler.intrinsic_registry");
@@ -185,6 +174,10 @@ def intrinsic_registry_if_ready -> object | None {
     }
     import from jaclang.compiler.intrinsic_registry { INTRINSIC_REGISTRY }
     return INTRINSIC_REGISTRY;
+}
+
+def resolved_callee(nd: FuncCall) -> (Ability | None) {
+    return nd.callee_decl or ability_of_symbol(resolve_expr_symbol(nd.target));
 }
 
 def classify_call(nd: FuncCall) -> CallKind {
@@ -220,7 +213,7 @@ def classify_call(nd: FuncCall) -> CallKind {
             return CallKind.CLIB;
         }
     }
-    if sym is not None and _is_local_user_shadow(sym, nd) {
+    if sym is not None and _is_user_symbol(sym) {
         if sym.sym_type
             in (
                 SymbolType.OBJECT_ARCH,
@@ -270,7 +263,7 @@ def collect_field_names(
 }
 
 def collect_method_names(arch: Archetype) -> set[str] {
-    import from jaclang.compiler.passes.main.layout_pass { archetype_accessors }
+    import from jaclang.compiler.passes.layout_pass { archetype_accessors }
     names: set[str] = set();
     if arch.body is not None and isinstance(arch.body, Sequence) {
         for stmt in arch.body {
@@ -314,12 +307,12 @@ def resolve_import_source_module(prog: any, nd: Import) -> (Module | None) {
         return None;
     }
     importer_path = resolve_importer_path_from_node(nd);
-    saved_opts = prog?._compile_options;
+    saved_opts = prog?.options;
     try {
         return prog.load_dependency_module(resolved_path, importer_path=importer_path);
     } finally {
         if saved_opts is not None {
-            prog._compile_options = saved_opts;
+            prog.options = saved_opts;
         }
     }
 }
@@ -331,7 +324,9 @@ def import_target_pinned_server(nd: Import) -> bool {
     try {
         target = nd.from_loc.resolve_relative_path();
         if isinstance(target, str) and target.endswith('.jac') {
-            import from jaclang.jac0core.placement_facts { pinned_module_space }
+            import from jaclang.compiler.placement.placement_facts {
+                pinned_module_space
+            }
             return pinned_module_space(target) == 'server';
         }
     } except Exception {
@@ -519,8 +514,8 @@ def _report_client_bare_import_uses(reporter: any, mod: Module, stmt: UniNode) {
 }
 
 def report_placement_warnings(reporter: any, mod: Module) {
-    import from jaclang.jac0core.placement { get_module_summary }
-    import from jaclang.jac0core.constant { CodeContext }
+    import from jaclang.compiler.placement.placement { get_module_summary }
+    import from jaclang.compiler.frontend.constant { CodeContext }
     ps = get_module_summary(mod, reporter.prog);
     written_glob_idxs: set[int] = set();
     for es in ps.elements {
@@ -603,14 +598,14 @@ def _module_top_element(mod: Module, nd: UniNode) -> (UniNode | None) {
 
 
 def client_bridged_endpoint(mod: Module, top: UniNode) -> bool {
-    import from jaclang.jac0core.placement { project_has_server }
+    import from jaclang.compiler.placement.placement { project_has_server }
     return (
         isinstance(top, Ability)
         and isinstance(top, ContextAwareNode)
         and top.access is not None
         and top.access.tag.name == Tok.KW_PUB
         and top.code_context == CodeContext.SERVER
-        and project_has_server(mod.loc.mod_path or '')
+        and project_has_server(mod)
     );
 }
 
@@ -722,8 +717,11 @@ def _import_used_as_value(mod: Module, imp: Import) -> bool {
 def serverless_server_evidence(
     mod: Module, prog: any
 ) -> list[tuple[str, str, UniNode]] {
-    import from jaclang.jac0core.placement { get_module_summary, project_has_server }
-    if project_has_server(mod.loc.mod_path or '') {
+    import from jaclang.compiler.placement.placement {
+        get_module_summary,
+        project_has_server
+    }
+    if project_has_server(mod) {
         return [];
     }
     out: list[tuple[str, str, UniNode]] = [];
@@ -753,13 +751,13 @@ def serverless_server_evidence(
 
 
 def report_serverless_kind_errors(reporter: any, mod: Module) {
-    import from jaclang.jac0core.diagnostics { E5087 }
-    import from jaclang.jac0core.placement { project_kind_name }
+    import from jaclang.compiler.frontend.diagnostics { E5087 }
+    import from jaclang.compiler.placement.placement { project_kind_name }
     evidence = serverless_server_evidence(mod, reporter.prog);
     if not evidence {
         return;
     }
-    kind = project_kind_name(mod.loc.mod_path or '') or 'client-only';
+    kind = project_kind_name(mod) or 'client-only';
     for (name, reason, stmt) in evidence {
         already = _already_reported(reporter, E5087, stmt);
         if not already {
@@ -768,4 +766,18 @@ def report_serverless_kind_errors(reporter: any, mod: Module) {
             );
         }
     }
+}
+
+def return_type_is_jsx(rt: (Expr | None)) -> bool {
+    if rt is None {
+        return False;
+    }
+    if (
+        isinstance(rt, BinaryExpr)
+        and isinstance(rt.op, Token)
+        and rt.op.name == Tok.BW_OR
+    ) {
+        return return_type_is_jsx(rt.left) or return_type_is_jsx(rt.right);
+    }
+    return isinstance(rt, Name) and rt.value in ("JsxElement", "JsxPage", "JsxLayout");
 }

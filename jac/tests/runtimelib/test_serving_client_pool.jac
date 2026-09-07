@@ -6,7 +6,7 @@ fresh socket per request puts a TCP (and TLS) handshake in front of every hop.""
 import asyncio;
 import gc;
 import weakref;
-import from jaclang.runtimelib.serving.client {
+import from jaclang.server.serving.client {
     ClientConnectionError,
     ConnectionPool,
     _has_buffered_bytes,
