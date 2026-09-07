@@ -8,8 +8,9 @@ import from jaclang.compiler.backends.es.es_unparse { es_to_js }
 import from jaclang.compiler.frontend.constant { CodeContext, SymbolType }
 import from jaclang.compiler.frontend.constant { Tokens as Tok }
 import from jaclang.runtime.osp_model { OspAnalysis, OspModel }
-import from jaclang.compiler.passes.ast_gen { BaseAstGenPass }
-import from jaclang.compiler.passes.ast_gen.jsx_processor { EsJsxProcessor }
+import from jaclang.compiler.backends.common.ast_gen_base { BaseAstGenPass }
+import from jaclang.compiler.frontend.module_facts { ModuleFacts }
+import from jaclang.compiler.backends.es.jsx_processor { EsJsxProcessor }
 import from jaclang.compiler.frontend.codeinfo { ClientManifest }
 import from jaclang.compiler.backends.es.scoped_styles {
     ScopedStyleSheet,
@@ -332,6 +333,7 @@ walker EsastGenPass(BaseAstGenPass[es.Statement]) {
         nd: uni.BinaryExpr, left_expr: es.Expression, right_expr: es.Expression
     ) -> (SpawnCallParts | None);
 
+    def _import_item_named(name: str) -> (uni.ModuleItem | None);
     def _build_spawn_runtime_call(
         nd: uni.BinaryExpr, parts: SpawnCallParts
     ) -> es.AwaitExpression;
@@ -414,6 +416,8 @@ walker EsastGenPass(BaseAstGenPass[es.Statement]) {
     ) -> None;
 
     def _sv_import_item_is_type(nd: uni.Import, item: uni.ModuleItem) -> bool;
+    def _is_service_bridge_import(nd: uni.Import) -> bool;
+    def _sv_provider_options(nd: uni.Import) -> (es.Expression | None);
     def _record_sv_backend(nd: uni.Import) -> None;
     def _generate_na_import_binding(nd: uni.Import) -> None;
     def _is_client_native_import(nd: uni.Import) -> bool;
@@ -677,6 +681,8 @@ walker EsastGenPass(BaseAstGenPass[es.Statement]) {
 
     def _bind_client_value_refs(nd: uni.Module) -> list[es.Statement];
     can exit_func_call with uni.FuncCall exit;
+    def _place_accessors(place: es.Expression) -> es.Expression | None;
+    def _lower_place_builtin(nd: uni.FuncCall) -> es.Expression | None;
     can exit_index_slice with uni.IndexSlice exit;
     can exit_special_var_ref with uni.SpecialVarRef exit;
     can exit_atom_trailer with uni.AtomTrailer exit;

@@ -27,8 +27,14 @@ impl native_compiler_fingerprint(options: any) -> str {
     import from jaclang.compiler.driver.jir { FORMAT_VERSION }
     _comp_h.update(str(FORMAT_VERSION).encode());
     for _cp in [
+        _cfp_os.path.join(_nat_dir, "*.jac"),
         _cfp_os.path.join(_nat_dir, "impl", "*.jac"),
-        _cfp_os.path.join(_nat_dir, "na_ir_gen", "*.jac"),
+        _cfp_os.path.join(_nat_dir, "na_ir_gen_pass.impl", "*.jac"),
+        _cfp_os.path.join(_jl_dir, "compiler", "backends", "common", "*.jac"),
+        _cfp_os.path.join(_jl_dir, "compiler", "passes", "layout_pass.jac"),
+        _cfp_os.path.join(
+            _jl_dir, "compiler", "passes", "impl", "layout_pass.impl.jac"
+        ),
         _cfp_os.path.join(_jl_dir, "compiler", "types", "*.jac"),
         _cfp_os.path.join(_jl_dir, "compiler", "types", "*", "*.jac"),
         _cfp_os.path.join(_jl_dir, "compiler", "type_registry.jac"),
@@ -47,14 +53,11 @@ impl native_compiler_fingerprint(options: any) -> str {
 }
 
 impl native_dep_cache_paths(real_path: str, options: any) -> tuple {
-    import hashlib as _dcp_hash;
     import os as _dcp_os;
-    import from jaclang.compiler.driver.jir { get_native_cache_dir }
+    import from jaclang.compiler.driver.jir { ct_dep_digest, get_native_cache_dir }
     _ir_cache_dir = str(get_native_cache_dir(real_path));
     _src_stem = _dcp_os.path.splitext(_dcp_os.path.basename(real_path))[0];
-    with open(real_path, "rb") as _sf {
-        _source_hash = _dcp_hash.sha256(_sf.read()).hexdigest()[:12];
-    }
+    _source_hash = ct_dep_digest(real_path, with_annexes=True)[:12];
     _fp = native_compiler_fingerprint(options);
     return (
         _dcp_os.path.join(_ir_cache_dir, f"{_src_stem}.{_source_hash}.{_fp}.ir_cache"),
@@ -244,9 +247,7 @@ impl native_unit_demotions(
         }
         _ud_all: set = set();
         import jaclang.compiler.frontend.unitree as _ud_uni;
-        import from jaclang.compiler.backends.py.module_codegen_pass {
-            ModuleCodegenPass as _UdWalk
-        }
+        import from jaclang.compiler.frontend.module_facts { ModuleFacts as _UdWalk }
         for _ud_stmt in _UdWalk.iter_context_stmts(_ud_tree) {
             if isinstance(_ud_stmt, _ud_uni.Ability) and _ud_stmt.name_ref {
                 _ud_all.add(_ud_stmt.name_ref.sym_name);
@@ -649,16 +650,22 @@ impl NativeCompilePass._compile_and_link_native_imports(
         }
     }
 
-    _INTERNAL_LINKAGE = 8;
-    _PRIVATE_LINKAGE = 9;
-    _WEAK_LINKAGE = 5;
-    _WEAK_ODR_LINKAGE = 6;
+    import from jaclang.compiler.backends.native.llvm.binding.value { Linkage }
+    non_unique_linkages = {
+        Linkage.internal,
+        Linkage.private,
+        Linkage.weak_any,
+        Linkage.weak_odr,
+        Linkage.linkonce_any,
+        Linkage.linkonce_odr,
+        Linkage.linkonce_odr_autohide
+    };
     for _mfn in _mod_functions(main_mod) {
         _mfn_name = str(_mfn.name);
         if _mfn.is_declaration or _mfn_name.startswith("llvm.") {
             continue;
         }
-        if _mfn.linkage == _INTERNAL_LINKAGE or _mfn.linkage == _PRIVATE_LINKAGE {
+        if _mfn.linkage in non_unique_linkages {
             continue;
         }
         symbol_origins[_mfn_name] = _MAIN_ORIGIN;
@@ -669,7 +676,7 @@ impl NativeCompilePass._compile_and_link_native_imports(
         if _mgv.is_declaration {
             continue;
         }
-        if _mgv.linkage == _INTERNAL_LINKAGE or _mgv.linkage == _PRIVATE_LINKAGE {
+        if _mgv.linkage in non_unique_linkages {
             continue;
         }
         symbol_origins[_mgv_name] = _MAIN_ORIGIN;
@@ -729,6 +736,19 @@ impl NativeCompilePass._compile_and_link_native_imports(
             continue;
         }
         linked_modules[real_path] = None;
+
+        import from jaclang.compiler.backends.common.kernel_units { kernel_unit_owner }
+        _kernel_owner = kernel_unit_owner(
+            real_path, source_mod_path.replace(os.sep, ".")
+        );
+        if _kernel_owner {
+            manifest = module.gen.interop_manifest;
+            if _kernel_owner not in manifest.native_transitive_sources {
+                manifest.native_transitive_sources.append(_kernel_owner);
+                manifest.native_transitive_keys.append("");
+            }
+            continue;
+        }
 
         import from jaclang.compiler.driver.jir { get_native_cache_dir }
         _src_stem = os.path.splitext(os.path.basename(real_path))[0];
@@ -1069,10 +1089,7 @@ impl NativeCompilePass._compile_and_link_native_imports(
                 if _func_name.startswith("llvm.") or func.is_declaration {
                     continue;
                 }
-                if func.linkage == _INTERNAL_LINKAGE
-                    or func.linkage == _PRIVATE_LINKAGE
-                    or func.linkage == _WEAK_LINKAGE
-                    or func.linkage == _WEAK_ODR_LINKAGE {
+                if func.linkage in non_unique_linkages {
                     continue;
                 }
                 exported_funcs.append(_func_name);
@@ -1098,11 +1115,7 @@ impl NativeCompilePass._compile_and_link_native_imports(
             exported_globals: list[str] = [];
             for gv in _mod_globals(imported_mod) {
                 _gv_name = str(gv.name);
-                if gv.is_declaration
-                    or gv.linkage == _INTERNAL_LINKAGE
-                    or gv.linkage == _PRIVATE_LINKAGE
-                    or gv.linkage == _WEAK_LINKAGE
-                    or gv.linkage == _WEAK_ODR_LINKAGE {
+                if gv.is_declaration or gv.linkage in non_unique_linkages {
                     continue;
                 }
                 exported_globals.append(_gv_name);
@@ -1227,7 +1240,7 @@ def _kernel_unit_opts(gc_mode: str, enforce: bool) -> any {
 def _compile_kernel_unit_ir(
     unit: str, cache: dict[str, str], gc_mode: str, enforce: bool
 ) -> (str | None) {
-    import from jaclang.compiler.backends.kernel_units {
+    import from jaclang.compiler.backends.common.kernel_units {
         load_unit_artifact,
         store_unit_artifact
     }
@@ -1262,7 +1275,7 @@ def _compile_kernel_unit_ir(
 def _compile_osp_kernel_ir(
     gc_mode: str = "cycles", enforce: bool = False
 ) -> (str | None) {
-    import from jaclang.compiler.backends.kernel_units { osp_core_unit_path }
+    import from jaclang.compiler.backends.common.kernel_units { osp_core_unit_path }
     variant = f"na_{gc_mode}_enf" if enforce else f"na_{gc_mode}";
     return _compile_kernel_unit_ir(
         osp_core_unit_path(variant), _OSP_KERNEL_IR_CACHE, gc_mode, enforce
@@ -1272,7 +1285,9 @@ def _compile_osp_kernel_ir(
 def _compile_region_kernel_ir(
     gc_mode: str = "cycles", enforce: bool = False
 ) -> (str | None) {
-    import from jaclang.compiler.backends.kernel_units { region_kernel_unit_path }
+    import from jaclang.compiler.backends.common.kernel_units {
+        region_kernel_unit_path
+    }
     variant = f"na_{gc_mode}_enf" if enforce else f"na_{gc_mode}";
     return _compile_kernel_unit_ir(
         region_kernel_unit_path(variant), _REGION_KERNEL_IR_CACHE, gc_mode, enforce
@@ -1303,7 +1318,7 @@ impl NativeCompilePass._module_defines(main_mod: ModuleRef, name: str) -> bool {
 impl NativeCompilePass._references_undefined_region_kernel(
     main_mod: ModuleRef
 ) -> bool {
-    import from jaclang.compiler.backends.kernel_units { REGION_KERNEL_ABI }
+    import from jaclang.compiler.backends.common.kernel_units { REGION_KERNEL_ABI }
     try {
         for _fn in _mod_functions(main_mod) {
             if _fn.is_declaration and _fn.name in REGION_KERNEL_ABI {
@@ -1403,7 +1418,7 @@ impl NativeCompilePass._link_osp_kernel(main_mod: ModuleRef) -> None {
 glob _FMT_KERNEL_IR_CACHE: dict = {};
 
 def _compile_fmt_kernel_ir -> (str | None) {
-    import from jaclang.compiler.backends.kernel_units {
+    import from jaclang.compiler.backends.common.kernel_units {
         fmt_kernel_unit_path,
         load_unit_artifact,
         store_unit_artifact
@@ -1414,7 +1429,7 @@ def _compile_fmt_kernel_ir -> (str | None) {
     }
 
     kernel_opts = _KernelOpts(
-        aot_mode=True, default_codespace='native', na_gc_mode='cycles'
+        aot_mode=True, default_codespace='native', memory_profile='managed'
     );
     cache_key = kernel_opts.codegen_fingerprint();
     if cache_key in _FMT_KERNEL_IR_CACHE {
