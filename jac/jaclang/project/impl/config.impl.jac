@@ -1310,11 +1310,7 @@ impl _parse_toml_data(
 
 impl _interpolate_recursive(`obj: any) -> any {
     if isinstance(`obj, str) {
-        try {
-            return interpolate_env_vars(`obj);
-        } except ValueError {
-            return `obj;
-        }
+        return interpolate_env_vars(`obj);
     } elif isinstance(`obj, dict) {
         return {k: _interpolate_recursive(v) for (k, v) in `obj.items()};
     } elif isinstance(`obj, list) {
