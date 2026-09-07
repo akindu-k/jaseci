@@ -5,6 +5,12 @@ import types;
 import from pathlib { Path }
 import from jaclang.cli.console { console, use_line_buffered_output }
 import from jaclang.cli.commands.cli_helpers { proc_file as _proc_file }
+import from jaclang.server.assembly {
+    assemble_served_program,
+    colocate_services as _colocate_services,
+    gateway_colocates as _gateway_colocates,
+    service_apps as _service_apps
+}
 import from jaclang.project.kinds { RunPlan }
 import type from importlib.metadata { EntryPoint }
 import type from jaclang.compiler.backends.native.llvm.binding.executionengine {
@@ -176,11 +182,11 @@ def _pin_run_scope(filename: str, takeover: (bool | None)) -> None {
 }
 
 def _default_codespace_is_native -> bool {
-    import from jaclang.project.config { get_config, BuildConfig }
+    import from jaclang.project.config { get_config, PlacementConfig }
     cfg = get_config();
-    effective = cfg.build.default_codespace
+    effective = cfg.placement.default_codespace
         if cfg is not None
-        else BuildConfig().default_codespace;
+        else PlacementConfig().default_codespace;
     return effective == 'native';
 }
 
@@ -312,7 +318,8 @@ def _serve_flag_spelling -> dict {
         "faux": "--faux",
         "host": "--host",
         "platform": "--platform",
-        "fleet": "--fleet"
+        "fleet": "--fleet",
+        "workers": "--workers"
     };
 }
 
@@ -340,7 +347,8 @@ def _serve_overrides(
     host: (str | None),
     platform: (str | None),
     fleet: bool,
-    cfg: any
+    cfg: any,
+    workers: (str | None) = None
 ) -> dict {
     over: dict = {};
     if _port_is_explicit(port, cfg) {
@@ -366,6 +374,9 @@ def _serve_overrides(
     }
     if fleet {
         over["fleet"] = True;
+    }
+    if workers is not None {
+        over["workers"] = workers;
     }
     return over;
 }
@@ -433,7 +444,8 @@ def _serve_with(
         "host": "",
         "platform": "",
         "takeover": False,
-        "fleet": False
+        "fleet": False,
+        "workers": ""
     };
     for (k, v) in plan_flags.items() {
         if k in kw {
@@ -451,8 +463,8 @@ def _serve_with(
 }
 
 def _build_plan(plan: RunPlan) -> int {
-    if plan.verb == "nacompile" {
-        import from jaclang.cli.commands.nacompile { nacompile }
+    if plan.verb == "native" {
+        import from jaclang.cli.commands.native_build { native_build }
         out = plan.flags.get("output", "");
         if out {
             out_dir = os.path.dirname(out);
@@ -460,8 +472,8 @@ def _build_plan(plan: RunPlan) -> int {
                 os.makedirs(out_dir, exist_ok=True);
             }
         }
-        return nacompile(
-            filename=plan.entry_path, output=out, shared=plan.flags.get("shared", False)
+        return native_build(
+            filename=plan.entry_path, output=out, lib=plan.flags.get("lib", False)
         );
     }
     if plan.verb == "build" {
@@ -783,9 +795,21 @@ impl run(
     platform: (str | None) = None,
     takeover: (bool | None) = None,
     fleet: bool = False,
-    args: list = []
+    workers: (str | None) = None,
+    args: list = [],
+    backend: str = ""
 ) -> int {
     use_line_buffered_output();
+    if backend not in ("", "python", "native") {
+        console.error("--backend must be python or native.");
+        return 1;
+    }
+    if backend and (target.endswith(".jab") or debug_mode or entry_name) {
+        console.error(
+            "--backend requires ordinary Jac source execution; it cannot be combined with .jab, --debug or --entry."
+        );
+        return 1;
+    }
 
     if target.endswith(".jab") {
         if dev {
@@ -818,7 +842,7 @@ impl run(
     eff = _effective_config(cfg, app);
 
     over = _serve_overrides(
-        port, dev, api_port, no_client, faux, host, platform, fleet, eff
+        port, dev, api_port, no_client, faux, host, platform, fleet, eff, workers
     );
     entry_flags = _entry_flags_used(entry_name, nd, root_id, debug_mode);
     kind_serves = plan is not None and plan.action == "serve";
@@ -854,7 +878,26 @@ impl run(
         return 1;
     }
 
+    if backend
+        and (
+            want_serve or (plan is not None and plan.action == "build" and not file)
+        ) {
+        console.error(
+            "--backend applies only when executing Jac source, not serving or building an app."
+        );
+        return 1;
+    }
+    if backend
+        and not (file or (plan.entry_path if plan is not None else "")).endswith(
+            ".jac"
+        ) {
+        console.error("--backend requires a .jac source file.");
+        return 1;
+    }
     if show {
+        if backend {
+            console.print(f"backend      : {backend}");
+        }
         return _show_run(plan, app, target, file, want_serve);
     }
 
@@ -886,11 +929,16 @@ impl run(
     if entry_name {
         return _invoke_entrypoint(exec_target, entry_name, args, main, root_id, nd);
     }
-    return _exec_file(exec_target, main, cache, diagnostics, args);
+    return _exec_file(exec_target, main, cache, diagnostics, args, backend);
 }
 
 def _exec_file(
-    filename: str, main: bool, cache: bool, diagnostics: str, args: list
+    filename: str,
+    main: bool,
+    cache: bool,
+    diagnostics: str,
+    args: list,
+    backend: str = ""
 ) -> int {
     import from jaclang.runtime.runtime { JacRuntime as Jac }
     import from jaclang.project.config { get_config }
@@ -911,7 +959,17 @@ def _exec_file(
     sys.argv = [filename] + list(args);
     (base, mod, mach) = _proc_file(filename);
     lng = filename.split('.')[-1];
+    import from jaclang.compiler.frontend.codeinfo {
+        get_effective_default_codespace_override,
+        set_effective_default_codespace
+    }
+    previous_codespace = get_effective_default_codespace_override();
     try {
+        if backend {
+            set_effective_default_codespace(
+                'server' if backend == 'python' else 'native'
+            );
+        }
         if filename.endswith('.jac') {
             native_executed = False;
 
@@ -929,14 +987,16 @@ def _exec_file(
             import from jaclang.compiler.driver.boundary_classify {
                 module_demoted_native as _na_demoted
             }
-            if (
-                _kind_forced
-                or (
-                    _default_codespace_is_native()
-                    and sys.stdout is sys.__stdout__
-                    and not _na_demoted(filename)
-                )
-            ) {
+            if backend != "python"
+                and (
+                    backend == "native"
+                    or _kind_forced
+                    or (
+                        _default_codespace_is_native()
+                        and sys.stdout is sys.__stdout__
+                        and not _na_demoted(filename)
+                    )
+                ) {
                 import ctypes;
                 import from jaclang.compiler.driver.compile_options {
                     CompileOptions as _RunOpts
@@ -945,7 +1005,7 @@ def _exec_file(
                 program = Jac.get_program();
                 _run_options = (
                     _RunOpts(force_codespace='native', force_target_program=True)
-                        if _kind_forced
+                        if _kind_forced or backend == "native"
                         else None
                 );
                 ir_mod = program.compile(file_path=full_path, options=_run_options);
@@ -971,15 +1031,35 @@ def _exec_file(
                         }
                     }
                 }
-                if _kind_forced and not native_executed {
+                if (_kind_forced or backend == "native") and not native_executed {
                     console.error(
-                        "cli-native project did not produce a runnable native "
+                        "Native execution was requested but did not produce a runnable native "
                         "entry (no engine or no jac_entry)."
                     );
                     return 1;
                 }
             }
             if not native_executed {
+                if backend == "python" {
+                    import from jaclang.compiler.driver.compile_options {
+                        CompileOptions
+                    }
+                    program = Jac.get_program();
+                    program.compile(
+                        file_path=os.path.abspath(filename),
+                        options=CompileOptions(
+                            force_codespace="server",
+                            default_codespace="server",
+                            force_target_program=True
+                        )
+                    );
+                    if program.errors_had {
+                        for error in program.errors_had {
+                            console.error(error.pretty_print());
+                        }
+                        return 1;
+                    }
+                }
                 Jac.jac_import(
                     target=mod,
                     base_path=base,
@@ -1023,6 +1103,7 @@ def _exec_file(
         }
         return 1 if diagnostics != "none" else 0;
     } finally {
+        set_effective_default_codespace(previous_codespace);
         sys.argv = original_argv;
         mach.close();
     }
@@ -1041,19 +1122,6 @@ def _serve_app(cfg: any, app: str, filename: str) -> any {
     return cfg.app_for_path(os.path.abspath(filename));
 }
 
-def _service_apps(cfg: any, served: any) -> list {
-    return [
-        a
-        for a in cfg.serving_apps()
-        if a.kind in ("service", "service-mesh") and a.name != served.name
-    ];
-}
-
-def _gateway_colocates(cfg: any) -> bool {
-    scale_cfg = cfg.get_plugin_config("scale") or {};
-    gateway = scale_cfg.get("gateway", {}) if isinstance(scale_cfg, dict) else {};
-    return not (isinstance(gateway, dict) and gateway.get("colocate") is False);
-}
 
 def _serve_fleet(
     cfg: any,
@@ -1112,47 +1180,6 @@ def _serve_fleet(
     );
 }
 
-def _colocate_services(cfg: any, served: any, base: str) -> None {
-    if cfg is None or served is None or os.environ.get("JAC_SV_SIBLING") == "1" {
-        return;
-    }
-    services = _service_apps(cfg, served);
-    if not services {
-        return;
-    }
-    import from jaclang.runtime.runtime { JacRuntime as Jac }
-    import from jaclang.jac0core.ext_registry { base_stem }
-    import from jaclang.server.sv_client { register_local }
-
-    project_root = str(cfg.project_root) if cfg.project_root else base;
-    for svc in services {
-        entry_file = svc.entry_path(project_root);
-        if not entry_file or not os.path.isfile(entry_file) {
-            console.warning(
-                f"Service app '{svc.name}' has no entry_file file; not colocated."
-            );
-            continue;
-        }
-        (svc_base, svc_file) = os.path.split(entry_file);
-        loaded = Jac.jac_import(
-            target=base_stem(svc_file),
-            base_path=svc_base or "./",
-            lng=entry_file.split(".")[-1]
-        );
-        module = loaded[0] if loaded else None;
-        if module is None {
-            raise RuntimeError(
-                f"Service app '{svc.name}' failed to load from {entry_file}"
-            );
-        }
-        register_local(svc.name, module);
-        console.print(
-            f"  ✔ colocated service '{svc.name}' "
-            f"({os.path.relpath(entry_file, project_root)})",
-            style="muted"
-        );
-    }
-}
 
 def _client_display_path(path: Path, base: str) -> str {
     import jaclang;
@@ -1180,7 +1207,8 @@ impl serve(
     platform: str = "",
     takeover: bool = False,
     fleet: bool = False,
-    app: str = ""
+    app: str = "",
+    workers: str = ""
 ) -> int {
     import from jaclang.runtime.runtime { JacRuntime as Jac }
     import from pathlib { Path }
@@ -1250,11 +1278,7 @@ impl serve(
             mach.close();
             return 1;
         }
-        _colocate_services(cfg, served, base);
-        if served is not None {
-            import from jaclang.server.sv_client { set_consumer_app }
-            set_consumer_app(served.name);
-        }
+        assemble_served_program(cfg, served, base);
     } except Exception as e {
         if Jac.get_program().errors_had {
             for error in Jac.get_program().errors_had {
@@ -1285,13 +1309,28 @@ impl serve(
         api_port_pinned = port_pinned;
     }
 
+    import from jaclang.server.settings { ServeConfigError, ServeSettings }
+    overrides: dict[str, any] = {
+        'port': actual_api_port,
+        'strict_port': api_port_pinned,
+        'dev': dev,
+        'no_client': no_client
+    };
+    if host {
+        overrides['host'] = host;
+    }
+    if workers {
+        overrides['workers'] = workers;
+    }
+    try {
+        settings = ServeSettings.load(base, overrides);
+    } except ServeConfigError as e {
+        console.error(f"cannot start the server:\n{e}");
+        mach.close();
+        return 1;
+    }
     ServerClass = Jac.get_api_server_class();
-    server = ServerClass(
-        module_name=mod,
-        port=actual_api_port,
-        base_path=base,
-        strict_port=api_port_pinned
-    );
+    server = ServerClass(module_name=mod, base_path=base, settings=settings);
     if faux {
         try {
             server.print_endpoint_docs();
@@ -1301,11 +1340,6 @@ impl serve(
             console.error(dump_traceback(e));
             mach.close();
             return 1;
-        } finally {
-            svr = server.server;
-            if svr and hasattr(svr, 'server_close') {
-                svr.server_close();
-            }
         }
         mach.close();
         return 0;
@@ -1362,16 +1396,33 @@ impl serve(
                 import from jaclang.compiler.driver.pass_driver { compile_progress }
                 compiler = server.introspector._bundle_builder._get_compiler();
                 compiled: list[str] = [];
+                active: list[str] = [];
+                completed: list[int] = [0];
                 started = time.perf_counter();
                 with console.status("Compiling client...") as status {
                     def _on_module(file_path: str) {
                         compiled.append(file_path);
-                        status.update(
-                            "Compiling client: "
-                                + _client_display_path(Path(file_path), base)
-                        );
+                        active.append(file_path);
                     }
-                    with compile_progress.listen(_on_module) {
+                    def _on_finished(file_path: str) {
+                        active.remove(file_path);
+                        completed[0] += 1;
+                    }
+                    def _progress_text -> str {
+                        current = list(active);
+                        detail = (
+                            f"Compiling client: {completed[0]} completed"
+                            f" · {len(current)} active · {time.perf_counter()
+                                - started:.1f}s"
+                        );
+                        if current {
+                            detail += " · "
+                                + _client_display_path(Path(current[-1]), base);
+                        }
+                        return detail;
+                    }
+                    status.update(_progress_text);
+                    with compile_progress.listen(_on_module, _on_finished) {
                         compiler.compile(server.introspector._module, Path(filename));
                     }
                 }
@@ -1430,8 +1481,16 @@ impl serve(
         );
     }
     try {
-        server.start(dev=dev, no_client=no_client, on_ready=_announce_ready);
-        return 0;
+        return int(
+            server.start(dev=dev, no_client=no_client, on_ready=_announce_ready)
+        );
+    } except ServeConfigError as e {
+        console.error(str(e));
+        if hot_reloader is not None {
+            hot_reloader.stop();
+        }
+        mach.close();
+        return 1;
     } except KeyboardInterrupt {
         console.print('\nShutting down');
         if hot_reloader is not None {

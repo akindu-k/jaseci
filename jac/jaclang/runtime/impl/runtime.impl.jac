@@ -1473,8 +1473,13 @@ impl JacPersistence._destroy_anchors(objs: any, strict: bool) -> list[Anchor] {
 }
 
 impl JacPersistence.destroy(objs: any, strict: bool = False) -> None {
+    anchors = JacPersistence._destroy_anchors(objs, strict);
+    if not anchors {
+        return;
+    }
     import from jaclang.runtime.osp_kernel { osp_forget }
-    for anchor in JacPersistence._destroy_anchors(objs, strict) {
+    import from jaclang.runtime.region { run_drop }
+    for anchor in anchors {
         if isinstance(anchor.archetype, Root) {
             raise RuntimeError("cannot destroy root");
         }
@@ -1490,6 +1495,7 @@ impl JacPersistence.destroy(objs: any, strict: bool = False) -> None {
                         `edge.detach();
                         `edge.destroyed = True;
                         _edge_handle: any = `edge.archetype;
+                        run_drop(_edge_handle);
                         osp_forget(_edge_handle);
                         if eid is not None {
                             JacRuntimeInterface.get_context().mem.delete(eid);
@@ -1509,6 +1515,7 @@ impl JacPersistence.destroy(objs: any, strict: bool = False) -> None {
             }
             anchor.destroyed = True;
             _handle: any = anchor.archetype;
+            run_drop(_handle);
             osp_forget(_handle);
         }
     }
@@ -1577,31 +1584,16 @@ impl JacBuiltin.get_console -> ConsoleImpl {
 }
 
 impl JacServe.get_api_server_class -> type {
-    import from jaclang.server.identity_owner {
-        SCALE_IDENTITY,
-        identity_owner,
-        scale_stack_unavailable
-    }
-    _served = JacRuntime.get_full_target_path() or JacRuntime.get_base_path_dir();
-    if identity_owner(_served) != SCALE_IDENTITY {
-        import from jaclang.server.server { JacAPIServer }
-        return JacAPIServer;
-    }
+    import from jaclang.server.server { JacAPIServer }
+    return JacAPIServer;
+}
+
+impl JacServe.get_server_extensions -> list[ServerExtension] {
     _sp = _scale_provider();
     if _sp is None {
-        raise scale_stack_unavailable('jaclang.scale.plugin', scale_provider_error());
+        return [];
     }
-    _scaled = _sp.get_api_server_class();
-    if _scaled is None {
-        raise RuntimeError(
-            'the scale plugin returned no API server class while the scale '
-            'identity owns /user/* for this project. Nothing falls back to the '
-            'core store from here: the two stacks keep credentials in '
-            'different databases, so serving the other one would answer for '
-            'accounts this project does not have.'
-        );
-    }
-    return _scaled;
+    return list(_sp.get_server_extensions());
 }
 
 impl JacServe.get_sv_registry -> dict[str, str] {
@@ -2006,14 +1998,7 @@ impl JacConfig.validate_config(config: dict[(str, any)]) -> list[str] {
 }
 
 impl JacPersistence.get_user_manager(base_path: str) -> UserManager {
-    _sp = _scale_provider();
-    if _sp is not None {
-        _scaled = _sp.get_user_manager(base_path);
-        if _scaled is not None {
-            return _scaled;
-        }
-    }
-    import from jaclang.server.server { UserManager }
+    import from jaclang.server.identity.user_manager { UserManager }
     return UserManager(base_path=base_path);
 }
 
@@ -2177,4 +2162,29 @@ impl JacRuntime.push_request_context(context: ExecutionContext) -> any {
 
 impl JacRuntime.reset_request_context(token: any) -> None {
     _request_context.reset(token);
+}
+
+impl JacRuntime.after_fork_in_child -> None {
+    import from concurrent.futures { ThreadPoolExecutor }
+    import from jaclang.data.pgpool { detach }
+    ctx = JacRuntime.exec_ctx;
+    JacRuntime.exec_ctx = None;
+    if ctx is not None {
+        store = ctx.mem?.store;
+        if store is not None {
+            for attr in ('_conn', '_side_conn') {
+                detach(getattr(store, attr, None));
+                try {
+                    setattr(store, attr, None);
+                } except Exception {}
+            }
+            try {
+                store._listen_thread = None;
+                store._listen_stop = None;
+                store._side_listened = False;
+            } except Exception {}
+        }
+    }
+    _shared_root_resolver[1] = None;
+    JacRuntime.pool = ThreadPoolExecutor();
 }

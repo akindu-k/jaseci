@@ -18,6 +18,12 @@ comptime SPEC_RUN: CommandSpec = CommandSpec(
                  )
              ),
              Arg.create(
+                 "backend",
+                 `default="",
+                 choices=["python", "native"],
+                 help="Execution backend (omit for automatic selection)"
+             ),
+             Arg.create(
                  "show",
                  typ=bool,
                  `default=False,
@@ -136,8 +142,21 @@ comptime SPEC_RUN: CommandSpec = CommandSpec(
                  `default=None,
                  short="",
                  help=(
-                     "Mobile dev: optional host/IP the device reaches this machine on. "
-                     "When omitted, jac auto-selects a LAN address."
+                     "Interface to bind (serving only; default [serve] host, 0.0.0.0). "
+                     "Use 127.0.0.1 to keep a dev server off the network. For mobile "
+                     "dev (--client mobile --dev) this is also the host the device "
+                     "reaches this machine on."
+                 )
+             ),
+             Arg.create(
+                 "workers",
+                 typ=str,
+                 `default=None,
+                 short="w",
+                 help=(
+                     "Worker processes to serve with (serving only; default [serve.workers] "
+                     "count, 1). 'auto' sizes from the CPU quota. Each worker is a full "
+                     "process with its own thread pool; the parent only supervises."
                  )
              ),
              Arg.create(
@@ -247,7 +266,9 @@ def run(
     platform: str | None = None,
     takeover: bool | None = None,
     fleet: bool = False,
-    args: list[str] = []
+    workers: str | None = None,
+    args: list[str] = [],
+    backend: str = ""
 ) -> int;
 
 def serve(
@@ -262,7 +283,8 @@ def serve(
     platform: str = "",
     takeover: bool = False,
     fleet: bool = False,
-    app: str = ""
+    app: str = "",
+    workers: str = ""
 ) -> int;
 
 def debug(filename: str, main: bool = True, cache: bool = False) -> int;

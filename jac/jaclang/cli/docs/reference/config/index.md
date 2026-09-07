@@ -265,30 +265,36 @@ The `diagnostics` setting controls how compilation errors and warnings are repor
 
 The CLI flag `-e` / `--diagnostics` overrides this setting.
 
+### Execution backend override
+
+Use `jac run --backend python app.jac` to execute Jac source through the Python
+bytecode backend, or `jac run --backend native app.jac` to require native
+execution. Without `--backend`, the project and placement settings select the
+backend automatically. The override applies only to this invocation.
+
+Put run options before the source path; arguments after the path are passed to
+the program. For example, `jac run --backend python app.jac -- input.txt` passes
+`input.txt` to the program. Backend selection applies to source execution, not
+serving, building, sealed bundles, `--debug`, or `--entry`.
+
 ---
 
 ### [serve]
 
-Defaults for `jac run`:
+Everything the server process reads, for a laptop and a pod alike. Every key
+has a `JAC_SERVE_*` environment mirror (listed with each table), and the
+deploy target sets those same variables on the pod, so one resolver answers
+both.
 
 ```toml
 [serve]
+host = "0.0.0.0"         # Interface to bind; 127.0.0.1 keeps a dev server off the network
 port = 8000              # Server port
 session = ""             # Session name
 main = true              # Run as main module
-
-# Which identity stack owns /user/* -- register, login, tokens, and the
-# credential store behind them. "auto" is the scale (Postgres) identity when
-# the scale stack is configured for the project, and the core identity
-# (sqlite .jac/data/main.db) when it is not. Serving is itself one of the
-# things that configures it: `jac run --serve` turns the scale runtime on, so
-# under "auto" a served project always gets the scale identity, whether or not
-# it names a database. Set identity = "core" to serve from the core store
-# instead. The setting is resolved for the project being served rather than
-# the current directory, and a scale stack that will not import fails the boot
-# instead of quietly serving the other store, which holds none of the same
-# accounts. JAC_IDENTITY_BACKEND overrides it for one run.
-identity = "auto"        # "auto" | "core" | "scale"
+docs_enabled = true      # /docs and /openapi.json
+graph_enabled = true     # /graph and /graph/data (turn off in production)
+cors_origins = ["*"]     # Origins allowed by the CORS middleware
 
 # Optimistic-concurrency policy for concurrent check-then-create races
 # (see Persistence -> Concurrent writes).
@@ -296,22 +302,79 @@ on_conflict = "retry"        # "retry": abort + replay so the loser converges
                              # "fail":  no replay, return HTTP 409 immediately
 conflict_max_attempts = 5    # max walker/function attempts under "retry"
 conflict_backoff_ms = 0      # linear backoff between replay attempts (0 = none)
+
+[serve.workers]
+count = "1"              # Worker processes; "auto" = the CPU quota. JAC_SERVE_WORKERS
+threads = "auto"         # Sync-handler threads per worker; "auto" sizes from the quota. JAC_SERVE_THREADS
+max_requests = 0         # Recycle a worker after this many requests (0 = never). JAC_SERVE_MAX_REQUESTS
+max_requests_jitter = 0  # Random extra requests so workers do not recycle together
+request_timeout = 0.0    # Seconds before a request is answered 504 (0 = no limit). JAC_SERVE_REQUEST_TIMEOUT
+boot_timeout = 120.0     # Seconds a worker may take to start accepting before it is replaced
+hang_timeout = 30.0      # Seconds without a worker heartbeat before it is killed and replaced
+
+[serve.tls]
+certfile = ""            # PEM certificate chain; set to serve HTTPS directly. JAC_SERVE_TLS_CERTFILE
+keyfile = ""             # PEM private key. JAC_SERVE_TLS_KEYFILE
+ca_certs = ""            # Optional CA bundle for client certificates
+min_version = "1.2"      # "1.2" or "1.3"
+
+[serve.proxy]
+trusted = []             # Proxies (IPs or CIDRs) whose X-Forwarded-* / Forwarded headers are believed. JAC_SERVE_PROXY_TRUSTED
+
+[serve.limits]
+max_connections = 0      # Concurrent connections per worker before new ones get 503 (0 = unlimited)
+backlog = 2048           # Listen backlog
+max_body_bytes = 104857600
+max_header_bytes = 65536
+max_header_count = 100
+max_request_line_bytes = 8192
+multipart_spool_bytes = 1048576   # Multipart bodies above this spool to disk
+
+[serve.timeouts]
+header = 30.0            # Seconds to receive the request line and headers
+body = 60.0              # Seconds per body read
+keepalive = 65.0         # Idle seconds before a keep-alive connection is closed
+drain = 10.0             # Seconds in-flight requests get after SIGTERM. JAC_SERVE_DRAIN_TIMEOUT
+close = 5.0
+
+[serve.access_log]
+enabled = true           # JAC_SERVE_ACCESS_LOG
+format = "text"          # "text" or "json". JAC_SERVE_ACCESS_LOG_FORMAT
+suppress_health_checks = false
+
+[serve.compression]
+enabled = true           # gzip negotiable responses (JSON, text, JS, SVG, wasm)
+min_bytes = 1024
+level = 4
+
+[serve.websocket]
+allowed_origins = []     # Cross-origin upgrades to allow; [] = same-origin only. JAC_SERVE_WS_ALLOWED_ORIGINS
+max_message_bytes = 0    # 0 = the 64 MiB frame cap
+ping_interval = 20.0     # Idle seconds before the server pings
+ping_timeout = 20.0      # Seconds to answer the ping before the socket is closed
+
+[serve.auth]
+secret = ""              # JWT signing secret. JAC_SERVE_AUTH_SECRET. Required in a cluster; a laptop mints one per project
+algorithm = "HS256"
+token_ttl_days = 7
+password_hash_cost = 14  # log2 of the scrypt work factor, 10..17
 ```
 
 The served app's client is at `/`. Other client-capable apps in the workspace whose bundle exists (`jac build --all` writes `dist/<app>/`) are served at `/cl/<app-name>/` -- a fixed prefix with no config key. Serving apps answer under their `route` (default `/api/<name>`, see [`[apps]`](#apps)).
 
-`identity` decides which stack owns `/user/*`, and with it which database the
-credentials live in: the scale identity keeps them in Postgres as `scrypt$`
-hashes, the core identity in sqlite at `.jac/data/main.db`. The two never share
-rows, so moving between them strands every account that already exists -- which
-is why an unrecognized value, an unreadable `jac.toml`, and a scale stack that
-will not import are all refused rather than resolved to something. Under `auto`
-the answer depends on whether the scale runtime is on for the project, and
-serving turns it on: a served project gets the scale identity even with no
-`[scale.database]` url. The same project asked outside a serving process (a
-direct `identity_owner()` or `Jac.get_user_manager` call, which nothing in the
-tree does today) answers `core`, because nothing has turned the scale runtime
-on there. Pin `identity` explicitly if a project needs the same answer in both.
+Identity is one implementation: users, credentials and sessions live in the
+project's Postgres store (the embedded server on a laptop, `JAC_DB_URL` or
+`[scale.database] url` elsewhere) and every session token is an HS256 JWT
+signed with `[serve.auth] secret`. With no secret configured a laptop keeps
+one per project under `.jac/data/jwt_secret`; a cluster refuses to start
+without one, and `jac scale deploy` mints one into the app Secret.
+
+`workers` is the throughput and isolation knob. One worker is one Python
+process and therefore one core of CPU-bound work; `count = "auto"` starts one
+per core of the container's quota. Even on one core, more than one worker
+keeps a slow request from stalling every other request. Anything that only
+works in one process is refused when `count > 1`: `--dev` hot reload, a
+memory WebSocket backplane, or events without a database.
 
 `on_conflict` controls what happens when two concurrent requests race a "look it up, create it if missing" against the same node and the loser's commit is rejected. `retry` (default) re-runs the request against the now-current graph so it converges on the winner's node; `fail` surfaces a typed `409 write_conflict` for the client to handle. See [Persistence -> Concurrent writes: check-then-create](../persistence.md#concurrent-writes-check-then-create-and-convergence) for the full model.
 
@@ -324,10 +387,8 @@ Build configuration:
 ```toml
 [build]
 dir = ".jac"                # Build artifacts directory
-default_codespace = "native"  # Codespace for markerless .jac modules: "native"/"na" or "server"/"sv"
+native_closure_cap = 256    # Largest native closure the whole-module path will link
 ```
-
-`default_codespace` controls how a plain `.jac` module (not a `.jac` implementation variant) is treated when whole-module native compilation is possible. With `"native"` (the default) the compiler infers: a module with no server-requiring constructs, and whose imported plain `.jac` modules are likewise native-clean, is compiled whole-module in the native codespace and executed through the native engine. Modules with server-requiring constructs (OSP archetypes, python imports, serve endpoints, test blocks, JSX, and similar) compile in the server codespace exactly as before, and an inferred-native module that does not lower yet is transparently recompiled server-side with a dim `note:` -- the preference is always safe. Set `"server"` to opt a project out of native inference entirely; `[placement.pins]` entries mapping to `"native"` and forced builds (`jac nacompile`, `jac build --as native`, `CompileOptions(force_codespace='native')`) remain strict mandates.
 
 The `dir` setting controls where all build artifacts are stored:
 
@@ -338,18 +399,14 @@ The `dir` setting controls where all build artifacts are stored:
 
 ---
 
-### [placement.pins]
+### [placement]
 
-Placement overrides. Element placement (server / client / native) is inferred
-by the compiler from evidence in the source (see
-[Placement](../placement.md)); this table is the escape hatch when a decision
-must be forced. Keys are
-[fnmatch](https://docs.python.org/3/library/fnmatch.html) patterns matched
-against an element's dotted path -- `module` or `module.element`, relative to
-the project root -- and values are `"server"`, `"client"`, or `"native"`
-(any other value is a hard error at load time):
+Where markerless code runs, and the pins that override the solver:
 
 ```toml
+[placement]
+default = "native"        # markerless .jac modules: "native"/"na" or "server"/"sv"
+
 [placement.pins]
 "app.API_KEY"   = "server"    # one element: keep a secret out of the JS bundle
 "app.summarize" = "server"    # client calls to it bridge over RPC instead
@@ -357,39 +414,50 @@ the project root -- and values are `"server"`, `"client"`, or `"native"`
 helpers         = "client"    # module-level pin: the whole module
 ```
 
-A pinned element is immovable to the placement solver; everything else
-re-solves around it. Module-level `"server"` pins additionally give client
-imports of that module full service-boundary semantics (non-`:pub` items
-callable with auth, boundary types collected). Pins are part of the program:
-changing them invalidates the compilation cache, and
-`jac check --placements` reports them in each element's evidence chain.
+`default` controls how a plain `.jac` module (not a `.jac` implementation variant) is treated when whole-module native compilation is possible. With `"native"` (the default) the compiler infers: a module with no server-requiring constructs, and whose imported plain `.jac` modules are likewise native-clean, is compiled whole-module in the native codespace and executed through the native engine. Modules with server-requiring constructs (OSP archetypes, python imports, serve endpoints, test blocks, JSX, and similar) compile in the server codespace, and an inferred-native module that does not lower yet is transparently recompiled server-side with a dim `note:` -- the preference is always safe. Set `"server"` to opt a project out of native inference entirely; `[placement.pins]` entries mapping to `"native"` and forced builds (`jac build --native`, `CompileOptions(force_codespace='native')`) remain strict mandates.
 
-Pins can also be overlaid per app -- `[apps.<name>.placement.pins]` merges
-over this table for that app's modules -- and a pin is one way to name the
-**owner** of a server-placed shared module when several apps serve
-(`E5107`). Declaring that a module runs as its own **service** is a different
-fact with a different home: an `[apps.<name>]` table with `kind = "service"`
-(see [Workspaces & Apps](../apps.md)); imports of what that app owns lower to
-typed-async bridge stubs automatically.
+Element placement (server / client / native) is inferred by the compiler from evidence in the source (see [Placement](../placement.md)); `[placement.pins]` is the escape hatch when a decision must be forced. Keys are [fnmatch](https://docs.python.org/3/library/fnmatch.html) patterns matched against an element's dotted path -- `module` or `module.element`, relative to the project root -- and values are `"server"`, `"client"`, or `"native"` (any other value is a hard error at load time).
+
+A pinned element is immovable to the placement solver; everything else re-solves around it. Module-level `"server"` pins additionally give client imports of that module full service-boundary semantics (non-`:pub` items callable with auth, boundary types collected). Pins are part of the program: changing them invalidates the compilation cache, and `jac explain placement` reports them in each element's evidence chain.
+
+Pins can also be overlaid per app -- `[apps.<name>.placement.pins]` merges over this table for that app's modules -- and a pin is one way to name the **owner** of a server-placed shared module when several apps serve (`E5107`). Declaring that a module runs as its own **service** is a different fact with a different home: an `[apps.<name>]` table with `kind = "service"` (see [Workspaces & Apps](../apps.md)); imports of what that app owns lower to typed-async bridge stubs automatically.
 
 ---
 
-### [gc]
+### [memory]
 
-Memory-management defaults for **native** compilation (`jac nacompile`):
+The one declaration of memory intent, checked on every backend and reported by `jac check` without a native build:
 
 ```toml
-[gc]
-default = "cycles"    # gc mode emitted when --gc is not passed: "cycles", "rc", or "none"
-
-[gc.enforce]
-modules = []          # module-name patterns compiled under zero-RC nogc enforcement
-grandfathered = []    # patterns exempted from enforcement (checked before `modules`)
+[memory]
+profile = "managed"       # managed | rc | nogc   (artifact-wide)
+enforce = ["core.*"]      # incremental only: hold these modules to the nogc contract under a managed profile
+exempt  = ["legacy.*"]    # both lists are ignored, with a warning, when profile = "nogc"
 ```
 
-`default` selects the memory-management runtime the native backend emits when `jac nacompile` is invoked without an explicit `--gc`: `cycles` (reference counting plus the cycle collector), `rc` (reference counting only), or `none` (no retain/release call sites).
+| | `managed` | `rc` | `nogc` |
+|---|---|---|---|
+| Runtime emitted | reference counting plus the cycle collector, collecting automatically | reference counting only | none |
+| Contract | opt-in per binding; `enforce` patterns for modules ahead of the flip | same | every module, no exemptions |
+| Self-checks | none | none | RC-free IR scan, always on; a failure is a compiler bug |
 
-`[gc.enforce] modules` lists `fnmatch`-style patterns matched against compiled module names; a native module matching one is compiled under **nogc enforcement**, which makes zero-RC ownership coverage a compile-time contract -- every heap-typed parameter, return type, and `has` field must be in the owned world, and violations are hard [`E1401`-`E1406`](../diagnostics.md#zero-rc-enforcement-errors) errors that block codegen. `grandfathered` patterns exempt matching modules, so a codebase can adopt enforcement incrementally. The `jac nacompile --enforce-nogc` flag enforces the compiled module regardless of these patterns. See [Zero-RC ownership compilation](../language/native-pathway.md#zero-rc-ownership-compilation).
+`enforce` lists `fnmatch`-style patterns matched against compiled module names; a native module matching one is compiled under **nogc enforcement**, which makes zero-RC ownership coverage a compile-time contract -- every heap-typed parameter, return type, and `has` field must be in the owned world, and violations are hard [`E1401`-`E1407`](../diagnostics.md#zero-rc-enforcement-errors) errors that block codegen. `exempt` patterns exclude matching modules, so a codebase can adopt enforcement incrementally. `jac build <file> --native --memory nogc` overrides the profile for one build. See [Zero-RC ownership compilation](../language/native-pathway.md#zero-rc-ownership-compilation).
+
+---
+
+### [native]
+
+How `jac build --native` emits code:
+
+```toml
+[native]
+target = ""               # "" or "host" (default), "wasm32", or an LLVM triple
+opt = 2                   # optimization level
+debug = false             # DWARF, unoptimized JIT path, and the RC trace machinery, together
+threads = 4               # `flow for` width; a built binary can override with JAC_THREADS
+```
+
+A built binary reads two environment variables at run time and no others: `JAC_GC=off` disables collection for leak debugging (collection is on by default under `managed`), and `JAC_THREADS` overrides the `flow for` width. Nothing at compile time reads the environment; `jac explain memory|placement|ir` replaces the old diagnostic variables.
 
 ---
 
@@ -400,15 +468,24 @@ Defaults for `jac test`:
 ```toml
 [test]
 directory = ""          # Scopes no-argument `jac test` discovery (empty = walk project root)
+directories = []        # Several discovery roots; takes precedence over `directory`
+isolate = []            # Glob patterns of test files that each get a dedicated worker process
+serial = []             # Glob patterns of test files that run one at a time after the parallel phase
 filter = ""             # Filter pattern
 verbose = false         # Verbose output
 fail_fast = false       # Stop on first failure
 max_failures = 0        # Max failures (0 = unlimited)
 ```
 
-When `directory` is set, `jac test` with no file argument collects tests only
-from that directory (resolved against the project root), so application modules
-whose top-level `with entry` runs on import are not pulled into test collection.
+When `directory` (or the list form `directories`) is set, `jac test` with no
+file argument collects tests only from those directories (resolved against the
+project root), so application modules whose top-level `with entry` runs on
+import are not pulled into test collection. Every path in `directories` must
+exist. `isolate` names test files that must not share a worker process with
+any other file (servers, sockets, module-level config); `serial` names files
+that additionally run one after another once the parallel phase is done, for
+suites that share one on-disk resource. Both take glob patterns relative to the
+project root.
 
 ---
 
@@ -609,11 +686,9 @@ api_key = "${OPENAI_API_KEY}"
 [byllm.call_params]
 temperature = 0.7
 
-# Server settings (scale)
+# Serving-process logging (scale); the listener itself is [serve]
 [scale.server]
-port = 8000
-host = "0.0.0.0"
-docs_enabled = true              # Set to false to disable /docs, /redoc, /openapi.json
+structured_logs = true
 
 # Webhook settings (scale)
 [scale.webhook]
@@ -630,7 +705,6 @@ api_key_expiry_days = 365
 colocate = true                  # false: `jac run <app>` runs service apps as separate local processes
 gateway_port = 8000
 gateway_host = "0.0.0.0"
-drain_timeout_seconds = 10
 http_forward_timeout = 10.0
 boot_health_timeout = 60.0
 boot_max_wait = 90
@@ -643,7 +717,7 @@ allow_origins = ["*"]
 enabled = false
 ```
 
-`[scale.gateway]` holds everything about the process that fronts a workspace's service apps: ports, boot and drain timeouts, `cors`, `rate_limit`, `identity`, `ingress`, `logs`, `tracing`, `shared_volumes`, and `colocate`. Which apps form the fleet is not configured here -- it is every app whose kind has a server -- and per-app settings (`replicas`, resources, `rpc_timeout`, `http_activation`, `env`, ...) live in the app's own `[apps.<name>.scale]` overlay. `jac run <app> --fleet` overrides `colocate` for one run; `jac scale deploy` always deploys a fleet. See [Service apps](../plugins/jac-scale-http.md#service-apps-cross-app-bridging).
+`[scale.gateway]` holds everything about the process that fronts a workspace's service apps: ports, boot timeouts, `cors`, `rate_limit`, `identity`, `ingress`, `logs`, `tracing`, `shared_volumes`, and `colocate`. The drain window on SIGTERM is `[serve.timeouts] drain`, shared by the gateway and every app. Per-app `workers` and `threads` in `[apps.<name>.scale]` size that app's pods. Which apps form the fleet is not configured here -- it is every app whose kind has a server -- and per-app settings (`replicas`, resources, `rpc_timeout`, `http_activation`, `env`, ...) live in the app's own `[apps.<name>.scale]` overlay. `jac run <app> --fleet` overrides `colocate` for one run; `jac scale deploy` always deploys a fleet. See [Service apps](../plugins/jac-scale-http.md#service-apps-cross-app-bridging).
 
 **Prometheus Metrics (scale):**
 
@@ -714,6 +788,16 @@ Switching frameworks automatically adjusts the installed npm packages and the ge
 ```
 
 Defines custom import aliases applied to Vite `resolve.alias`, TypeScript `compilerOptions.paths`, and the Jac module resolver. See [jac-client Import Path Aliases](../plugins/jac-client.md#import-path-aliases) for details.
+
+**Asset Directory (jac-client):**
+
+```toml
+[client.assets]
+dir = "core/site/assets"        # default: the app's own assets/
+custom_extensions = [".pdf"]    # extra file types to copy into the bundle
+```
+
+Files in the assets directory are served at `/static/assets/<path>` and compiled into the client bundle. In a workspace each app defaults to its own `assets/`; apps that share one UI point `dir` at the shared directory, relative to the project root. Like every client section it overlays per app under `[apps.<name>.client.assets]`.
 
 **NPM Registry Configuration (jac-client):**
 
@@ -975,8 +1059,8 @@ A `jac scale deploy` reads the same file when it stages the app bundle, so a par
 | `JAC_PROFILE` | Activate a configuration profile (e.g., `production`) |
 | `JAC_BASE_PATH` | Override base directory for data/storage |
 | `JAC_DATA_PATH` | Override the base directory for application data (graph storage, user db, dev signing secret) |
-| `JAC_IDENTITY_BACKEND` | Which stack owns `/user/*` for one run: `auto` (default), `core`, or `scale`. Overrides `[serve] identity` |
-| `JAC_SCALE_RUNTIME` | Set to `1` by the serving path; under `auto` it is what makes a served project use the scale identity |
+| `JAC_SERVE_*` | Every `[serve]` key, one variable each: `JAC_SERVE_HOST`, `JAC_SERVE_PORT`, `JAC_SERVE_WORKERS`, `JAC_SERVE_THREADS`, `JAC_SERVE_AUTH_SECRET`, `JAC_SERVE_PROXY_TRUSTED`, `JAC_SERVE_DRAIN_TIMEOUT`, `JAC_SERVE_ACCESS_LOG_FORMAT`, ... (see [serve](#serve)) |
+| `JAC_SCALE_RUNTIME` | Set to `1` by the serving path so scale features (microservices, deploy context) know they are serving |
 | `JACPATH` | Colon-separated extra search path for Jac module resolution (like `PYTHONPATH`) |
 | `JAC_SCHEMA_REPAIR` | Schema-drift handling on load: `repair` (default) or `strict` |
 | `JAC_STRICT_PERMISSIONS` | Enable strict permission checking for security-sensitive operations (`1`/`true`) |

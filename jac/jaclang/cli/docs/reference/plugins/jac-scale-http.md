@@ -68,17 +68,19 @@ jac db recover-all --app app.jac
 
 ### Server Configuration
 
+The listener, worker fleet, limits, timeouts, TLS, proxy trust, access log
+and compression are all `[serve]` settings, shared by every server this
+runtime starts; see [Configuration -> [serve]](../config/index.md#serve).
+The only `[scale.server]` key left is logging shape:
+
 ```toml
 [scale.server]
-port = 8000
-host = "0.0.0.0"
-docs_enabled = true                  # Enable /docs, /redoc, /openapi.json (default: true)
-suppress_health_check_logs = false   # Suppress health-check access log entries (default: false)
+structured_logs = true               # JSON log handler on the root logger at boot
 ```
 
-Set `docs_enabled = false` to disable Swagger UI, ReDoc, and the OpenAPI JSON endpoint in production.
-
-Set `suppress_health_check_logs = true` to suppress access log entries for health-check and documentation endpoints (`/`, `/docs`, `/openapi.json`, `/health`, `/healthz`, `/healthz/ready`, `/healthz/live`) from CLI output and Kubernetes pod logs. Useful for reducing log noise in production.
+Set `[serve] docs_enabled = false` to turn off Swagger UI and the OpenAPI
+document in production, and `[serve.access_log] suppress_health_checks = true`
+to keep probe traffic out of the access log.
 
 ### CORS Configuration
 
@@ -627,23 +629,23 @@ Returns HTTP 400 if the current password is incorrect or the new password is emp
 
 JWT tokens use `user_id` (UUID) as the primary claim, not the username. This means users can change their username or email without invalidating existing tokens.
 
-Configure JWT via `jac.toml` or environment variables:
+Configure signing via `jac.toml` or environment variables:
 
 ```toml
-[scale.jwt]
+[serve.auth]
 secret = "your-secret-key-here"
 algorithm = "HS256"
-exp_delta_days = 7
+token_ttl_days = 7
 ```
 
 | Variable | `jac.toml` key | Description | Default |
 |----------|---------------|-------------|---------|
-| `JWT_SECRET` | `secret` | Secret key for JWT signing | unset: a dev server mints one per project into `.jac/data/jwt_secret` |
-| `JWT_ALGORITHM` | `algorithm` | JWT signing algorithm | `HS256` |
-| `JWT_EXP_DELTA_DAYS` | `exp_delta_days` | Token expiration in days | `7` |
+| `JAC_SERVE_AUTH_SECRET` | `secret` | Secret key for JWT signing | unset: a dev server mints one per project into `.jac/data/jwt_secret` |
+| `JAC_SERVE_AUTH_ALGORITHM` | `algorithm` | JWT signing algorithm | `HS256` |
+| `JAC_SERVE_AUTH_TOKEN_TTL_DAYS` | `token_ttl_days` | Token expiration in days | `7` |
 
 !!! warning "Production: set the JWT secret"
-    Left unset, the secret is minted per project into `.jac/data/jwt_secret` -- fine for a dev server, wrong for a cluster, where it would be per-replica. A deployment must set a long, random secret via environment variable or `jac.toml`; a cluster with none configured signs with the shipped placeholder and warns at boot, and anyone who knows that placeholder can forge valid tokens for any user.
+    Left unset, the secret is minted per project into `.jac/data/jwt_secret` -- fine for a dev server, wrong for a cluster, where it would be per-replica. A cluster with none configured refuses to start rather than signing with a placeholder; `jac scale deploy` mints a random secret into the app Secret as `JAC_SERVE_AUTH_SECRET` when neither `[serve.auth] secret` nor `[scale.secrets]` provides one.
 
 **JWT claims:**
 
@@ -1906,3 +1908,46 @@ The visualizer uses a force-directed layout with color-coded node types, edge la
 | `GET /graph/data` | Returns graph nodes and edges as JSON (optional `Authorization` header) |
 
 ---
+
+### OAuth sessions for browser and native clients
+
+`jaclang.scale.sso.oauth_session.OAuthSession` is the shared authorization-code
+flow used by Scale and available to application callback facades. Construct it
+with a `UserManager`, an `OAuth2CodeProvider`, and the provider name. The
+provider supplies its registered `redirect_uri`; application facades must
+choose that URL from server configuration, never from arbitrary request input.
+
+`begin(challenge, mode="web", link_user="")` issues expiring random state and
+an S256 PKCE authorization URL. `finish(code, state, verifier)` validates the
+client/app binding and consumes state before exchanging the code. The verifier
+must be a cryptographically random 43–128-character value. Keep it on the
+originating client. A supplied `link_user` must already have been authenticated
+by the server; it is not an untrusted request parameter.
+
+Scale exposes `POST /sso/{platform}/begin`, `/finish`, and `/poll`. Begin accepts
+`challenge` and `mode`; an authenticated Bearer session requests account
+linking, while an anonymous request requests sign-in. Finish accepts `code`,
+`state`, and `verifier`. For client-managed web flows configure
+`[scale.sso] client_auth_callback_url`: the provider callback forwards the
+short-lived code and state there for the client to finish. It does not forward
+a session token in this flow.
+
+For native clients, `begin(..., mode="native")` also returns a random `poll`
+secret that must stay on the initiating device. Open the authorization URL in
+the system browser. The server callback calls `complete_native(code, state)`;
+`poll(poll_secret)` atomically redeems the result on the device. Results expire
+after two minutes and contain the application's session token, never the
+provider access token. Cancellation and timeout should return the user to the
+sign-in screen. The begin/session state expires after ten minutes.
+
+Existing `/sso/{platform}/login` and `/register` browser routes use the same
+session implementation with a per-attempt HttpOnly state cookie. Callback
+requests without that browser binding are rejected before token exchange.
+Loopback destinations are stored in server-side state, not trusted from the
+callback query string. HTTPS flows use Secure cookies.
+
+Users are resolved by `(provider, external_id)`. Matching email addresses no
+longer automatically merge accounts. Existing password users must sign in and
+explicitly connect the provider; existing linked SSO users keep their accounts
+when their email or provider username changes. GitHub sign-in requires only
+public identity and does not request email or repository access permissions.

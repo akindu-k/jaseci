@@ -115,6 +115,7 @@ impl JacClientCompiler.compile(
         native=native
     );
     self._has_pages = self._scan_and_compile_pages(
+        entry_manifest=artifact.manifest,
         visited=visited,
         collected_exports=collected_exports,
         collected_globals=collected_globals,
@@ -135,7 +136,8 @@ impl JacClientCompiler.compile(
 }
 
 impl JacClientCompiler.copy_root_assets(self: JacClientCompiler) -> None {
-    root_assets_dir = self._app_root() / 'assets';
+    import from jaclang.client.config_loader { JacClientConfig }
+    root_assets_dir = JacClientConfig(self.project_dir).get_assets_dir();
     compiled_assets_dir = self.compiled_dir / 'assets';
     if (root_assets_dir.exists() and root_assets_dir.is_dir()) {
         self.asset_processor.copy_assets(root_assets_dir, compiled_assets_dir);
@@ -278,6 +280,9 @@ impl JacClientCompiler.compile_dependencies_recursively(
         return;
     }
     for (_name, import_path) in manifest.imports.items() {
+        if _name in self.SELF_COMPILED_VIRTUAL_MODULES {
+            continue;
+        }
         path_obj = Path(str(import_path)).resolve();
         if native {
             path_obj = self._native_variant(path_obj);
@@ -575,6 +580,7 @@ impl JacClientCompiler.compile_mobui_utils(
 
 impl JacClientCompiler._scan_and_compile_pages(
     self: JacClientCompiler,
+    entry_manifest: any = None,
     visited: (set[Path] | None) = None,
     collected_exports: (set[str] | None) = None,
     collected_globals: (dict[(str, any)] | None) = None,
@@ -589,6 +595,7 @@ impl JacClientCompiler._scan_and_compile_pages(
         self._warn_pages_without_routes(scanner);
         return False;
     }
+    self._check_entry_renders_routes(entry_manifest);
     self._route_scanner = scanner;
     source_root = self.project_dir;
     for page_file in scanner.get_page_files() {
@@ -603,6 +610,22 @@ impl JacClientCompiler._scan_and_compile_pages(
     }
     self._generate_routes_manifest();
     return True;
+}
+
+impl JacClientCompiler._check_entry_renders_routes(
+    self: JacClientCompiler, entry_manifest: any
+) -> None {
+    import from jaclang.client.route_scanner { entry_drops_route_children }
+    if not entry_drops_route_children(entry_manifest) {
+        return;
+    }
+    raise ClientBundleError(
+        "'app' declares no 'children' parameter, so every pages/ route would "
+        "be discarded. The generated entry renders app with the route tree as "
+        "its children; declare `def:pub app(children: any) -> JsxElement` and "
+        "render them (`<Theme>{children}</Theme>`), or take a single `props` "
+        "parameter and render `props.children`."
+    );
 }
 
 impl JacClientCompiler._warn_pages_without_routes(

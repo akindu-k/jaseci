@@ -53,10 +53,12 @@ import from jaclang.compiler.frontend.unitree {
     InnerCompr,
     Int,
     IterForStmt,
+    JsxComment,
     JsxElement,
     JsxElementName,
     JsxNormalAttribute,
     JsxSpreadAttribute,
+    JsxText,
     KVPair,
     KWPair,
     LambdaExpr,
@@ -246,6 +248,7 @@ import from jaclang.compiler.frontend.diagnostics {
     E5094,
     W1050,
     W1051,
+    W1053,
     W1100,
     W1101,
     W1102
@@ -420,6 +423,10 @@ walker TypeEvaluator {
     ) -> (TypeBase | None);
 
     def _ts_decl_path(from_loc: ModulePath) -> (str | None);
+    def _jac_virtual_sibling_dts(
+        import_node: Import, from_mod_type: ModuleType
+    ) -> (str | None);
+
     def _ts_declared_type_from_file(
         dts_path: str, item_name: str
     ) -> (TypeBase | None);
@@ -745,6 +752,11 @@ walker TypeEvaluator {
         is_constructor_call: bool = False
     ) -> dict[str, TypeBase];
 
+    def _call_receiver_type(expr: FuncCall) -> ClassType | None;
+    def _overload_accepts_receiver(
+        overload: FunctionType, receiver: TypeBase | None
+    ) -> bool;
+
     def _validate_jsx_props(
         expr: JsxElement, expected_type: TypeBase | None = None
     ) -> None;
@@ -756,6 +768,11 @@ walker TypeEvaluator {
         expr: JsxElement, component_name: str, func_type: FunctionType | None = None
     ) -> None;
 
+    def _validate_jsx_children(
+        expr: JsxElement, component_name: str, param_map: dict[str, Parameter]
+    ) -> None;
+
+    def _has_rendered_jsx_children(expr: JsxElement) -> bool;
     def _validate_intrinsic_jsx_props(expr: JsxElement, tag_name: str) -> None;
     def _resolve_intrinsic_jsx_tag(part: Name, tag_name: str) -> None;
     def validate_typevar_in_type_expr(expr: Expr) -> None;

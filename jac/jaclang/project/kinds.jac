@@ -42,7 +42,7 @@ glob KIND_SPECS: dict[str, KindSpec] = {
                  description="Natively-compiled standalone binary (built into dist/)",
                  `entry="main.jac",
                  action="build",
-                 verb="nacompile",
+                 verb="native",
                  summary="Build native binary -> {output}",
                  output_dir="dist"
              ),
@@ -51,9 +51,9 @@ glob KIND_SPECS: dict[str, KindSpec] = {
                  description="Natively-compiled shared library (.so / .dylib / .dll)",
                  `entry="main.jac",
                  action="build",
-                 verb="nacompile",
+                 verb="native",
                  summary="Build shared library (.so / .dylib / .dll)",
-                 flags={"shared": True}
+                 flags={"lib": True}
              ),
              KindSpec(
                  name="service",
@@ -67,11 +67,11 @@ glob KIND_SPECS: dict[str, KindSpec] = {
              ),
              KindSpec(
                  name="service-mesh",
-                 description="Jac microservice (server walkers; auto-starts providers)",
+                 description="Jac microservice (server walkers; colocates its service apps)",
                  `entry="main.jac",
                  action="serve",
                  verb="run",
-                 summary="Serve microservice consumer (auto-starts providers)",
+                 summary="Serve microservice consumer (colocates its service apps)",
                  has_server=True
              ),
              KindSpec(
@@ -118,7 +118,7 @@ glob KIND_SPECS: dict[str, KindSpec] = {
              ),
              KindSpec(
                  name="desktop",
-                 description="Jac desktop app (OS webview + nacompile)",
+                 description="Jac desktop app (OS webview + native build)",
                  `entry="main.jac",
                  action="serve",
                  verb="run",
@@ -193,7 +193,9 @@ obj RunPlan {
     }
 
     def command_line -> str {
-        parts = ["jac", self.verb];
+        parts = ["jac", "build", "--native"]
+            if self.verb == "native"
+            else ["jac", self.verb];
         if self.app {
             parts.append(self.app);
         } elif self.entry_path {

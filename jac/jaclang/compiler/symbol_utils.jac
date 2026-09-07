@@ -5,6 +5,7 @@ import from jaclang.compiler.frontend.unitree {
     Assignment,
     AstSymbolNode,
     AtomTrailer,
+    BinaryExpr,
     ContextAwareNode,
     ElementStmt,
     Enum as UniEnum,
@@ -23,6 +24,7 @@ import from jaclang.compiler.frontend.unitree {
     ParamVar,
     SubTag,
     Symbol,
+    Token,
     UniNode,
     UniScopeNode
 }
@@ -164,23 +166,6 @@ def _is_user_symbol(sym: Symbol) -> bool {
     return False;
 }
 
-def _symbol_defining_module(sym: Symbol) -> (Module | None) {
-    decl = sym.decl;
-    if decl is None {
-        return None;
-    }
-    return decl.find_parent_of_type(Module);
-}
-
-def _is_local_user_shadow(sym: Symbol, call: FuncCall) -> bool {
-    if not _is_user_symbol(sym) {
-        return False;
-    }
-    call_mod = call.find_parent_of_type(Module);
-    sym_mod = _symbol_defining_module(sym);
-    return call_mod is not None and sym_mod is call_mod;
-}
-
 def intrinsic_registry_if_ready -> object | None {
     import sys;
     _mod = sys.modules.get("jaclang.compiler.intrinsic_registry");
@@ -189,6 +174,10 @@ def intrinsic_registry_if_ready -> object | None {
     }
     import from jaclang.compiler.intrinsic_registry { INTRINSIC_REGISTRY }
     return INTRINSIC_REGISTRY;
+}
+
+def resolved_callee(nd: FuncCall) -> (Ability | None) {
+    return nd.callee_decl or ability_of_symbol(resolve_expr_symbol(nd.target));
 }
 
 def classify_call(nd: FuncCall) -> CallKind {
@@ -224,7 +213,7 @@ def classify_call(nd: FuncCall) -> CallKind {
             return CallKind.CLIB;
         }
     }
-    if sym is not None and _is_local_user_shadow(sym, nd) {
+    if sym is not None and _is_user_symbol(sym) {
         if sym.sym_type
             in (
                 SymbolType.OBJECT_ARCH,
@@ -777,4 +766,18 @@ def report_serverless_kind_errors(reporter: any, mod: Module) {
             );
         }
     }
+}
+
+def return_type_is_jsx(rt: (Expr | None)) -> bool {
+    if rt is None {
+        return False;
+    }
+    if (
+        isinstance(rt, BinaryExpr)
+        and isinstance(rt.op, Token)
+        and rt.op.name == Tok.BW_OR
+    ) {
+        return return_type_is_jsx(rt.left) or return_type_is_jsx(rt.right);
+    }
+    return isinstance(rt, Name) and rt.value in ("JsxElement", "JsxPage", "JsxLayout");
 }

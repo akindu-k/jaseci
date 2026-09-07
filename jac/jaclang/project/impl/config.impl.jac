@@ -292,26 +292,7 @@ impl JacConfig.merge_from_toml_file(toml_path: Path) -> None {
             }
         }
     }
-    if "gc" in data {
-        gc_data = data["gc"];
-        if "default" in gc_data {
-            _gcd = str(gc_data["default"]).strip().lower();
-            if _gcd in ("cycles", "rc", "none") {
-                self.gc.`default = _gcd;
-            }
-        }
-        if "enforce" in gc_data and isinstance(gc_data["enforce"], dict) {
-            enf = gc_data["enforce"];
-            if "modules" in enf {
-                self.gc.enforce.modules = [str(_m) for _m in enf["modules"]];
-            }
-            if "grandfathered" in enf {
-                self.gc.enforce.grandfathered = [
-                    str(_m) for _m in enf["grandfathered"]
-                ];
-            }
-        }
-    }
+    _apply_memory_native_placement(self, data);
     for _feat in CAPABILITY_SECTIONS {
         if _feat in data and isinstance(data[_feat], dict) {
             if _feat in self.plugins {
@@ -1084,88 +1065,8 @@ impl _parse_toml_data(
             diagnostics=run_data.get("diagnostics", "error")
         );
     }
-    if "build" in data {
-        build_data = data["build"];
-        _codespace_aliases = {"sv": "server", "na": "native"};
-        _builtin_cs = BuildConfig().default_codespace;
-        _default_cs = str(
-            build_data.get("default_codespace", _builtin_cs)
-        ).strip().lower();
-        _default_cs = _codespace_aliases.get(_default_cs, _default_cs);
-        if _default_cs not in ("server", "native") {
-            import from jaclang.cli.console { console }
-            console.warning(
-                f"[build] default_codespace='{build_data.get('default_codespace')}' "
-                f"is not one of 'server'/'sv', 'native'/'na'; "
-                f"defaulting to '{_builtin_cs}'."
-            );
-            _default_cs = _builtin_cs;
-        }
-        _builtin_cap = BuildConfig().native_closure_cap;
-        try {
-            _cap = int(build_data.get("native_closure_cap", _builtin_cap));
-        } except (TypeError, ValueError) {
-            _cap = 0;
-        }
-        if _cap < 1 {
-            import from jaclang.cli.console { console }
-            console.warning(
-                f"[build] native_closure_cap="
-                f"'{build_data.get('native_closure_cap')}' must be a positive "
-                f"integer; defaulting to {_builtin_cap}."
-            );
-            _cap = _builtin_cap;
-        }
-        _native_data = build_data.get("native", {});
-        if not isinstance(_native_data, dict) {
-            _native_data = {};
-        }
-        _builtin_native = NativeBuildConfig();
-        try {
-            _native_opt = int(_native_data.get("opt_level", _builtin_native.opt_level));
-        } except (TypeError, ValueError) {
-            import from jaclang.cli.console { console }
-            console.warning(
-                f"[build.native] opt_level="
-                f"'{_native_data.get('opt_level')}' must be an integer; "
-                f"defaulting to {_builtin_native.opt_level}."
-            );
-            _native_opt = _builtin_native.opt_level;
-        }
-        config.build = BuildConfig(
-            dir=build_data.get("dir", ".jac"),
-            default_codespace=_default_cs,
-            native_closure_cap=_cap,
-            native=NativeBuildConfig(
-                opt_level=_native_opt,
-                dump_ir=str(_native_data.get("dump_ir", "")),
-                target=str(_native_data.get("target", "")),
-                debug=bool(_native_data.get("debug", False)),
-                rc_debug_codegen=bool(_native_data.get("rc_debug_codegen", False))
-            )
-        );
-    }
-    if "gc" in data {
-        gc_data = data["gc"];
-        _gc_default = str(gc_data.get("default", "cycles")).strip().lower();
-        if _gc_default not in ("cycles", "rc", "none") {
-            import from jaclang.cli.console { console }
-            console.warning(
-                f"[gc] default='{gc_data.get('default')}' is not one of "
-                "'cycles', 'rc', 'none'; defaulting to 'cycles'."
-            );
-            _gc_default = "cycles";
-        }
-        enforce_cfg = GcEnforceConfig();
-        if "enforce" in gc_data and isinstance(gc_data["enforce"], dict) {
-            enf = gc_data["enforce"];
-            enforce_cfg = GcEnforceConfig(
-                modules=[str(_m) for _m in enf.get("modules", [])],
-                grandfathered=[str(_m) for _m in enf.get("grandfathered", [])]
-            );
-        }
-        config.gc = GcConfig(`default=_gc_default, enforce=enforce_cfg);
-    }
+    _apply_build_section(config, data);
+    _apply_memory_native_placement(config, data);
     if "test" in data {
         test_data = data["test"];
         config.`test = TestConfig(
@@ -1191,14 +1092,94 @@ impl _parse_toml_data(
             );
             on_conflict = "retry";
         }
+        workers_raw = serve_data.get("workers", {});
+        workers_data: dict[str, any] = (
+            workers_raw if isinstance(workers_raw, dict) else {"count": workers_raw}
+        );
+        tls_data: dict[str, any] = serve_data.get("tls", {}) or {};
+        proxy_data: dict[str, any] = serve_data.get("proxy", {}) or {};
+        limits_data: dict[str, any] = serve_data.get("limits", {}) or {};
+        timeouts_data: dict[str, any] = serve_data.get("timeouts", {}) or {};
+        access_data: dict[str, any] = serve_data.get("access_log", {}) or {};
+        compression_data: dict[str, any] = serve_data.get("compression", {}) or {};
+        ws_data: dict[str, any] = serve_data.get("websocket", {}) or {};
+        auth_data: dict[str, any] = serve_data.get("auth", {}) or {};
+        cors_raw = serve_data.get("cors_origins", ["*"]);
         config.serve = ServeConfig(
+            host=str(serve_data.get("host", "0.0.0.0")),
             port=serve_data.get("port", 8000),
             session=serve_data.get("session", ""),
             main=serve_data.get("main", True),
-            identity=str(serve_data.get("identity", "auto")),
+            docs_enabled=bool(serve_data.get("docs_enabled", True)),
+            graph_enabled=bool(serve_data.get("graph_enabled", True)),
+            cors_origins=[str(_o) for _o in cors_raw]
+                if isinstance(cors_raw, list)
+                else [str(cors_raw)],
             on_conflict=on_conflict,
             conflict_max_attempts=serve_data.get("conflict_max_attempts", 5),
-            conflict_backoff_ms=serve_data.get("conflict_backoff_ms", 0)
+            conflict_backoff_ms=serve_data.get("conflict_backoff_ms", 0),
+            workers=ServeWorkersConfig(
+                count=str(workers_data.get("count", "1")),
+                threads=str(workers_data.get("threads", "auto")),
+                max_requests=int(workers_data.get("max_requests", 0)),
+                max_requests_jitter=int(workers_data.get("max_requests_jitter", 0)),
+                request_timeout=float(workers_data.get("request_timeout", 0.0)),
+                boot_timeout=float(workers_data.get("boot_timeout", 120.0)),
+                hang_timeout=float(workers_data.get("hang_timeout", 30.0))
+            ),
+            tls=ServeTlsConfig(
+                certfile=str(tls_data.get("certfile", "")),
+                keyfile=str(tls_data.get("keyfile", "")),
+                ca_certs=str(tls_data.get("ca_certs", "")),
+                min_version=str(tls_data.get("min_version", "1.2"))
+            ),
+            proxy=ServeProxyConfig(
+                trusted=[str(_p) for _p in proxy_data.get("trusted", [])]
+            ),
+            limits=ServeLimitsConfig(
+                max_connections=int(limits_data.get("max_connections", 0)),
+                backlog=int(limits_data.get("backlog", 2048)),
+                max_body_bytes=int(limits_data.get("max_body_bytes", 104857600)),
+                max_header_bytes=int(limits_data.get("max_header_bytes", 65536)),
+                max_header_count=int(limits_data.get("max_header_count", 100)),
+                max_request_line_bytes=int(
+                    limits_data.get("max_request_line_bytes", 8192)
+                ),
+                multipart_spool_bytes=int(
+                    limits_data.get("multipart_spool_bytes", 1048576)
+                )
+            ),
+            timeouts=ServeTimeoutsConfig(
+                header=float(timeouts_data.get("header", 30.0)),
+                body=float(timeouts_data.get("body", 60.0)),
+                keepalive=float(timeouts_data.get("keepalive", 65.0)),
+                drain=float(timeouts_data.get("drain", 10.0)),
+                close=float(timeouts_data.get("close", 5.0))
+            ),
+            access_log=ServeAccessLogConfig(
+                enabled=bool(access_data.get("enabled", True)),
+                format=str(access_data.get("format", "text")),
+                suppress_health_checks=bool(
+                    access_data.get("suppress_health_checks", False)
+                )
+            ),
+            compression=ServeCompressionConfig(
+                enabled=bool(compression_data.get("enabled", True)),
+                min_bytes=int(compression_data.get("min_bytes", 1024)),
+                level=int(compression_data.get("level", 4))
+            ),
+            websocket=ServeWebSocketConfig(
+                allowed_origins=[str(_o) for _o in ws_data.get("allowed_origins", [])],
+                max_message_bytes=int(ws_data.get("max_message_bytes", 0)),
+                ping_interval=float(ws_data.get("ping_interval", 20.0)),
+                ping_timeout=float(ws_data.get("ping_timeout", 20.0))
+            ),
+            auth=ServeAuthConfig(
+                secret=str(auth_data.get("secret", "")),
+                algorithm=str(auth_data.get("algorithm", "HS256")),
+                token_ttl_days=int(auth_data.get("token_ttl_days", 7)),
+                password_hash_cost=int(auth_data.get("password_hash_cost", 14))
+            )
         );
     }
     if "format" in data {
@@ -1470,6 +1451,21 @@ impl JacConfig.effective_for_app(name: str) -> JacConfig {
     return cfg;
 }
 
+impl JacConfig.app_for_target(entry_path: str = "") -> AppConfig | None {
+    if not self.is_workspace or not self.apps {
+        return None;
+    }
+    if not entry_path {
+        import from jaclang.runtime.runtime { JacRuntime }
+        entry_path = JacRuntime.get_full_target_path() or "";
+    }
+    if not entry_path {
+        return None;
+    }
+    app = self.app_for_path(os.path.abspath(entry_path));
+    return None if app is None or app.implicit else app;
+}
+
 impl JacConfig.app_for_path(abs_path: str) -> AppConfig | None {
     if self.project_root is None {
         return None;
@@ -1527,4 +1523,112 @@ impl JacConfig.owner_app_for_path(abs_path: str) -> tuple[AppConfig | None, bool
 
 impl JacConfig.default_app.getter -> str {
     return self.project.default_app;
+}
+
+def _apply_build_section(cfg: JacConfig, data: dict) -> None {
+    if "build" not in data or not isinstance(data["build"], dict) {
+        return;
+    }
+    import from jaclang.cli.console { console }
+    build_data = data["build"];
+    for (_old_key, _new_home) in [
+        ("default_codespace", "[placement] default"),
+        ("native", "[native]")
+    ] {
+        if _old_key in build_data {
+            console.error(
+                f"jac.toml: [build] {_old_key} was retired; use {_new_home}."
+            );
+        }
+    }
+    _builtin_cap = BuildConfig().native_closure_cap;
+    try {
+        _cap = int(build_data.get("native_closure_cap", _builtin_cap));
+    } except (TypeError, ValueError) {
+        _cap = 0;
+    }
+    if _cap < 1 {
+        console.warning(
+            f"[build] native_closure_cap="
+            f"'{build_data.get('native_closure_cap')}' must be a positive "
+            f"integer; defaulting to {_builtin_cap}."
+        );
+        _cap = _builtin_cap;
+    }
+    cfg.build = BuildConfig(
+        dir=str(build_data.get("dir", BuildConfig().dir)), native_closure_cap=_cap
+    );
+}
+
+def _apply_memory_native_placement(cfg: JacConfig, data: dict) {
+    import from jaclang.cli.console { console }
+    for (_old, _new) in [("gc", "[memory] profile / enforce / exempt")] {
+        if _old in data {
+            console.error(f"jac.toml: the [{_old}] section was retired; use {_new}.");
+        }
+    }
+    if "memory" in data and isinstance(data["memory"], dict) {
+        mem = data["memory"];
+        if "profile" in mem {
+            _prof = str(mem["profile"]).strip().lower();
+            if _prof in ("managed", "rc", "nogc") {
+                cfg.memory.profile = _prof;
+            } else {
+                console.warning(
+                    f"[memory] profile='{mem['profile']}' is not one of managed, rc,"
+                    " nogc; defaulting to 'managed'."
+                );
+            }
+        }
+        if "enforce" in mem {
+            cfg.memory.enforce = [str(_m) for _m in mem["enforce"]];
+        }
+        if "exempt" in mem {
+            cfg.memory.exempt = [str(_m) for _m in mem["exempt"]];
+        }
+        if cfg.memory.profile == "nogc" and (cfg.memory.enforce or cfg.memory.exempt) {
+            console.warning(
+                "[memory] enforce/exempt are ignored under profile = 'nogc': every"
+                " module is held to the contract."
+            );
+        }
+    }
+    if "native" in data and isinstance(data["native"], dict) {
+        nat = data["native"];
+        cfg.native.target = str(nat.get("target", cfg.native.target));
+        try {
+            cfg.native.opt = int(nat.get("opt", cfg.native.opt));
+        } except (TypeError, ValueError) {
+            console.warning(
+                f"[native] opt='{nat.get('opt')}' must be an integer; defaulting to 2."
+            );
+            cfg.native.opt = 2;
+        }
+        cfg.native.debug = bool(nat.get("debug", cfg.native.debug));
+        try {
+            cfg.native.threads = max(1, int(nat.get("threads", cfg.native.threads)));
+        } except (TypeError, ValueError) {
+            console.warning(
+                f"[native] threads='{nat.get(
+                    'threads'
+                )}' must be an integer; defaulting to 4."
+            );
+            cfg.native.threads = 4;
+        }
+    }
+    if "placement" in data
+        and isinstance(data["placement"], dict)
+        and "default" in data["placement"] {
+        _cs_aliases = {"sv": "server", "na": "native"};
+        _raw = data["placement"]["default"];
+        _cs = _cs_aliases.get(str(_raw).strip().lower(), str(_raw).strip().lower());
+        if _cs in ("server", "native") {
+            cfg.placement.default_codespace = _cs;
+        } else {
+            console.warning(
+                f"[placement] default='{_raw}' is not one of 'server'/'sv', 'native'/'na';"
+                " defaulting to 'native'."
+            );
+        }
+    }
 }

@@ -41,6 +41,17 @@ myapp/
 TypeScript/TSX and CSS files are also supported -- drop a `.tsx` component or
 a `.css` file anywhere in the project and import it from your Jac code.
 
+Files under `assets/` are served at `/static/assets/<path>` and compiled into
+the client bundle. In a workspace the directory is the app's own `assets/` by
+default; when several apps share one UI, point them at the shared directory
+(relative to the project root) and list any extra file types to carry along:
+
+```toml
+[client.assets]
+dir = "core/site/assets"
+custom_extensions = [".pdf"]
+```
+
 ### Client Code Is Inferred
 
 A component file needs no marker at all -- JSX and npm imports are client-only syntax, so the compiler places these declarations (and any helpers they use) in the client bundle automatically:
@@ -1851,7 +1862,7 @@ jac run --dev                # Dev server with HMR
 
 ### Desktop
 
-The desktop target ships with `jaclang` core (documented in the **[jac-desktop Reference](jac-desktop.md)**). It reuses jac-client's Vite frontend pipeline and compiles a native host (`jac nacompile`) that renders your client UI - one self-contained binary, no Rust toolchain, no PyInstaller, no setup step.
+The desktop target ships with `jaclang` core (documented in the **[jac-desktop Reference](jac-desktop.md)**). It reuses jac-client's Vite frontend pipeline and compiles a native host (`jac build --native`) that renders your client UI - one self-contained binary, no Rust toolchain, no PyInstaller, no setup step.
 
 ```bash
 jac build desktop_app
@@ -1879,8 +1890,8 @@ A mobile app is a **mobUI** app: one source tree that compiles to both native (A
 **Prerequisites:**
 
 - Node.js is **not** required -- all JS tooling (installs, Expo/Metro, Vite) runs on the Bun runtime bundled with the `jac` binary (`JAC_BUN` overrides which bun is used)
-- **Android**: Java/JDK 21+, Android SDK ([Android Studio](https://developer.android.com/studio))
-- **iOS** (macOS only): Xcode, Xcode Command Line Tools, [CocoaPods](https://cocoapods.org/)
+- **Android**: JDK 21 and Android SDK are provisioned automatically; SDK license acceptance is required
+- **iOS** (macOS only): Xcode and its Command Line Tools; Jac provisions Ruby and CocoaPods
 
 **Declaring the app:** `jac create --app mobile --kind mobile` writes an `[apps.mobile]` table; `jac create myapp --kind mobile` writes the single-app form:
 
@@ -2331,7 +2342,7 @@ def:pub Footer() -> JsxElement {
 
 ### Prerequisites
 
-jac-client uses [Bun](https://bun.sh/) for package management and JavaScript bundling. A Bun runtime ships inside the `jac` binary and is the only JS runtime jac invokes -- no Node.js/npm install is needed or consulted. Set `JAC_BUN` to substitute a specific bun binary.
+jac-client uses [Bun](https://bun.sh/) for package management and JavaScript bundling. A Bun runtime ships inside the `jac` binary for package management and bundling. Native build subprocesses use managed Node.js 22 for Expo/React Native compatibility; no manual Node.js/npm installation is needed. Set `JAC_BUN` to substitute a specific bun binary.
 
 ### Start Server
 

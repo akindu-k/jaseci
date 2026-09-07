@@ -132,6 +132,7 @@ jobs:
           WORK="$(mktemp -d)"
           printf 'obj P { has x:int=0; def sq->int { return self.x*self.x; } }\nwith entry { print(P(x=7).sq()); }\n' > "$WORK/obj.jac"
           env -i HOME="$WORK" PATH=/usr/bin:/bin JAC_NO_DEV_SOURCE=1 "$BIN" --version
+          env -i HOME="$WORK" PATH=/usr/bin:/bin JAC_NO_DEV_SOURCE=1 "$BIN" -c 'import os, ssl; assert os.path.isfile(os.environ["SSL_CERT_FILE"]); assert ssl.create_default_context().cert_store_stats()["x509_ca"] > 0'
           out="$(env -i HOME="$WORK" PATH=/usr/bin:/bin JAC_NO_DEV_SOURCE=1 "$BIN" run "$WORK/obj.jac")"
           echo "$out" | grep -q 49
 
@@ -433,6 +434,19 @@ jobs:
             exit 1
           fi
 
+      - name: Block duplicate diagnostic codes
+        # Two branches each take the next free code and the merge keeps both;
+        # the registry refuses at import, which here means the kit fails to
+        # build. Reading the source names the collision in seconds instead.
+        # Mirrors tests/compiler/test_diagnostic_registry.jac.
+        run: |
+          dupes=$(grep -Pzo '\b[EW]\d{4} = _(?:err|warn)\(\s*"\K[EW]\d{4}' \
+            jac/jaclang/compiler/frontend/diagnostics.jac | tr '\0' '\n' | sort | uniq -d)
+          if [ -n "$dupes" ]; then
+            echo "::error::diagnostic code(s) claimed more than once in diagnostics.jac: $(echo $dupes)"
+            exit 1
+          fi
+
       - name: Check Release Notes Updated
         if: |
           github.event_name == 'pull_request' &&
@@ -482,6 +496,9 @@ jobs:
             paths: jaclang/compiler/tests
             sealed: ""
             iface_verify: "1"
+            # Source compiler workers peak above 4 GB; four can exhaust this
+            # 16 GB runner before the pool's per-file recycling can intervene.
+            jobs: "2"
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/jac-kit
@@ -497,7 +514,7 @@ jobs:
         run: |
           set -uxo pipefail
           WORK="$(mktemp -d)"
-          HOME="$WORK" JAC_TEST_RSS_LOG=1 JAC_TEST_JOBS=auto JAC_TEST_STRICT=1 jac test ${{ matrix.paths }}
+          HOME="$WORK" JAC_TEST_RSS_LOG=1 JAC_TEST_JOBS=${{ matrix.jobs || 'auto' }} JAC_TEST_STRICT=1 jac test ${{ matrix.paths }}
 
   # Everything except the compiler tests.
   test-runtime:
@@ -955,8 +972,10 @@ jobs:
       # should name the quickstart step, not a missing module at bundle time.
       - name: Verify the scaffold came from the bundled template
         run: |
-          test -f site/web/main.jac && test -f site/web/game/arena.jac \
+          test -f site/web/main.jac && test -f site/core/site/game/arena.jac \
             || { echo "::error::scaffold is missing the site's entry or the wasm game"; exit 1; }
+          test -f site/desktop/main.jac \
+            || { echo "::error::scaffold is missing the desktop app"; exit 1; }
           # Client npm deps live under the project's build dir (.jac/client),
           # not a top-level node_modules; that is where the vite bundler looks.
           test -d site/.jac/client/node_modules/vite \
@@ -966,13 +985,72 @@ jobs:
           fi
           grep -q '^name = "site"' site/jac.toml \
             || { echo "::error::the scaffold was not renamed to the project name"; exit 1; }
-          cmp jac/examples/jaclang_org/web/assets/og-card.png site/web/assets/og-card.png \
+          cmp jac/examples/jaclang_org/core/site/assets/og-card.png site/core/site/assets/og-card.png \
             || { echo "::error::a binary asset did not survive the template round trip"; exit 1; }
           echo "scaffold matches the README quickstart"
 
       - name: Type check the site
         working-directory: site
         run: jac check
+
+      # The site ships as a desktop app too (apps.desktop, backend jaclang.org):
+      # the native engine needs WebKitGTK + a C toolchain to build libwebview,
+      # patchelf for the $ORIGIN runpath, and a display to launch under.
+      - name: Install desktop build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev \
+            patchelf xvfb
+
+      - name: Build the desktop app
+        working-directory: site
+        run: jac build desktop
+
+      - name: Desktop artifact audit
+        working-directory: site
+        run: |
+          OUT=.jac/client/desktop/desktop
+          test -x $OUT/jaclang || { echo "::error::no desktop binary"; exit 1; }
+          test -f $OUT/app.jab || { echo "::error::no sealed app image beside the binary"; exit 1; }
+          test -f $OUT/dist/index.html || { echo "::error::no client bundle beside the binary"; exit 1; }
+          test ! -d $OUT/sv || { echo "::error::loose sources shipped; the image is the program"; exit 1; }
+          grep -q "https://jaclang.org" $OUT/dist/client.*.js \
+            || { echo "::error::the bundle does not carry its remote backend"; exit 1; }
+
+      # Launch under Xvfb: the host announces its loopback origin on stdout,
+      # serves the bundle and the broker there, and answers no walker locally
+      # because its backend is remote.
+      - name: Desktop smoke (Xvfb)
+        working-directory: site/.jac/client/desktop/desktop
+        run: |
+          Xvfb :99 -screen 0 1280x800x24 &
+          XVFB_PID=$!
+          DISPLAY=:99 GDK_BACKEND=x11 timeout 600s ./jaclang-launch.sh > /tmp/site-desktop.log 2>&1 &
+          APP_PID=$!
+          for i in $(seq 1 110); do
+            grep -q "JAC_DESKTOP_SERVING" /tmp/site-desktop.log && break
+            if ! kill -0 $APP_PID 2>/dev/null; then echo "::error::desktop app exited early"; cat /tmp/site-desktop.log; exit 1; fi
+            sleep 5
+          done
+          ORIGIN=$(grep -o "JAC_DESKTOP_SERVING http://[^ ]*" /tmp/site-desktop.log | head -1 | cut -d' ' -f2)
+          test -n "$ORIGIN" || { echo "::error::the desktop host never announced its origin"; cat /tmp/site-desktop.log; exit 1; }
+          curl -fsS "${ORIGIN}__jac/health" | grep -q '"ok": true' || { echo "::error::broker health failed"; exit 1; }
+          curl -fsS "$ORIGIN" | grep -q "The Jac Programming Language" || { echo "::error::the site index did not load"; exit 1; }
+          curl -fsS "${ORIGIN}docs/getting-started" | grep -q "The Jac Programming Language" || { echo "::error::SPA fallback failed"; exit 1; }
+          curl -fsS "${ORIGIN}static/assets/jac-logo.svg" | grep -q "<svg" || { echo "::error::the shared site assets are not served by the desktop host"; exit 1; }
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${ORIGIN}walker/doc_page" -H 'Content-Type: application/json' -d '{}')
+          [ "$code" = "404" ] || [ "$code" = "405" ] || { echo "::error::a remote-backend desktop app served a walker locally ($code)"; exit 1; }
+          kill $APP_PID $XVFB_PID 2>/dev/null || true
+          echo "desktop app serves the site on $ORIGIN"
+
+      - name: Upload desktop logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-desktop-logs
+          path: /tmp/site-desktop.log
+          if-no-files-found: ignore
 
       # The docs section reads the corpus bundled with the jac binary under
       # test in-process (jaclang.cli.guide_store), so the docs journey stop is
@@ -1255,6 +1333,38 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'macos')) }}
     uses: ./.github/workflows/_macos-native.yml
 
+  test-managed-android:
+    needs: [changes, build-kit]
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      JAC_NO_DEV_SOURCE: "1"
+      JAC_ACCEPT_ANDROID_LICENSES: "1"
+      JAC_TOOLCHAIN_USE_SYSTEM: "0"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/jac-kit
+      - name: Build a release APK with a fresh managed Android SDK
+        run: |
+          set -euo pipefail
+          export JAC_TOOLCHAIN_DIR="$RUNNER_TEMP/toolchains"
+          export ANDROID_HOME="$JAC_TOOLCHAIN_DIR/android-sdk/linux-x64"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          cp -r jac/tests/client/fixtures/react_native_multiscreen "$RUNNER_TEMP/mobile-app"
+          printf '\n[client.react_native]\nrelease = true\n' >> "$RUNNER_TEMP/mobile-app/jac.toml"
+          jac setup --toolchain android
+          cd "$RUNNER_TEMP/mobile-app"
+          jac build --platform android main.jac
+          test -n "$(find .jac/mobile-rn/android/app/build/outputs/apk -name '*.apk' -print -quit)"
+      - name: Upload the generated APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: managed-android-apk
+          path: ${{ runner.temp }}/mobile-app/.jac/mobile-rn/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
   # Aggregate gate: branch protection requires only this context. A NEW job
   # must be added to needs below by hand; always() so failures upstream fail
   # the gate instead of skipping it (skipped required checks count as passing).
@@ -1271,6 +1381,7 @@ jobs:
       - test-runtime
       - test-in-package-sealed
       - test-client
+      - test-managed-android
       - test-packages-and-docs
       - test-scale
       - test-scale-k8s

@@ -8,8 +8,9 @@ import from jaclang.compiler.backends.es.es_unparse { es_to_js }
 import from jaclang.compiler.frontend.constant { CodeContext, SymbolType }
 import from jaclang.compiler.frontend.constant { Tokens as Tok }
 import from jaclang.runtime.osp_model { OspAnalysis, OspModel }
-import from jaclang.compiler.passes.ast_gen { BaseAstGenPass }
-import from jaclang.compiler.passes.ast_gen.jsx_processor { EsJsxProcessor }
+import from jaclang.compiler.backends.common.ast_gen_base { BaseAstGenPass }
+import from jaclang.compiler.frontend.module_facts { ModuleFacts }
+import from jaclang.compiler.backends.es.jsx_processor { EsJsxProcessor }
 import from jaclang.compiler.frontend.codeinfo { ClientManifest }
 import from jaclang.compiler.backends.es.scoped_styles {
     ScopedStyleSheet,
@@ -600,7 +601,6 @@ walker EsastGenPass(BaseAstGenPass[es.Statement]) {
     can exit_assignment with uni.Assignment exit;
     def _resolve_source_module(nd: uni.Import) -> (uni.Module | None);
     def _resolve_call_ability(nd: uni.FuncCall) -> (uni.Ability | None);
-    def _return_type_includes_jsx_element(rt: uni.Expr) -> bool;
     def _return_type_route_role(rt: uni.Expr) -> (str | None);
     def _component_pascal_name(nd: uni.Ability) -> (str | None);
     def _component_call_abi(ability_node: uni.Ability) -> str;
@@ -680,6 +680,8 @@ walker EsastGenPass(BaseAstGenPass[es.Statement]) {
 
     def _bind_client_value_refs(nd: uni.Module) -> list[es.Statement];
     can exit_func_call with uni.FuncCall exit;
+    def _place_accessors(place: es.Expression) -> es.Expression | None;
+    def _lower_place_builtin(nd: uni.FuncCall) -> es.Expression | None;
     can exit_index_slice with uni.IndexSlice exit;
     can exit_special_var_ref with uni.SpecialVarRef exit;
     can exit_atom_trailer with uni.AtomTrailer exit;
