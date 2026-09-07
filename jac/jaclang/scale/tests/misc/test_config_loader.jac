@@ -210,92 +210,61 @@ test "get_scale_config raises on a different project_dir instead of silently reu
 }
 
 
-"""Load a jac.toml with the given [scale.monitoring] body and return the namespace."""
-def _monitoring_namespace(monitoring_body: str) -> str {
-    reset_scale_config();
-    project_dir = tempfile.mkdtemp(prefix="jac-cfg-ns-");
-    try {
-        (Path(project_dir) / "jac.toml").write_text(
-            f'[project]\nname = "repro"\n\n{monitoring_body}'
-        );
-        cfg = get_scale_config(project_dir=Path(project_dir));
-        return cfg.get_monitoring_config()["namespace"];
-    } finally {
-        reset_scale_config();
-        shutil.rmtree(project_dir, ignore_errors=True);
-    }
-}
-
-
-test "a configured monitoring namespace is sanitized before it reaches Prometheus" {
-    got = _monitoring_namespace('[scale.monitoring]\nnamespace = "jac--shop"\n');
-    assert got == "jac_shop";
-}
-
-
-test "a configured monitoring namespace that is already valid is left alone" {
-    got = _monitoring_namespace('[scale.monitoring]\nnamespace = "myapp_prod"\n');
-    assert got == "myapp_prod";
-}
-
-
-test "a configured monitoring namespace with nothing usable falls back to the default" {
-    got = _monitoring_namespace('[scale.monitoring]\nnamespace = "---"\n');
-    assert got == "jaclang_scale";
-}
-
-
-test "a non-string monitoring namespace is coerced before it is sanitized" {
-    got = _monitoring_namespace('[scale.monitoring]\nnamespace = 2024\n');
-    assert got == "_2024";
-}
-
-
-test "an empty monitoring namespace still derives from the kubernetes namespace" {
-    got = _monitoring_namespace(
-        '[scale.kubernetes]\nnamespace = "jac-shop-prod"\n\n[scale.monitoring]\nnamespace = ""\n'
-    );
-    assert got == "jac_shop_prod";
-}
-
-
-"""Load a project with the given monitoring namespace and return what was logged."""
-def _namespace_load_logs(configured: str) -> str {
+"""Load a jac.toml with the given [scale] body; return the monitoring namespace and what was logged."""
+def _load_monitoring_namespace(scale_body: str) -> tuple[str, str] {
     import io;
     import logging;
+    reset_scale_config();
     stream = io.StringIO();
     handler = logging.StreamHandler(stream);
     root_logger = logging.getLogger();
     previous_level = root_logger.level;
     root_logger.addHandler(handler);
     root_logger.setLevel(logging.WARNING);
+    project_dir = tempfile.mkdtemp(prefix="jac-cfg-ns-");
     try {
-        _monitoring_namespace(f'[scale.monitoring]\nnamespace = "{configured}"\n');
+        (Path(project_dir) / "jac.toml").write_text(
+            f'[project]\nname = "repro"\n\n{scale_body}'
+        );
+        namespace = get_scale_config(
+            project_dir=Path(project_dir)
+        ).get_monitoring_config()["namespace"];
     } finally {
         root_logger.removeHandler(handler);
         root_logger.setLevel(previous_level);
+        reset_scale_config();
+        shutil.rmtree(project_dir, ignore_errors=True);
     }
-    return stream.getvalue();
+    return (namespace, stream.getvalue());
 }
 
 
-test "a rewritten monitoring namespace warns, so the metric rename is not silent" {
-    logged = _namespace_load_logs("jac--shop");
-    assert "jac--shop" in logged and "jac_shop" in logged , (
-        f"the warning does not name both the old and the new prefix:\n{logged}"
-    );
-    assert "dashboards" in logged , f"the warning does not tell the user what to update:\n{logged}";
-    assert _namespace_load_logs("myapp_prod") == "" , "a valid namespace must not warn";
-}
-
-
-test "the namespace warning fires again for the next project in the same process" {
-    first = _namespace_load_logs("jac--shop");
-    second = _namespace_load_logs("jac--depot");
-    assert "jac--shop" in first , f"the first rewritten namespace did not warn:\n{first}";
-    assert "jac--depot" in second , (
-        f"a second project loaded in the same process was renamed silently:\n{second}"
-    );
+test "the monitoring namespace is sanitized on every path, and only a rewrite warns" {
+    # (scale body, expected namespace, rewritten value the warning must name)
+    cases = [
+        ('[scale.monitoring]\nnamespace = "jac--shop"\n', "jac_shop", "jac--shop"),
+        ('[scale.monitoring]\nnamespace = "myapp_prod"\n', "myapp_prod", ""),
+        ('[scale.monitoring]\nnamespace = "---"\n', "jaclang_scale", "---"),
+        ('[scale.monitoring]\nnamespace = 2024\n', "_2024", "2024"),
+        (
+            '[scale.kubernetes]\nnamespace = "jac-shop-prod"\n\n[scale.monitoring]\nnamespace = ""\n',
+            "jac_shop_prod",
+            ""
+        )
+    ];
+    for row in cases {
+        (body, expected, rewritten) = row;
+        (namespace, logged) = _load_monitoring_namespace(body);
+        assert namespace == expected , f"{body!r} -> {namespace!r}, expected {expected!r}";
+        if not rewritten {
+            assert logged == "" , f"a value that was not rewritten must not warn:\n{logged}";
+            continue;
+        }
+        # Every project loads fresh, so each rewritten value must warn about itself.
+        assert rewritten in logged and expected in logged and "dashboards" in logged , (
+            f"no usable rewrite warning for {rewritten!r}:\n{logged}"
+        );
+    }
 }
 
 
