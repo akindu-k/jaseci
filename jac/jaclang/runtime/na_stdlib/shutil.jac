@@ -8,6 +8,7 @@ import from c { def readdir(dirp: int) -> int;  }
 import from c { def closedir(dirp: int) -> i32;  }
 import from c { def strdup(s: int) -> str;  }
 import from _dirent_native { dirent_name }
+import from _errno_native { errno_message }
 
 
 def:pub which(cmd: str) -> (str | None) {
@@ -67,7 +68,9 @@ def:pub move(src: str, dst: str) -> str {
         raise ValueError(f"move: cannot relocate directory '{src}' across filesystems");
     }
     copyfile(src, real_dst);
-    unlink(src);
+    if unlink(src) != 0 {
+        raise ValueError(f"move: could not remove '{src}': {errno_message()}");
+    }
     return real_dst;
 }
 
@@ -93,11 +96,11 @@ def:pub rmtree(path: str) {
         child = os.path.join(path, nm);
         if os.path.isdir(child) {
             rmtree(child);
-        } else {
-            unlink(child);
+        } elif unlink(child) != 0 {
+            raise ValueError(f"rmtree: could not remove '{child}': {errno_message()}");
         }
     }
     if rmdir(path) != 0 {
-        raise ValueError(f"rmtree: could not remove '{path}'");
+        raise ValueError(f"rmtree: could not remove '{path}': {errno_message()}");
     }
 }

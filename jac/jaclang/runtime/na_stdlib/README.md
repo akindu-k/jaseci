@@ -187,7 +187,10 @@ bundled one. A bundled module links through the existing cross-module machinery
   SCOPE/divergences: copy/copy2 duplicate bytes but do not yet preserve
   mode/mtime metadata; rmtree follows the isdir predicate, so directory
   symlinks are recursed into rather than unlinked; errors raise `ValueError`
-  rather than CPython's `OSError` subclasses.
+  rather than CPython's `OSError` subclasses. Every removal checks its libc
+  return, so the error carries the path that actually failed plus the
+  `strerror` text: an un-unlinkable child names that child, where CPython's
+  default handler reports the directory whose `rmdir` failed in consequence.
 
 - **`keyword.jac`** (#7593 item 18) -- `kwlist`/`softkwlist`/`iskeyword`/
   `issoftkeyword` mirroring CPython's lists verbatim, ordering included
