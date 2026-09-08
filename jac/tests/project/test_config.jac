@@ -138,17 +138,18 @@ test "interpolate non string passthrough" {
 test "config load rejects unset environment variables" {
     config_mod._config = None;
     var_name = "JAC_TEST_ENV_MISSING";
+    setting = "scale.secrets.SOME_API_KEY";
     cases = [
-        (f"${{{var_name}}}", False, ["JAC_TEST_ENV_MISSING is not set"]),
+        (f"${{{var_name}}}", False, [setting, "JAC_TEST_ENV_MISSING is not set"]),
         (
             f"${{{var_name}:?set {var_name}}}",
             False,
-            ["JAC_TEST_ENV_MISSING", "set JAC_TEST_ENV_MISSING"]
+            [setting, "JAC_TEST_ENV_MISSING", "set JAC_TEST_ENV_MISSING"]
         ),
         (
             f"${{{var_name}:?set {var_name}}}",
             True,
-            ["JAC_TEST_ENV_MISSING", "set JAC_TEST_ENV_MISSING"]
+            [setting, "JAC_TEST_ENV_MISSING", "set JAC_TEST_ENV_MISSING"]
         )
     ];
     previous = os.environ.pop(var_name, None);

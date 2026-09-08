@@ -901,6 +901,8 @@ base_url = "${BASE_URL:?Base URL is required}"      # Required with error
 | `${VAR:-default}` | Use default if not set |
 | `${VAR:?error}` | Custom error if not set |
 
+Interpolation happens when the config loads, so every command that reads `jac.toml` needs the variable set, not just the command that consumes the value. Use `${VAR:-default}` for values that only some commands need, such as deploy-time settings you do not want to export before running `jac check`. Errors name the setting that needs the variable, for example `scale.kubernetes.namespace: Environment variable K8S_NAMESPACE is not set`.
+
 ---
 
 ### [project.include]
