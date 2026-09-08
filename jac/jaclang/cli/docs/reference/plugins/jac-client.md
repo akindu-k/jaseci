@@ -1376,7 +1376,7 @@ proxy = "http://proxy.company.com:8080"
 _authToken = "${NODE_AUTH_TOKEN}"
 ```
 
-The `${NODE_AUTH_TOKEN}` syntax is resolved via the existing jac.toml environment variable interpolation. If the variable is not set at config load time, it passes through as a literal `${NODE_AUTH_TOKEN}` in the generated `.npmrc`, which npm and bun also resolve natively.
+The `${NODE_AUTH_TOKEN}` syntax is resolved via the existing jac.toml environment variable interpolation, so the variable must be set when the config loads. If it is not set, Jac rejects the configuration instead of writing an unresolved value to the generated `.npmrc`. Use `${NODE_AUTH_TOKEN:-}` if the registry entry should stay optional.
 
 The generated `.npmrc` is placed in `.jac/client/configs/` and is automatically applied when Jac installs dependencies (e.g., via `jac install --npm`, `jac run`, or `jac build`).
 

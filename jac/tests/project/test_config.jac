@@ -44,6 +44,22 @@ def make_temp_project(temp_dir: Path) -> Path {
     return project_dir;
 }
 
+"""Load a secret value through jac.toml, optionally via a profile overlay."""
+def _load_secret_value(tmpdir: Path, value: str, through_overlay: bool) -> None {
+    section = f"[scale.secrets]\nSOME_API_KEY = \"{value}\"\n";
+    if through_overlay {
+        project_dir = make_temp_project(tmpdir);
+        config = JacConfig.load(project_dir / "jac.toml");
+        overlay_path = project_dir / "jac.prod.toml";
+        overlay_path.write_text(section);
+        config.merge_from_toml_file(overlay_path);
+        return;
+    }
+    toml_path = tmpdir / "jac.toml";
+    toml_path.write_text("[project]\nname = \"test-project\"\n\n" + section);
+    JacConfig.load(toml_path);
+}
+
 """Write base, prod, and local TOML files into project_dir."""
 def write_multi_profile(project_dir: Path) {
     (project_dir / "jac.toml").write_text(BASE_TOML);
@@ -119,75 +135,37 @@ test "interpolate non string passthrough" {
     assert interpolate_env_vars(_as_any(None)) is None;
 }
 
-test "load fails loud for unset environment variables" {
+test "config load rejects unset environment variables" {
     config_mod._config = None;
-    required_var = "JAC_TEST_REQUIRED_AT_LOAD";
-    plain_var = "JAC_TEST_PLAIN_AT_LOAD";
-    required_previous = os.environ.pop(required_var, None);
-    plain_previous = os.environ.pop(plain_var, None);
-    try {
-        with TemporaryDirectory() as tmpdir {
-            toml_path = Path(tmpdir) / "jac.toml";
-            toml_path.write_text(
-                "[project]\nname = \"test-project\"\n\n"
-                "[scale.kubernetes]\nnamespace = \"${JAC_TEST_REQUIRED_AT_LOAD:?"
-                "set JAC_TEST_REQUIRED_AT_LOAD}\"\n"
-            );
-            raised = False;
-            try {
-                JacConfig.load(toml_path);
-            } except ValueError as e {
-                raised = True;
-                assert "JAC_TEST_REQUIRED_AT_LOAD" in str(e);
-                assert "set JAC_TEST_REQUIRED_AT_LOAD" in str(e);
-            }
-            assert raised , "Expected an unset required variable to reject jac.toml";
-            toml_path.write_text(
-                "[project]\nname = \"test-project\"\n\n"
-                "[scale.secrets]\nSOME_API_KEY = \"${JAC_TEST_PLAIN_AT_LOAD}\"\n"
-            );
-            raised = False;
-            try {
-                JacConfig.load(toml_path);
-            } except ValueError as e {
-                raised = True;
-                assert "JAC_TEST_PLAIN_AT_LOAD is not set" in str(e);
-            }
-            assert raised , "Expected an unset variable to reject jac.toml";
-        }
-    } finally {
-        if required_previous is not None {
-            os.environ[required_var] = required_previous;
-        }
-        if plain_previous is not None {
-            os.environ[plain_var] = plain_previous;
-        }
-    }
-}
-
-test "overlay load fails loud for unset environment variables" {
-    config_mod._config = None;
-    var_name = "JAC_TEST_REQUIRED_IN_OVERLAY";
+    var_name = "JAC_TEST_ENV_MISSING";
+    cases = [
+        (f"${{{var_name}}}", False, ["JAC_TEST_ENV_MISSING is not set"]),
+        (
+            f"${{{var_name}:?set {var_name}}}",
+            False,
+            ["JAC_TEST_ENV_MISSING", "set JAC_TEST_ENV_MISSING"]
+        ),
+        (
+            f"${{{var_name}:?set {var_name}}}",
+            True,
+            ["JAC_TEST_ENV_MISSING", "set JAC_TEST_ENV_MISSING"]
+        )
+    ];
     previous = os.environ.pop(var_name, None);
     try {
-        with TemporaryDirectory() as tmpdir {
-            project_dir = make_temp_project(Path(tmpdir));
-            config = JacConfig.load(project_dir / "jac.toml");
-            overlay = project_dir / "jac.prod.toml";
-            overlay.write_text(
-                "[scale.secrets]\nSOME_API_KEY = "
-                "\"${JAC_TEST_REQUIRED_IN_OVERLAY:?set "
-                "JAC_TEST_REQUIRED_IN_OVERLAY}\"\n"
-            );
-            raised = False;
-            try {
-                config.merge_from_toml_file(overlay);
-            } except ValueError as e {
-                raised = True;
-                assert "JAC_TEST_REQUIRED_IN_OVERLAY" in str(e);
-                assert "set JAC_TEST_REQUIRED_IN_OVERLAY" in str(e);
+        for (value, through_overlay, expected) in cases {
+            with TemporaryDirectory() as tmpdir {
+                raised = False;
+                try {
+                    _load_secret_value(Path(tmpdir), value, through_overlay);
+                } except ValueError as e {
+                    raised = True;
+                    for fragment in expected {
+                        assert fragment in str(e);
+                    }
+                }
+                assert raised , f"Expected {value} to reject the config";
             }
-            assert raised , "Expected an unset variable to reject a config overlay";
         }
     } finally {
         if previous is not None {
