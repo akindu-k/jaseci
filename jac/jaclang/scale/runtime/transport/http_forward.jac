@@ -14,18 +14,8 @@ glob _logger = logging.getLogger(__name__),
          "upgrade",
          "proxy-authenticate",
          "proxy-authorization"
-     },
-     _DRAINABLE_BYTES: int = 65536;
+     };
 
-
-def _is_drainable(resp: any) -> bool {
-    length = resp.headers.get("Content-Length");
-    try {
-        return length is not None and int(length) <= _DRAINABLE_BYTES;
-    } except ValueError {
-        return False;
-    }
-}
 
 def _filtered_headers(resp: any) -> dict[str, str] {
     resp_headers: dict[str, str] = {};
@@ -82,15 +72,6 @@ impl ForwardResult.to_response -> StreamingResponse {
 
 
 impl ForwardResult.cleanup -> None {
-    if _is_drainable(self._resp) {
-        try {
-            async for _chunk in self._resp.aiter_raw() {
-                ;
-            }
-        } except Exception {
-            ;
-        }
-    }
     await self._resp.aclose();
 }
 

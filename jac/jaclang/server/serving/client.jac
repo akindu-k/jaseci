@@ -3,7 +3,6 @@ import os;
 import ssl as ssl_lib;
 import threading;
 import time;
-import weakref;
 import queue as queue_lib;
 import from base64 { b64encode }
 import from concurrent.futures { ThreadPoolExecutor }
@@ -20,8 +19,7 @@ glob DEFAULT_TIMEOUT: float = 30.0,
      MAX_IDLE_TOTAL: int = 256,
      IDLE_TIMEOUT: float = 60.0;
 
-glob _POOLS: any = weakref.WeakKeyDictionary(),
-     _TLS_CONTEXT: dict[str, any] = {},
+glob _TLS_CONTEXT: dict[str, any] = {},
      _FRAMING_HEADERS: set[str] = {'content-length', 'transfer-encoding'},
      _POOL_ATTR: str = '_jac_client_pool',
      _IDEMPOTENT_METHODS: set[str] = {
@@ -57,9 +55,7 @@ def _client_json_default(o: any) -> str {
 def _close_writer(writer: any) {
     try {
         writer.close();
-    } except Exception {
-        ;
-    }
+    } except Exception {}
 }
 
 def _has_buffered_bytes(reader: any) -> bool {
@@ -154,37 +150,12 @@ obj ConnectionPool {
     }
 }
 
-def _loop_pool(loop: any) -> (ConnectionPool | None) {
-    return getattr(loop, _POOL_ATTR, None) or _POOLS.get(loop);
-}
-
-def _bind_loop_pool(loop: any, pool: ConnectionPool) {
-    try {
-        setattr(loop, _POOL_ATTR, pool);
-    } except (AttributeError, TypeError) {
-        _POOLS[loop] = pool;
-    }
-}
-
-def _unbind_loop_pool(loop: any) -> (ConnectionPool | None) {
-    pool = getattr(loop, _POOL_ATTR, None);
-    if pool is not None {
-        try {
-            delattr(loop, _POOL_ATTR);
-        } except (AttributeError, TypeError) {
-            ;
-        }
-        return pool;
-    }
-    return _POOLS.pop(loop, None);
-}
-
 def connection_pool -> ConnectionPool {
     loop = asyncio.get_running_loop();
-    pool = _loop_pool(loop);
+    pool = getattr(loop, _POOL_ATTR, None);
     if pool is None {
         pool = ConnectionPool();
-        _bind_loop_pool(loop, pool);
+        setattr(loop, _POOL_ATTR, pool);
     }
     return pool;
 }
@@ -195,8 +166,9 @@ def close_connection_pool {
     } except RuntimeError {
         return;
     }
-    pool = _unbind_loop_pool(loop);
+    pool = getattr(loop, _POOL_ATTR, None);
     if pool is not None {
+        delattr(loop, _POOL_ATTR);
         pool.close_all();
     }
 }
@@ -569,7 +541,7 @@ async def arequest(
     retried = False;
     replayable = method.upper() in _IDEMPOTENT_METHODS;
     while True {
-        pooled = pool.acquire(origin);
+        pooled = None if retried else pool.acquire(origin);
         (reader, writer) = pooled
             if pooled is not None
             else await _open_stream(scheme, host, port, connect_timeout);

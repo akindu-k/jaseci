@@ -1,7 +1,4 @@
-"""The native HTTP client keeps connections alive and reuses them.
-
-Every proxied gateway call goes through `arequest`, so a client that opens a
-fresh socket per request puts a TCP (and TLS) handshake in front of every hop."""
+"""The native HTTP client keeps connections alive and reuses them."""
 
 import asyncio;
 import gc;
@@ -16,7 +13,6 @@ import from jaclang.server.serving.client {
 }
 
 
-"""A reader stand-in that exercises the pool without a socket behind it."""
 obj _FakeReader {
     has _buffer: bytes = b"";
 
@@ -25,7 +21,6 @@ obj _FakeReader {
     }
 }
 
-"""A writer stand-in that records only whether it has been closed."""
 obj _FakeWriter {
     has closing: bool = False;
 
@@ -76,11 +71,11 @@ async def _read_request(reader: any) -> tuple[(str | None), list[str]] {
 }
 
 
-"""A keep-alive HTTP upstream that counts the connections it accepts."""
 obj _ProbeUpstream {
     has connections: int = 0,
         port: int = 0,
         drop_next: bool = False,
+        drop_reused: bool = False,
         header_names: list[list[str]] = [],
         _server: any = None,
         _writers: list[any] = [];
@@ -99,18 +94,14 @@ obj _ProbeUpstream {
         self._server.close();
         try {
             await asyncio.wait_for(self._server.wait_closed(), timeout=5);
-        } except asyncio.TimeoutError {
-            ;
-        }
+        } except asyncio.TimeoutError {}
     }
 
     def drop_connections {
         for writer in list(self._writers) {
             try {
                 writer.transport.abort();
-            } except Exception {
-                ;
-            }
+            } except Exception {}
         }
         self._writers = [];
     }
@@ -118,6 +109,7 @@ obj _ProbeUpstream {
     async def _handle(reader: any, writer: any) {
         self.connections += 1;
         self._writers.append(writer);
+        served: int = 0;
         try {
             while True {
                 (path, names) = await _read_request(reader);
@@ -125,25 +117,22 @@ obj _ProbeUpstream {
                     break;
                 }
                 self.header_names.append(names);
-                if self.drop_next {
+                if self.drop_next or (self.drop_reused and served > 0) {
                     self.drop_next = False;
                     writer.transport.abort();
                     break;
                 }
+                served += 1;
                 writer.write(_RESPONSES.get(path, _RESPONSES["/hello"]));
                 await writer.drain();
                 if path == "/close" {
                     break;
                 }
             }
-        } except Exception {
-            ;
-        }
+        } except Exception {}
         try {
             writer.close();
-        } except Exception {
-            ;
-        }
+        } except Exception {}
     }
 }
 
@@ -173,18 +162,85 @@ def _with_upstream(work: any) -> any {
 }
 
 
-test "sequential requests share a single pooled connection" {
+def _fetch_sequence(paths: list[str]) -> dict {
     async def work(upstream: any) -> dict {
-        bodies: list[str] = [];
-        for _ in range(3) {
-            resp = await arequest("GET", f"{upstream.base()}/hello");
-            bodies.append(resp.text());
+        seen: list[tuple[int, str]] = [];
+        for path in paths {
+            resp = await arequest("GET", f"{upstream.base()}{path}");
+            seen.append((resp.status_code, resp.text()));
         }
-        return {"bodies": bodies, "connections": upstream.connections};
+        return {"seen": seen, "connections": upstream.connections};
+    }
+    return _with_upstream(work);
+}
+
+
+def _fetch_after_drop(method: str, payload: any) -> dict {
+    async def work(upstream: any) -> dict {
+        await arequest("GET", f"{upstream.base()}/hello");
+        upstream.drop_next = True;
+        text: (str | None) = None;
+        try {
+            resp = await arequest(
+                method, f"{upstream.base()}/hello", json_body=payload
+            );
+            text = resp.text();
+        } except ClientConnectionError {
+            text = None;
+        }
+        return {"text": text, "connections": upstream.connections};
+    }
+    return _with_upstream(work);
+}
+
+
+test "connection reuse follows the response framing" {
+    cases = [
+        (
+            ["/hello", "/hello", "/hello"],
+            [(200, "hello"), (200, "hello"), (200, "hello")],
+            1
+        ),
+        (["/nocontent", "/hello"], [(204, ""), (200, "hello")], 1),
+        (["/close", "/hello"], [(200, "close"), (200, "hello")], 2),
+        (["/overlong", "/hello"], [(200, "hello"), (200, "hello")], 2)
+    ];
+    for (paths, expected, expected_connections) in cases {
+        result = _fetch_sequence(paths);
+        assert result["seen"] == expected;
+        assert result["connections"] == expected_connections;
+    }
+}
+
+
+test "a dead pooled connection is retried only for idempotent methods" {
+    cases = [("GET", None, "hello", 2), ("POST", {"n": 1}, None, 1)];
+    for (method, payload, expected_text, expected_connections) in cases {
+        result = _fetch_after_drop(method, payload);
+        assert result["text"] == expected_text;
+        assert result["connections"] == expected_connections;
+    }
+}
+
+
+test "the retry opens a fresh connection instead of taking another dead one" {
+    async def work(upstream: any) -> dict {
+        await asyncio.gather(
+            *[arequest("GET", f"{upstream.base()}/hello") for _ in range(2)]
+        );
+        pooled = connection_pool().idle_count();
+        upstream.drop_reused = True;
+        resp = await arequest("GET", f"{upstream.base()}/hello");
+        return {
+            "pooled": pooled,
+            "text": resp.text(),
+            "connections": upstream.connections
+        };
     }
     result = _with_upstream(work);
-    assert result["bodies"] == ["hello", "hello", "hello"];
-    assert result["connections"] == 1;
+    assert result["pooled"] == 2;
+    assert result["text"] == "hello";
+    assert result["connections"] == 3;
 }
 
 
@@ -207,42 +263,6 @@ test "a drained streaming response hands its connection back to the pool" {
     assert result["streamed"] == "alphabeta";
     assert result["follow_up"] == "hello";
     assert result["connections"] == 1;
-}
-
-
-test "a bodiless response is not read past its head" {
-    async def work(upstream: any) -> dict {
-        resp = await arequest("GET", f"{upstream.base()}/nocontent");
-        follow_up = await arequest("GET", f"{upstream.base()}/hello");
-        return {
-            "status": resp.status_code,
-            "body": resp.body,
-            "follow_up": follow_up.text(),
-            "connections": upstream.connections
-        };
-    }
-    result = _with_upstream(work);
-    assert result["status"] == 204;
-    assert result["body"] == b"";
-    assert result["follow_up"] == "hello";
-    assert result["connections"] == 1;
-}
-
-
-test "a response asking to close is not pooled" {
-    async def work(upstream: any) -> dict {
-        first = await arequest("GET", f"{upstream.base()}/close");
-        second = await arequest("GET", f"{upstream.base()}/hello");
-        return {
-            "first": first.text(),
-            "second": second.text(),
-            "connections": upstream.connections
-        };
-    }
-    result = _with_upstream(work);
-    assert result["first"] == "close";
-    assert result["second"] == "hello";
-    assert result["connections"] == 2;
 }
 
 
@@ -278,54 +298,6 @@ test "the pool bounds how many idle connections it keeps per host" {
 }
 
 
-test "a response longer than its content length is not pooled" {
-    async def work(upstream: any) -> dict {
-        first = await arequest("GET", f"{upstream.base()}/overlong");
-        second = await arequest("GET", f"{upstream.base()}/hello");
-        return {
-            "first": first.text(),
-            "second": second.text(),
-            "connections": upstream.connections
-        };
-    }
-    result = _with_upstream(work);
-    assert result["first"] == "hello";
-    assert result["second"] == "hello";
-    assert result["connections"] == 2;
-}
-
-
-test "an idempotent request is retried when its pooled connection dies" {
-    async def work(upstream: any) -> dict {
-        await arequest("GET", f"{upstream.base()}/hello");
-        upstream.drop_next = True;
-        retried = await arequest("GET", f"{upstream.base()}/hello");
-        return {"retried": retried.text(), "connections": upstream.connections};
-    }
-    result = _with_upstream(work);
-    assert result["retried"] == "hello";
-    assert result["connections"] == 2;
-}
-
-
-test "a post is not replayed when its pooled connection dies" {
-    async def work(upstream: any) -> dict {
-        await arequest("GET", f"{upstream.base()}/hello");
-        upstream.drop_next = True;
-        failed = False;
-        try {
-            await arequest("POST", f"{upstream.base()}/hello", json_body={"n": 1});
-        } except ClientConnectionError {
-            failed = True;
-        }
-        return {"failed": failed, "connections": upstream.connections};
-    }
-    result = _with_upstream(work);
-    assert result["failed"];
-    assert result["connections"] == 1;
-}
-
-
 test "a caller supplied content length does not reach the upstream" {
     async def work(upstream: any) -> dict {
         response = await arequest(
@@ -344,53 +316,47 @@ test "a caller supplied content length does not reach the upstream" {
 }
 
 
-test "the buffered byte check reads an attribute asyncio still has" {
-    async def work -> bool {
+test "the buffered byte check reads asyncio's real buffer" {
+    async def work -> list[bool] {
         reader_cls: any = asyncio.StreamReader;
-        return hasattr(reader_cls(), "_buffer");
+        filled = reader_cls();
+        filled.feed_data(b"leftover");
+        return [
+            _has_buffered_bytes(reader_cls()),
+            _has_buffered_bytes(filled),
+            _has_buffered_bytes(object())
+        ];
     }
-    assert _run(work());
+    assert _run(work()) == [False, True, True];
 }
 
 
-test "a reader that cannot answer is treated as dirty" {
-    assert _has_buffered_bytes(object());
-}
-
-
-test "an expired connection is swept from an origin nobody asks for again" {
-    pool = ConnectionPool(idle_timeout=0.0);
-    pool.release("http://a:80", _FakeReader(), _FakeWriter());
-    assert pool.idle_count() == 1;
-    pool.release("http://b:80", _FakeReader(), _FakeWriter());
-    assert "http://a:80" not in pool._idle;
-    assert pool.idle_count() == 1;
-}
-
-
-test "a rejected connection leaves no bucket behind" {
-    pool = ConnectionPool();
-    pool.release("http://a:80", _FakeReader(), _FakeWriter(closing=True));
-    assert pool._idle == {};
-    assert pool.acquire("http://b:80") is None;
-    assert pool._idle == {};
+test "the pool keeps no empty or expired buckets" {
+    expiring = ConnectionPool(idle_timeout=0.0);
+    expiring.release("http://a:80", _FakeReader(), _FakeWriter());
+    assert expiring.idle_count() == 1;
+    expiring.release("http://b:80", _FakeReader(), _FakeWriter());
+    assert "http://a:80" not in expiring._idle;
+    assert expiring.idle_count() == 1;
+    rejecting = ConnectionPool();
+    rejecting.release("http://a:80", _FakeReader(), _FakeWriter(closing=True));
+    assert rejecting._idle == {};
+    assert rejecting.acquire("http://b:80") is None;
+    assert rejecting._idle == {};
 }
 
 
 test "a loop with pooled connections is still collectable" {
-    async def work(upstream: any) -> any {
-        await arequest("GET", f"{upstream.base()}/hello");
-        assert connection_pool().idle_count() == 1;
-        return None;
-    }
     async def body -> any {
         upstream = _ProbeUpstream();
         await upstream.start();
         try {
-            return await work(upstream);
+            await arequest("GET", f"{upstream.base()}/hello");
+            assert connection_pool().idle_count() == 1;
         } finally {
             await upstream.stop();
         }
+        return None;
     }
     loop = asyncio.new_event_loop();
     loop.run_until_complete(body());
