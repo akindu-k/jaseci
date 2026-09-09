@@ -1378,7 +1378,7 @@ _authToken = "${NODE_AUTH_TOKEN}"
 
 The `${NODE_AUTH_TOKEN}` syntax is resolved via the existing jac.toml environment variable interpolation, so the variable must be set when the config loads. If it is not set, Jac rejects the configuration instead of writing an unresolved value to the generated `.npmrc`.
 
-To keep the old behaviour where npm resolves the token itself at install time, write `${NODE_AUTH_TOKEN:-${NODE_AUTH_TOKEN}}`, which falls back to the literal `${NODE_AUTH_TOKEN}` in the generated `.npmrc`. An empty default such as `${NODE_AUTH_TOKEN:-}` is not a way to make the entry optional: it writes an empty token and npm answers 401.
+There is no longer a way to pass the placeholder through for npm to resolve at install time: export `NODE_AUTH_TOKEN` before the command that reads `jac.toml`. An empty default such as `${NODE_AUTH_TOKEN:-}` is not a substitute, because it writes an empty token and npm answers 401. If a registry entry is genuinely optional, leave the `[client.npm.auth]` table out of `jac.toml` rather than giving it a blank value.
 
 The generated `.npmrc` is placed in `.jac/client/configs/` and is automatically applied when Jac installs dependencies (e.g., via `jac install --npm`, `jac run`, or `jac build`).
 

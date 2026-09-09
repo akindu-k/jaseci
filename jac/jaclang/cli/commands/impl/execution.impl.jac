@@ -4,6 +4,7 @@ import sys;
 import types;
 import from pathlib { Path }
 import from jaclang.cli.console { console, use_line_buffered_output }
+import from jaclang.cli.config_errors { exit_on_config_error }
 import from jaclang.cli.commands.cli_helpers { proc_file as _proc_file }
 import from jaclang.server.assembly {
     assemble_served_program,
@@ -42,7 +43,9 @@ def _discover_config_from_file(filename: str) -> None {
 
     try {
         config = get_config(start_path=file_dir, force_discover=True);
-    } except (OSError, KeyError, ValueError) as e {
+    } except ValueError as e {
+        exit_on_config_error(e);
+    } except (OSError, KeyError) as e {
         console.print(
             f"Warning: Failed to discover config from {file_dir}: {e}", style="warning"
         );
@@ -129,7 +132,9 @@ def _pin_run_scope(filename: str, takeover: (bool | None)) -> None {
     try {
         owner = JacConfig.discover(start_path=file_path.parent);
         ambient = JacConfig.discover(start_path=Path.cwd());
-    } except (OSError, KeyError, ValueError) as e {
+    } except ValueError as e {
+        exit_on_config_error(e);
+    } except (OSError, KeyError) as e {
         console.warning(f"Failed to discover config from {file_path.parent}: {e}");
         return;
     }
