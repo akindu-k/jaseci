@@ -22,6 +22,8 @@ import tempfile;
 import from contextlib { redirect_stderr, redirect_stdout }
 import from pathlib { Path }
 
+import from jaclang.cli { dispatch as dispatch_cmds }
+import from jaclang.cli.command { CommandSpec }
 import from jaclang.cli.commands { execution as execution_cmds }
 
 
@@ -116,6 +118,74 @@ def exit_code_from(cwd: str, filename: str, profile: str = "") -> int {
     } finally {
         os.chdir(old);
         reset_config();
+    }
+    return 0;
+}
+
+
+"""Exit code from the dispatch profile hook when a prod overlay sets *namespace*."""
+def dispatch_profile_exit(namespace: str) -> int {
+    world = tempfile.mkdtemp(prefix="jacscope-dispatch-");
+    old = os.getcwd();
+    buf = io.StringIO();
+    try {
+        write(
+            os.path.join(world, "jac.toml"),
+            '[project]\nname = "overlay"\nentry-point = "main.jac"\n'
+        );
+        write(
+            os.path.join(world, "jac.prod.toml"),
+            f'[scale.kubernetes]\nnamespace = "{namespace}"\n'
+        );
+        os.chdir(world);
+        reset_config();
+        with redirect_stdout(buf), redirect_stderr(buf) {
+            dispatch_cmds._apply_profile(
+                CommandSpec(name="run", help="run a target"), {"profile": "prod"}
+            );
+        }
+    } except SystemExit as exc {
+        return int(exc.code or 0);
+    } finally {
+        os.chdir(old);
+        reset_config();
+        shutil.rmtree(world, ignore_errors=True);
+    }
+    return 0;
+}
+
+
+"""Exit code from `jac run` when the entry-point resolves into another project."""
+def cross_project_entry_exit(namespace: str) -> int {
+    # Not a file target: scope stays unpinned, so _discover_config_from_file runs.
+    world = tempfile.mkdtemp(prefix="jacscope-entry-");
+    old = os.getcwd();
+    buf = io.StringIO();
+    try {
+        write(
+            os.path.join(world, "outer", "jac.toml"),
+            '[project]\nname = "outer"\nentry-point = "../inner/main.jac"\n'
+        );
+        write(
+            os.path.join(world, "inner", "jac.toml"),
+            '[project]\nname = "inner"\nentry-point = "main.jac"\n'
+            f'\n[scale.kubernetes]\nnamespace = "{namespace}"\n'
+        );
+        write(
+            os.path.join(world, "inner", "main.jac"),
+            'with entry {\n    print("inner");\n}\n'
+        );
+        os.chdir(os.path.join(world, "outer"));
+        reset_config();
+        with redirect_stdout(buf), redirect_stderr(buf) {
+            execution_cmds.run(target="");
+        }
+    } except SystemExit as exc {
+        return int(exc.code or 0);
+    } finally {
+        os.chdir(old);
+        reset_config();
+        shutil.rmtree(world, ignore_errors=True);
     }
     return 0;
 }
@@ -326,6 +396,33 @@ test "a target project whose config cannot load stops the run" {
             assert code == expected , (
                 f"{label}: expected exit {expected}, got {code}"
             );
+        }
+    } finally {
+        if previous is not None {
+            os.environ[var_name] = previous;
+        }
+    }
+}
+
+
+test "each config-load guard exits rather than warning" {
+    # Reverting either guard must turn this red; _pin_run_scope is pinned above.
+    var_name = "JAC_TEST_GUARD_UNSET";
+    unresolvable = f"${{{var_name}:?export {var_name}}}";
+    fallback = f"${{{var_name}:-fallback-ns}}";
+    cases = [
+        ("dispatch overlay, unresolvable", "dispatch", unresolvable, 2),
+        ("dispatch overlay, resolvable", "dispatch", fallback, 0),
+        ("cross-project entry, unresolvable", "entry", unresolvable, 2),
+        ("cross-project entry, resolvable", "entry", fallback, 0)
+    ];
+    previous = os.environ.pop(var_name, None);
+    try {
+        for (label, guard, namespace, expected) in cases {
+            code = dispatch_profile_exit(namespace)
+                if guard == "dispatch"
+                else cross_project_entry_exit(namespace);
+            assert code == expected , f"{label}: expected exit {expected}, got {code}";
         }
     } finally {
         if previous is not None {
