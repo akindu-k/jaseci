@@ -122,12 +122,24 @@ def _apply_profile(meta: CommandSpec, args_dict: dict) {
             profile = config.environment.default_profile;
         }
 
-        config.apply_profile_overlay(profile or None);
+        _apply_overlay_or_exit(config, profile or None);
         _apply_config_defaults(
             _command_config(config, meta, args_dict), meta, args_dict
         );
     } except (KeyError, ValueError, OSError) as exc {
         console.warning(f"Failed to apply profile: {exc}");
+    }
+}
+
+def _apply_overlay_or_exit(config: any, profile: str | None) {
+    import from jaclang.project.tomlio { MalformedJacTomlError }
+
+    try {
+        config.apply_profile_overlay(profile);
+    } except MalformedJacTomlError as exc {
+        _exit_on_malformed_jac_toml(exc);
+    } except ValueError as exc {
+        _exit_on_invalid_jac_toml(exc);
     }
 }
 
