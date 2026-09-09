@@ -85,6 +85,42 @@ def show_from(cwd: str, filename: str, takeover: (bool | None) = None) -> str {
 }
 
 
+"""Put the ambient config on *profile*, the way dispatch does before a command."""
+def _activate_profile(profile: str) {
+    import from jaclang.project { config as config_mod }
+    ambient = config_mod.get_config();
+    if ambient is not None {
+        ambient.apply_profile_overlay(profile);
+    }
+}
+
+
+"""Run *filename* from *cwd* and return the exit code it raised, or 0 if it ran.
+
+Config failures surface as a clean `SystemExit(2)` from the discovery helpers
+rather than a traceback, so the code is the whole assertion."""
+def exit_code_from(cwd: str, filename: str, profile: str = "") -> int {
+    buf = io.StringIO();
+    old = os.getcwd();
+    os.chdir(cwd);
+    reset_config();
+    try {
+        if profile {
+            _activate_profile(profile);
+        }
+        with redirect_stdout(buf), redirect_stderr(buf) {
+            execution_cmds.run(target=filename, show=True);
+        }
+    } except SystemExit as exc {
+        return int(exc.code or 0);
+    } finally {
+        os.chdir(old);
+        reset_config();
+    }
+    return 0;
+}
+
+
 test "a file outside the project does not inherit the project's serve plan" {
     (world, outside) = make_world();
     proj = os.path.join(world, "site");
@@ -237,4 +273,63 @@ test "an in-tree file keeps its project when the shell is somewhere else" {
     assert "kind         : web-app" in out , (
         f"a file's own project follows it wherever the shell is; got:\n{out}"
     );
+}
+
+
+test "a target project whose config cannot load stops the run" {
+    # The named file's project is discovered outside the main dispatch path,
+    # so an unresolvable ${VAR} there must exit 2 like it does for the cwd.
+    var_name = "JAC_TEST_SCOPE_UNSET";
+    base = '[project]\nname = "target"\nentry-point = "main.jac"\n';
+    bad = f'\n[scale.kubernetes]\nnamespace = "${{{var_name}:?export {var_name}}}"\n';
+    cases = [
+        ("unresolvable base file", base + bad, "", "", 2),
+        ("unresolvable profile overlay", base, bad, "prod", 2),
+        (
+            "resolvable default",
+            base + f'\n[scale.kubernetes]\nnamespace = "${{{var_name}:-fallback}}"\n',
+            "",
+            "",
+            0
+        )
+    ];
+    previous = os.environ.pop(var_name, None);
+    try {
+        for (label, base_toml, overlay_toml, profile, expected) in cases {
+            world = tempfile.mkdtemp(prefix="jacscope-config-");
+            try {
+                target = os.path.join(world, "target");
+                write(os.path.join(target, "jac.toml"), base_toml);
+                if overlay_toml {
+                    write(os.path.join(target, "jac.prod.toml"), overlay_toml);
+                }
+                write(
+                    os.path.join(target, "main.jac"),
+                    'with entry {\n    print("target");\n}\n'
+                );
+                write(
+                    os.path.join(world, "shell", "jac.toml"),
+                    '[project]\nname = "shell"\nentry-point = "main.jac"\n'
+                );
+                write(
+                    os.path.join(world, "shell", "main.jac"),
+                    'with entry {\n    print("shell");\n}\n'
+                );
+                code = exit_code_from(
+                    os.path.join(world, "shell"),
+                    os.path.join(target, "main.jac"),
+                    profile=profile
+                );
+            } finally {
+                shutil.rmtree(world, ignore_errors=True);
+            }
+            assert code == expected , (
+                f"{label}: expected exit {expected}, got {code}"
+            );
+        }
+    } finally {
+        if previous is not None {
+            os.environ[var_name] = previous;
+        }
+    }
 }
