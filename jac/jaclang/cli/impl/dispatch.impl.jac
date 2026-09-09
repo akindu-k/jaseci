@@ -1,7 +1,7 @@
 import os;
 import sys;
 import from jaclang.cli.command { Arg, ArgKind, CommandSpec, arg_consumes_value }
-import from jaclang.cli.config_errors { exit_on_config_error }
+import from jaclang.cli.config_errors { apply_overlay_or_exit, exit_on_config_error }
 
 def _discover_project_config {
     try {
@@ -103,20 +103,12 @@ def _apply_profile(meta: CommandSpec, args_dict: dict) {
             profile = config.environment.default_profile;
         }
 
-        _apply_overlay_or_exit(config, profile or None);
+        apply_overlay_or_exit(config, profile or None);
         _apply_config_defaults(
             _command_config(config, meta, args_dict), meta, args_dict
         );
     } except (KeyError, ValueError, OSError) as exc {
         console.warning(f"Failed to apply profile: {exc}");
-    }
-}
-
-def _apply_overlay_or_exit(config: any, profile: str | None) {
-    try {
-        config.apply_profile_overlay(profile);
-    } except ValueError as exc {
-        exit_on_config_error(exc);
     }
 }
 

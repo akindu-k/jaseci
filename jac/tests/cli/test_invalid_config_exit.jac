@@ -4,7 +4,7 @@ import os;
 import from pathlib { Path }
 import from tempfile { TemporaryDirectory }
 import from jaclang.cli.commands.execution { _discover_config_from_file }
-import from jaclang.cli.dispatch { _apply_overlay_or_exit }
+import from jaclang.cli.config_errors { apply_overlay_or_exit }
 import from jaclang.project.config { JacConfig }
 import jaclang.project.config as config_mod;
 
@@ -35,7 +35,7 @@ test "unresolvable profile overlay exits cleanly" {
                 exited = False;
                 code: any = None;
                 try {
-                    _apply_overlay_or_exit(config, "prod");
+                    apply_overlay_or_exit(config, "prod");
                 } except SystemExit as exc {
                     exited = True;
                     code = exc.code;
@@ -88,6 +88,51 @@ test "unresolvable config in a file target exits cleanly" {
                 code: any = None;
                 try {
                     _discover_config_from_file(str(entry_path));
+                } except SystemExit as exc {
+                    exited = True;
+                    code = exc.code;
+                }
+                assert exited == should_exit , (
+                    f"{namespace} exited={exited}, expected {should_exit}"
+                );
+                if should_exit {
+                    assert code == 2 , f"expected exit code 2, got {code}";
+                }
+            }
+        }
+    } finally {
+        config_mod._config = None;
+        if previous is not None {
+            os.environ[var_name] = previous;
+        }
+    }
+}
+
+test "unresolvable overlay on a cross-project file target exits cleanly" {
+    config_mod._config = None;
+    var_name = "JAC_TEST_TARGET_OVERLAY_EXIT";
+    cases = [
+        (f"${{{var_name}:?export {var_name}}}", True),
+        (f"${{{var_name}:-fallback-ns}}", False)
+    ];
+    previous = os.environ.pop(var_name, None);
+    try {
+        for (namespace, should_exit) in cases {
+            with TemporaryDirectory() as tmpdir {
+                config_mod._config = None;
+                target = Path(tmpdir) / "target";
+                target.mkdir();
+                entry_path = make_base_project(target, "${JAC_TEST_UNUSED:-ok}");
+                (target / "jac.prod.toml").write_text(
+                    f"[scale.kubernetes]\nnamespace = \"{namespace}\"\n"
+                );
+                _discover_config_from_file(str(entry_path));
+                active = config_mod.get_config();
+                assert active is not None;
+                exited = False;
+                code: any = None;
+                try {
+                    apply_overlay_or_exit(active, "prod");
                 } except SystemExit as exc {
                     exited = True;
                     code = exc.code;
