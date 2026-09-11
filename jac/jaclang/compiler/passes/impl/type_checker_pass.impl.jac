@@ -94,7 +94,8 @@ impl TypeCheckPass.exit_return_stmt with ReturnStmt exit {
         return;
     }
 
-    if isinstance(scope, Ability) and scope.get_all_sub_nodes(YieldExpr) {
+    import from jaclang.compiler.frontend.module_facts { ModuleFacts }
+    if isinstance(scope, Ability) and ModuleFacts.ability_is_generator(scope) {
         gen_return = get_declared_generator_return_type(return_type);
         if gen_return is not None {
             return_type = self.evaluator._convert_to_instance(gen_return);
@@ -142,14 +143,20 @@ impl TypeCheckPass.exit_filter_compr with FilterCompr exit {
     self.evaluator.get_type_of_expression(here);
 }
 
+def _lambda_needs_context(nd: LambdaExpr) -> bool {
+    return nd.signature is not None
+        and any(param.type_tag is None for param in nd.signature.get_parameters())
+        and (isinstance(nd.body, Expr) or nd.tail_return_expr() is not None);
+}
+
 impl TypeCheckPass.enter_lambda_expr with LambdaExpr entry {
-    if (isinstance(here.body, Expr) or here.tail_return_expr() is not None) {
+    if _lambda_needs_context(here) {
         self._lambda_depth += 1;
     }
 }
 
 impl TypeCheckPass.exit_lambda_expr with LambdaExpr exit {
-    if (isinstance(here.body, Expr) or here.tail_return_expr() is not None) {
+    if _lambda_needs_context(here) {
         self._lambda_depth -= 1;
     }
 }
@@ -287,7 +294,7 @@ impl TypeCheckPass._check_intrinsic_call(nd: FuncCall) -> None {
             reason=f"expected {intr.arity()} argument(s), got {len(positional)}"
         );
     }
-    if intr.result_spec in ("i64", "f64") {
+    if intr.result_spec != "none" {
         if self.evaluator.na_builtins_module is not None {
             result_cls = self.evaluator._get_type_from_module(
                 self.evaluator.na_builtins_module, intr.result_spec
@@ -893,7 +900,8 @@ impl TypeCheckPass.exit_ability with Ability exit {
             }
         }
 
-        is_generator = len(here.get_all_sub_nodes(YieldExpr)) > 0;
+        import from jaclang.compiler.frontend.module_facts { ModuleFacts }
+        is_generator = ModuleFacts.ability_is_generator(here);
 
         body_stmts: list[CodeBlockStmt] = [
             stmt
@@ -948,7 +956,7 @@ impl TypeCheckPass.exit_ability with Ability exit {
                 or (
                     any_cls is not None
                     and isinstance(props_param.type, ClassType)
-                    and props_param.type.shared == any_cls.shared
+                    and props_param.type.shared.same_class(any_cls.shared)
                 )
             );
             if is_untyped_bag {
@@ -1289,23 +1297,28 @@ impl TypeCheckPass._install_client_state_setters -> None {
     }
 }
 
-impl TypeCheckPass.init(prog: JacProgram, **kwargs: any) -> None {
-    self.prog = prog;
-    UniPass.__init__(self, **kwargs);
-}
-
 impl TypeCheckPass.postinit -> None {
     self.evaluator = self.prog.get_type_evaluator();
     super.postinit();
 }
 
-impl TypeCheckPass.before_pass -> None {
-    self.evaluator = self.prog.get_type_evaluator();
+impl TypeCheckPass.transform(ir_in: Module) -> Module {
+    evaluator = self.prog.get_type_evaluator();
+    self.evaluator = evaluator;
+    previous_pass = evaluator._pass;
+    previous_quiet = evaluator.ct_quiet;
+    evaluator._pass = self;
 
-    self._prev_eval_pass = self.evaluator._pass;
-    self.evaluator._pass = self;
-    self._prev_ct_quiet = self.evaluator.ct_quiet;
-    self.evaluator.ct_quiet = bool(self.ir_in.ct_resolved);
+    evaluator.ct_quiet = False;
+    try {
+        return super.transform(ir_in);
+    } finally {
+        evaluator._pass = previous_pass;
+        evaluator.ct_quiet = previous_quiet;
+    }
+}
+
+impl TypeCheckPass.before_pass -> None {
     self._insert_builtin_symbols();
     self._install_client_state_setters();
 }
@@ -1313,10 +1326,6 @@ impl TypeCheckPass.before_pass -> None {
 impl TypeCheckPass.after_pass -> None {
     self._check_unresolved_lambda_params();
     self._stamp_fixed_width();
-    self.evaluator.ct_quiet = self._prev_ct_quiet;
-    if self.evaluator._pass is self {
-        self.evaluator._pass = self._prev_eval_pass;
-    }
 }
 
 impl TypeCheckPass.exit_param_var with ParamVar exit {
@@ -1342,6 +1351,7 @@ impl TypeCheckPass.exit_param_var with ParamVar exit {
 }
 
 impl TypeCheckPass.exit_has_var with HasVar exit {
+    import from jaclang.compiler.field_semantics { field_initialization }
     if (here.defer and here.kid and isinstance(here.kid[-1], Name)) {
         postinit_nd: Name = here.kid[-1];
         if postinit_nd.sym is None {
@@ -1375,11 +1385,28 @@ impl TypeCheckPass.exit_has_var with HasVar exit {
             if here.find_parent_of_type(Import) is not None {
                 return;
             }
+            initialization = field_initialization(here);
+            value_expr = initialization.default_expr;
+            is_factory = False;
+            if value_expr is None {
+                value_expr = initialization.factory_expr;
+                is_factory = True;
+            }
+            if value_expr is None {
+                return;
+            }
             right_type = self.evaluator.get_type_of_expression(
-                here.value, expected_type=here.type
+                value_expr, expected_type=here.type if not is_factory else None
             );
+            if is_factory {
+                if isinstance(right_type, FunctionType) {
+                    right_type = right_type.return_type or UnknownType();
+                } elif isinstance(right_type, ClassType) {
+                    right_type = self.evaluator._convert_to_instance(right_type);
+                }
+            }
             verdict = self.evaluator.assign_expr(
-                here.value,
+                value_expr,
                 right_type,
                 here.type,
                 strict=self.evaluator._is_strict_site(here)
@@ -1464,6 +1491,7 @@ impl TypeCheckPass.exit_in_for_stmt with InForStmt exit {
         self.evaluator.get_type_of_expression(here.target);
     } elif isinstance(here.target, (TupleVal, ListVal)) {
         self._eval_unpacking_names(here.target);
+        self.evaluator.get_type_of_expression(here.target);
     }
 
     collection_type = self.evaluator.get_type_of_expression(here.collection);
@@ -1485,12 +1513,13 @@ impl TypeCheckPass.exit_in_for_stmt with InForStmt exit {
         }
     }
 
+    iter_method = "__aiter__" if here.is_async else "__iter__";
     if isinstance(collection_type, TypeVarType) {
         if collection_type.constraints {
             for constraint_type in collection_type.constraints {
                 if isinstance(constraint_type, ClassType) {
                     iter_result = self.evaluator.get_type_of_magic_method_call(
-                        constraint_type, "__iter__", [], None
+                        constraint_type, iter_method, [], None
                     );
                     if iter_result is None {
                         self.emit(E1021, node_override=here, type=str(constraint_type));
@@ -1499,7 +1528,7 @@ impl TypeCheckPass.exit_in_for_stmt with InForStmt exit {
             }
         } elif collection_type.bound and isinstance(collection_type.bound, ClassType) {
             iter_result = self.evaluator.get_type_of_magic_method_call(
-                collection_type.bound, "__iter__", [], here.collection
+                collection_type.bound, iter_method, [], here.collection
             );
             if iter_result is None {
                 self.emit(E1021, node_override=here, type=str(collection_type.bound));
@@ -1514,10 +1543,15 @@ impl TypeCheckPass.exit_in_for_stmt with InForStmt exit {
         );
         if not is_enum {
             iter_result = self.evaluator.get_type_of_magic_method_call(
-                collection_type, "__iter__", [], here.collection
+                collection_type, iter_method, [], here.collection
             );
             if iter_result is None {
-                self.emit(E1022, node_override=here, type=str(collection_type));
+                self.emit(
+                    E1022,
+                    node_override=here,
+                    type=str(collection_type),
+                    method=iter_method
+                );
             }
         }
     }
@@ -1854,7 +1888,7 @@ impl TypeCheckPass.exit_visit_stmt with VisitStmt exit {
             if t.is_node_type() or t.is_edge_type() {
                 return True;
             }
-            if path_class is not None and t.shared == path_class.shared {
+            if path_class is not None and t.shared.same_class(path_class.shared) {
                 return True;
             }
             if (

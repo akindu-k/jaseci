@@ -79,7 +79,13 @@ impl JcirGenPass.exit_archetype with Archetype exit {
         insert_at = 1 if here.doc else 0;
         body[insert_at:insert_at] = ct_fields;
     }
-    if here.is_async {
+    async_walker = here.arch_kind == 'walker'
+        and any(
+            isinstance(stmt, Ability)
+                and stmt.is_async
+                and isinstance(stmt.signature, EventSignature) for stmt in (inner or [])
+        );
+    if here.is_async or async_walker {
         body.insert(
             0,
             self.nod(
@@ -93,7 +99,7 @@ impl JcirGenPass.exit_archetype with Archetype exit {
                             ['__jac_async__', self.nod('Store', [], [])]
                         )
                     ],
-                    self.const_of(here.is_async)
+                    self.const_of(True)
                 ]
             )
         );
@@ -610,6 +616,7 @@ impl JcirGenPass.exit_arch_has with ArchHas exit {
 }
 
 impl JcirGenPass.exit_has_var with HasVar exit {
+    import from jaclang.compiler.field_semantics { is_field_marker }
     annotation = self.val(here.type_tag) if here.type_tag else None;
     if ((here.accessors is not None) and (len(here.accessors) > 0)) {
         result_stmts: list[CgItem] = [];
@@ -647,7 +654,8 @@ impl JcirGenPass.exit_has_var with HasVar exit {
         );
     } elif here.value {
         value_expr = self.val(here.value);
-        if value_expr.cls == 'Constant' {
+        if value_expr.cls == 'Constant'
+            or (isinstance(here.value, FuncCall) and is_field_marker(here.value)) {
             value = value_expr;
         } else {
             value = self.call_node(
@@ -658,7 +666,7 @@ impl JcirGenPass.exit_has_var with HasVar exit {
                         'keyword',
                         ['arg', 'value'],
                         [
-                            'factory',
+                            'default_factory',
                             self.nod(
                                 'Lambda',
                                 ['args', 'body'],

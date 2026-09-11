@@ -1,7 +1,8 @@
 import json;
 import types;
 import typing;
-import from dataclasses { fields, is_dataclass, MISSING }
+import from jaclang.runtime.object_interop { fields, is_record }
+import from jaclang.runtime.object_model { MISSING }
 import from typing { get_args, get_origin, get_type_hints, Union }
 
 obj:pub ContractError(ValueError) {}
@@ -40,7 +41,7 @@ def:pub decode_contract(value: any, contract: any, path: str = "response") -> an
         }
         return value;
     }
-    if not is_dataclass(contract) or not isinstance(value, dict) {
+    if not is_record(contract) or not isinstance(value, dict) {
         raise ContractError(f"{path}: expected declared record {contract}");
     }
     hints = get_type_hints(contract);
@@ -50,7 +51,7 @@ def:pub decode_contract(value: any, contract: any, path: str = "response") -> an
             continue;
         }
         if f.name not in value {
-            if f.default is MISSING and f.default_factory is MISSING {
+            if f.default is MISSING and f.default_factory is None {
                 raise ContractError(f"{path}.{f.name}: missing required field");
             }
             continue;

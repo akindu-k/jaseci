@@ -16,8 +16,7 @@ import shutil;
 import tempfile;
 import from pathlib { Path }
 import from jaclang.client.targets.desktop.desktop_build { _stage_fused_runtime }
-import from jaclang.compiler.driver.compile_options { CompileOptions }
-import from jaclang.compiler.driver.program { JacProgram }
+import from tests.support { compile_native, get_func }
 
 
 glob _CACHE: str = "/tmp/jac_gc_stale_probe",
@@ -49,21 +48,12 @@ def _generation(name: str) -> str {
 """Compile the sweep probe over a staged fused runtime and hand back its entry."""
 def _sweep_probe(work: str) -> object {
     _stage_fused_runtime(Path(work));
-    probe = os.path.join(work, "gc_probe.jac");
-    (Path(probe)).write_text(_probe_source());
-    prog = JacProgram();
-    opts = CompileOptions(default_codespace="native", force_target_program=True);
-    ir = prog.compile(file_path=probe, options=opts);
-    assert not prog.errors_had , f"probe failed to compile: {prog.errors_had}";
-    eng = ir.gen.native_engine;
-    assert eng is not None , "no native engine produced for the sweep probe";
-    init_addr = eng.get_function_address("jac_entry");
-    if init_addr != 0 {
-        ctypes.CFUNCTYPE(None)(init_addr)();
+    (Path(os.path.join(work, "gc_probe.jac"))).write_text(_probe_source());
+    (eng, _) = compile_native("gc_probe.jac", work);
+    if eng.get_function_address("jac_entry") != 0 {
+        get_func(eng, "jac_entry", None)();
     }
-    addr = eng.get_function_address("sweep");
-    assert addr != 0 , "sweep not found in the JIT engine";
-    return ctypes.CFUNCTYPE(ctypes.c_int64)(addr);
+    return get_func(eng, "sweep", ctypes.c_int64);
 }
 
 

@@ -3,11 +3,7 @@ import from c { def access(path: str, mode: i32) -> i32;  }
 import from c { def unlink(path: str) -> i32;  }
 import from c { def rmdir(path: str) -> i32;  }
 import from c { def rename(oldp: str, newp: str) -> i32;  }
-import from c { def opendir(path: str) -> int;  }
-import from c { def readdir(dirp: int) -> int;  }
-import from c { def closedir(dirp: int) -> i32;  }
-import from c { def strdup(s: int) -> str;  }
-import from _dirent_native { dirent_name }
+import from _directory_native { directory_names }
 import from _errno_native { errno_message }
 
 
@@ -68,30 +64,12 @@ def:pub move(src: str, dst: str) -> str {
         raise ValueError(f"move: cannot relocate directory '{src}' across filesystems");
     }
     copyfile(src, real_dst);
-    if unlink(src) != 0 {
-        raise ValueError(f"move: could not remove '{src}': {errno_message()}");
-    }
+    unlink(src);
     return real_dst;
 }
 
 def:pub rmtree(path: str) {
-    d = opendir(path);
-    if d == 0 {
-        raise ValueError(f"rmtree: cannot open '{path}'");
-    }
-    children: list[str] = [];
-    while True {
-        ent = readdir(d);
-        if ent == 0 {
-            break;
-        }
-        nm = dirent_name(ent);
-        if nm == "." or nm == ".." {
-            continue;
-        }
-        children.append(nm);
-    }
-    closedir(d);
+    children = directory_names(path);
     for nm in children {
         child = os.path.join(path, nm);
         if os.path.isdir(child) {

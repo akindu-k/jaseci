@@ -8,7 +8,7 @@ impl JacCompiler.selfhost.getter -> SelfHostCache {
     return cache;
 }
 
-impl JacCompiler.stub_catalog -> any {
+impl JacCompiler.stub_catalog -> StubCatalog | None {
     if self.stub_catalog_disabled or self._stub_trees_served {
         return None;
     }
@@ -35,7 +35,7 @@ impl JacCompiler.note_stub_tree_served(path: str, program: JacProgram) -> None {
     }
 }
 
-impl JacCompiler.ensure_stub_catalog -> any {
+impl JacCompiler.ensure_stub_catalog -> StubCatalog | None {
     if self.stub_catalog_disabled or self._stub_trees_served {
         return None;
     }
@@ -83,15 +83,15 @@ impl JacCompiler.get_native_interop_setup(
 
 impl JacCompiler.get_native_layout(
     full_target: str, target_program: JacProgram
-) -> (object | None) {
+) -> (NativeModuleLayout | None) {
     actual_program = self.selfhost.resolve(full_target, target_program);
-    _layout: any = None;
+    _layout: NativeModuleLayout | None = None;
     if (full_target in actual_program.hub.artifacts) {
         gen = actual_program.hub.artifacts[full_target];
-        _layout = gen?.native_layout;
+        _layout = gen.native_layout;
     } elif (full_target in actual_program.mod.hub) {
         mod = actual_program.mod.hub[full_target];
-        _layout = mod.gen?.native_layout;
+        _layout = mod.gen.native_layout;
     }
     if _layout is not None {
         JacCompiler._check_native_abi(_layout, full_target);
@@ -99,9 +99,11 @@ impl JacCompiler.get_native_layout(
     return _layout;
 }
 
-impl JacCompiler._check_native_abi(layout: any, full_target: str) -> None {
+impl JacCompiler._check_native_abi(
+    layout: NativeModuleLayout, full_target: str
+) -> None {
     import from jaclang.compiler.frontend.codeinfo { NATIVE_ABI_VERSION }
-    stamped = layout?.abi_version;
+    stamped = layout.abi_version;
     if stamped is not None and stamped != NATIVE_ABI_VERSION {
         import logging as _abi_log;
         _abi_log.getLogger(__name__).warning(
@@ -752,6 +754,8 @@ impl JacCompiler.parse_str(
         } elif (codespace == 'native') {
             _coerce_native_module(mod);
             na_coverage_record(mod.loc.mod_path, 'native');
+        } elif codespace == 'server' {
+            mod.set_code_context(CodeContext.SERVER);
         } else {
             run_codespace_infer = True;
         }
@@ -1257,7 +1261,7 @@ impl JacCompiler.compile(
             and in_native_scope_path(str(file_path))
             and not scope_lowering_active()
         ) {
-            activate_scope_lowering();
+            activate_scope_lowering(str(file_path));
             _scope_armed = True;
         }
         if self._reentrant_depth == 0 and not self.stub_catalog_disabled {
@@ -2317,7 +2321,9 @@ impl JacCompiler.get_client_artifact(
     }
     mark = len(actual_program.errors_had);
     compiled = self.compile(
-        file_path=full_target, target_program=actual_program, options=CompileOptions()
+        file_path=full_target,
+        target_program=actual_program,
+        options=CompileOptions(no_cgen=True)
     );
     if len(actual_program.errors_had) > mark {
         return None;

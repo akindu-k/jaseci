@@ -1,5 +1,6 @@
 import asyncio;
-import dataclasses;
+import from jaclang.runtime.object_interop { fields as record_fields, is_record }
+import from jaclang.runtime.object_model { MISSING }
 import inspect;
 import json;
 import os;
@@ -1029,7 +1030,7 @@ impl ModuleIntrospector.introspect_walker(
     walker_cls: type[WalkerArchetype]
 ) -> dict[str, any] {
     try {
-        sig = inspect.signature(walker_cls.init);
+        sig = inspect.signature(walker_cls);
         try {
             type_hints = get_type_hints(walker_cls.init);
         } except Exception {
@@ -1040,9 +1041,9 @@ impl ModuleIntrospector.introspect_walker(
     }
 
     factory_defaults: dict[str, any] = {};
-    if dataclasses.is_dataclass(walker_cls) {
-        for dc_field in dataclasses.fields(walker_cls) {
-            if dc_field.default_factory is dataclasses.MISSING {
+    if is_record(walker_cls) {
+        for dc_field in record_fields(walker_cls) {
+            if dc_field.default_factory is None {
                 continue;
             }
             try {
@@ -1054,7 +1055,8 @@ impl ModuleIntrospector.introspect_walker(
     }
     fields: dict[str, dict[str, any]] = {};
     for (name, param) in sig.parameters.items() {
-        if (name in ('self', 'args', 'kwargs')) {
+        if param.kind
+            in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD) {
             continue;
         }
 

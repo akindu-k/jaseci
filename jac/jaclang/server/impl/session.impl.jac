@@ -74,7 +74,10 @@ impl scratch_requested(base_path: (str | None)) -> bool {
         not in ('', '0', 'false', 'no') {
         return True;
     }
-    return bool(base_path) and os.path.abspath(base_path) in _scratch_bases;
+    if not base_path {
+        return False;
+    }
+    return os.path.abspath(base_path) in _scratch_bases;
 }
 
 
@@ -749,11 +752,7 @@ impl Session._flush_locked(full: bool) -> None {
             pending.append((anchor, h));
         }
         if rows or self._deleted {
-            if self.store.txn_isolation() is TxnIsolation.SNAPSHOT_READ_ONLY {
-                self.ensure_writable_txn();
-            } else {
-                self._ensure_txn();
-            }
+            self.ensure_writable_txn();
         }
         if rows {
             self.store.upsert(rows);
