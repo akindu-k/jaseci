@@ -131,7 +131,7 @@ def dispatch_profile_exit(namespace: str) -> int {
     try {
         write(
             os.path.join(world, "jac.toml"),
-            '[project]\nname = "overlay"\nentry-point = "main.jac"\n'
+            '[project]\nname = "overlay"\nentry-point = "main"\n'
         );
         write(
             os.path.join(world, "jac.prod.toml"),
@@ -164,15 +164,15 @@ def cross_project_entry_exit(namespace: str) -> int {
     try {
         write(
             os.path.join(world, "outer", "jac.toml"),
-            '[project]\nname = "outer"\nentry-point = "../inner/main.jac"\n'
+            '[project]\nname = "outer"\nentry-point = "inner.main"\n'
         );
         write(
-            os.path.join(world, "inner", "jac.toml"),
-            '[project]\nname = "inner"\nentry-point = "main.jac"\n'
+            os.path.join(world, "outer", "inner", "jac.toml"),
+            '[project]\nname = "inner"\nentry-point = "main"\n'
             f'\n[scale.kubernetes]\nnamespace = "{namespace}"\n'
         );
         write(
-            os.path.join(world, "inner", "main.jac"),
+            os.path.join(world, "outer", "inner", "main.jac"),
             'with entry {\n    print("inner");\n}\n'
         );
         os.chdir(os.path.join(world, "outer"));
@@ -350,7 +350,7 @@ test "a target project whose config cannot load stops the run" {
     # The named file's project is discovered outside the main dispatch path,
     # so an unresolvable ${VAR} there must exit 2 like it does for the cwd.
     var_name = "JAC_TEST_SCOPE_UNSET";
-    base = '[project]\nname = "target"\nentry-point = "main.jac"\n';
+    base = '[project]\nname = "target"\nentry-point = "main"\n';
     bad = f'\n[scale.kubernetes]\nnamespace = "${{{var_name}:?export {var_name}}}"\n';
     cases = [
         ("unresolvable base file", base + bad, "", "", 2),
@@ -379,7 +379,7 @@ test "a target project whose config cannot load stops the run" {
                 );
                 write(
                     os.path.join(world, "shell", "jac.toml"),
-                    '[project]\nname = "shell"\nentry-point = "main.jac"\n'
+                    '[project]\nname = "shell"\nentry-point = "main"\n'
                 );
                 write(
                     os.path.join(world, "shell", "main.jac"),
