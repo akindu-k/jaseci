@@ -23,8 +23,6 @@ impl interpolate_env_vars(value: str) -> str {
             raise ValueError(f"Environment variable {var_name} is required: {operand}");
         }
 
-        # No process can export a name like "1" or "#ARR[@]", so reporting these
-        # shell expansions as unset variables would leave the user no way out.
         if not var_name.isidentifier() {
             return `match.group(0);
         }

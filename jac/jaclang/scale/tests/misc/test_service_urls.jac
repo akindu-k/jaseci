@@ -113,9 +113,7 @@ test "an app_name still carrying ${...} never reaches the URL" {
             );
             try {
                 assert service_base_url("SVCURL_UNSET", "worker", 6000)
-                    == "http://localhost:6000" , (
-                    f"{app_name} must not reach the URL"
-                );
+                    == "http://localhost:6000" , (f"{app_name} must not reach the URL");
             } finally {
                 _teardown_config(project_dir);
             }
