@@ -456,7 +456,16 @@ target = ""               # "" or "host" (default), "wasm32", or an LLVM triple
 opt = 2                   # optimization level
 debug = false             # DWARF, unoptimized JIT path, and the RC trace machinery, together
 threads = 4               # `flow for` width; a built binary can override with JAC_THREADS
+require = []              # Module-name patterns whose native lowering must succeed
 ```
+
+`require` makes matching modules native-only during checking and building. For
+example, `require = ["jaclang.runtime.python.*"]` covers JacPython's runtime
+modules and bindings. Lowering failures remain errors; Python fallback and
+opaque field erasure cannot satisfy this contract. Required dependencies stay
+in the target compilation, and checks verify the native dependency closure
+without executing it. The policy is included in analysis and code-generation
+cache identities.
 
 A built binary reads two environment variables at run time and no others: `JAC_GC=off` disables collection for leak debugging (collection is on by default under `managed`), and `JAC_THREADS` overrides the `flow for` width. Nothing at compile time reads the environment; `jac explain memory|placement|ir` replaces the old diagnostic variables.
 
@@ -884,6 +893,24 @@ Activate a profile:
 ```bash
 JAC_PROFILE=production jac run main.jac
 ```
+
+Profile selection uses `--profile` first, then `JAC_PROFILE`, then
+`[environment].default_profile`. CLI commands, compiler configuration, plugins,
+and deployment fleet generation share the resolved project configuration. A
+profile applies to both top-level settings such as `[scale.gateway]` and
+per-app settings such as `[apps.orders.scale]`, including nested HPA and pod
+overrides. `jac.local.toml` is applied last, even when no named profile is selected.
+
+Code that reads project settings should use `get_config()` or
+`get_config_for_path()` from `jaclang.project.config`. These cache the resolved
+configuration per project root. `get_config(force_discover=True)` refreshes that
+cache after configuration files or the environment change;
+`get_config_for_path(path, force_discover=True)` refreshes one root while preserving
+its explicit profile selection. New plugin configuration instances refresh that
+shared root, so existing readers see the updated settings too. `JacConfig.resolve()`
+resolves a fresh configuration; `JacConfig.load()` and `JacConfig.discover()`
+remain available for raw configuration inspection. An explicit profile is carried
+across CLI project discovery; otherwise each project uses its own default.
 
 ---
 

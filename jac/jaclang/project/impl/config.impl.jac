@@ -29,9 +29,7 @@ impl interpolate_env_vars(value: str) -> str {
 }
 
 impl find_project_root(start: Path | None = None) -> tuple[Path, Path] | None {
-    import from jaclang.compiler.driver.modresolver {
-        find_project_root as _find_project_root
-    }
+    import from jaclang.project.modresolver { find_project_root as _find_project_root }
     return _find_project_root(start);
 }
 
@@ -66,6 +64,20 @@ impl JacConfig.load(toml_path: Path) -> JacConfig {
     data = read_toml_with_encoding(str(toml_path));
     config = _parse_toml_data(data, toml_path);
     config.config_files = [toml_path];
+    return config;
+}
+
+impl JacConfig.resolve(
+    start_path: Path | None = None, profile: str | None = None
+) -> JacConfig | None {
+    config = JacConfig.discover(start_path=start_path);
+    if config is not None {
+        config.profile_override = profile.strip() if profile is not None else None;
+        selected = config.profile_override
+            if config.profile_override is not None
+            else active_profile_name(config).strip();
+        config.apply_profile_overlay(selected or None);
+    }
     return config;
 }
 
@@ -441,7 +453,7 @@ impl JacConfig.save -> None {
     old_doc: dict[str, any] = {};
     if self.toml_path.exists() {
         import tomllib;
-        import from jaclang.compiler.frontend.helpers { read_file_with_encoding }
+        import from jaclang.project.source { read_file_with_encoding }
         import from jaclang.project.tomlio { MalformedJacTomlError }
         text = read_file_with_encoding(str(self.toml_path));
         try {
@@ -1373,15 +1385,25 @@ impl _child_config_path(parent: str, key: str) -> str {
 }
 
 impl get_config(
-    start_path: Path | None = None, force_discover: bool = False
+    start_path: Path | None = None,
+    force_discover: bool = False,
+    profile: str | None = None
 ) -> JacConfig | None {
-    if (_config is None and not _config_explicit) or force_discover {
-        _config = JacConfig.discover(start_path=start_path);
-
+    if force_discover {
+        _config = None;
         _config_explicit = False;
-
-        if force_discover {
-            _config_by_root = {};
+        _config_by_root = {};
+    }
+    if _config_explicit {
+        return _config;
+    }
+    if _config is None or profile is not None {
+        base = start_path or (_config.project_root if _config else None) or Path.cwd();
+        _config = get_config_for_path(base, profile=profile);
+        if _config is not None and _config.project_root is not None {
+            _config.discovered_from_ancestor = (
+                _config.project_root.resolve() != base.resolve()
+            );
         }
     }
     return _config;
@@ -1423,10 +1445,16 @@ impl active_profile_name(config: JacConfig | None) -> str {
     return config.environment.default_profile or "";
 }
 
-impl get_config_for_path(start_path: Path) -> JacConfig | None {
+impl get_config_for_path(
+    start_path: Path, profile: str | None = None, force_discover: bool = False
+) -> JacConfig | None {
     explicit = get_explicit_config();
     if explicit is not None {
-        return explicit;
+        project_root = explicit.project_root;
+        if project_root is None
+            or start_path.resolve().is_relative_to(project_root.resolve()) {
+            return explicit;
+        }
     }
     result = find_project_root(start_path);
     if result is None {
@@ -1434,8 +1462,23 @@ impl get_config_for_path(start_path: Path) -> JacConfig | None {
     }
     (project_root, _) = result;
     key = str(project_root);
-    if key not in _config_by_root {
-        _config_by_root[key] = JacConfig.discover(start_path=project_root);
+    cached = _config_by_root.get(key);
+    if force_discover
+        or key not in _config_by_root
+        or (
+            profile is not None
+            and cached is not None
+            and cached.profile_override != profile.strip()
+        ) {
+        selected = profile
+            if profile is not None
+            else (cached.profile_override if cached is not None else None);
+        _config_by_root[key] = JacConfig.resolve(
+            start_path=project_root, profile=selected
+        );
+        if _config is not None and _config.project_root == project_root {
+            _config = _config_by_root[key];
+        }
     }
     return _config_by_root[key];
 }
@@ -1495,6 +1538,7 @@ impl JacConfig.effective_for_app(name: str) -> JacConfig {
     }
     cfg = _parse_toml_data(data, self.toml_path);
     cfg.discovered_from_ancestor = self.discovered_from_ancestor;
+    cfg.profile_override = self.profile_override;
     if self.toml_path is not None {
         cfg.config_files = [self.toml_path];
     }
@@ -1524,6 +1568,8 @@ impl JacConfig.app_for_target(entry_path: str = "") -> AppConfig | None {
 }
 
 impl JacConfig.app_for_path(abs_path: str) -> AppConfig | None {
+    import from jaclang.runtime.prepared { origin_for_source }
+    abs_path = origin_for_source(abs_path);
     if self.project_root is None {
         return None;
     }
@@ -1621,6 +1667,13 @@ def _apply_memory_native_placement(cfg: JacConfig, data: dict) {
     }
     if "native" in data and isinstance(data["native"], dict) {
         nat = data["native"];
+        if "require" in nat {
+            if not isinstance(nat["require"], list)
+                or not all(isinstance(pattern, str) for pattern in nat["require"]) {
+                raise ValueError("[native] require must be a list of module patterns");
+            }
+            cfg.native.require = list(nat["require"]);
+        }
         cfg.native.target = str(nat.get("target", cfg.native.target));
         try {
             cfg.native.opt = int(nat.get("opt", cfg.native.opt));

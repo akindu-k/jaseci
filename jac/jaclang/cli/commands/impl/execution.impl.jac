@@ -1,10 +1,11 @@
+import from jaclang.server.build_status { BuildMonitor }
 import marshal;
 import os;
 import sys;
 import types;
 import from pathlib { Path }
 import from jaclang.cli.console { console, use_line_buffered_output }
-import from jaclang.cli.config_errors { apply_overlay_or_exit, exit_on_config_error }
+import from jaclang.cli.config_errors { exit_on_config_error }
 import from jaclang.cli.commands.cli_helpers { proc_file as _proc_file }
 import from jaclang.server.assembly {
     gateway_colocates as _gateway_colocates,
@@ -37,10 +38,12 @@ def _discover_config_from_file(filename: str) -> None {
     }
 
     existing_config = get_config();
-    active_profile = existing_config.active_profile if existing_config else None;
+    active_profile = existing_config.profile_override if existing_config else None;
 
     try {
-        config = get_config(start_path=file_dir, force_discover=True);
+        config = get_config(
+            start_path=file_dir, force_discover=True, profile=active_profile
+        );
     } except ValueError as e {
         exit_on_config_error(e);
     } except (OSError, KeyError) as e {
@@ -50,9 +53,6 @@ def _discover_config_from_file(filename: str) -> None {
         return;
     }
     if config is not None {
-        if active_profile {
-            apply_overlay_or_exit(config, active_profile);
-        }
         add_venv_to_path(config);
     }
 }
@@ -125,11 +125,11 @@ def _pin_run_scope(filename: str, takeover: (bool | None)) -> None {
     Jac.set_full_target_path(str(file_path));
 
     existing_config = get_config();
-    active_profile = existing_config.active_profile if existing_config else None;
+    active_profile = existing_config.profile_override if existing_config else None;
 
     try {
-        owner = JacConfig.discover(start_path=file_path.parent);
-        ambient = JacConfig.discover(start_path=Path.cwd());
+        owner = JacConfig.resolve(start_path=file_path.parent, profile=active_profile);
+        ambient = JacConfig.resolve(start_path=Path.cwd(), profile=active_profile);
     } except ValueError as e {
         exit_on_config_error(e);
     } except (OSError, KeyError) as e {
@@ -175,9 +175,6 @@ def _pin_run_scope(filename: str, takeover: (bool | None)) -> None {
         _scope_notice(notice);
     }
 
-    if chosen is not None and active_profile {
-        apply_overlay_or_exit(chosen, active_profile);
-    }
     pin_project_scope(chosen);
     if chosen is not None {
         add_venv_to_path(chosen);
@@ -619,12 +616,10 @@ def _load_cwd_config -> any {
 
     initialize_provider_registry();
     existing_config = get_config();
-    active_profile = existing_config.active_profile if existing_config else None;
-    cfg = get_config(start_path=Path.cwd(), force_discover=True);
-    if cfg is not None and active_profile {
-        apply_overlay_or_exit(cfg, active_profile);
-    }
-    return cfg;
+    active_profile = existing_config.profile_override if existing_config else None;
+    return get_config(
+        start_path=Path.cwd(), force_discover=True, profile=active_profile
+    );
 }
 
 def _project_root_of(cfg: any) -> str {
@@ -1236,7 +1231,7 @@ impl serve(
         }
     }
 
-    import from jaclang.scale.plugin { mark_scale_runtime }
+    import from jaclang.scale.runtime.provider { mark_scale_runtime }
     mark_scale_runtime();
     fleet_rc = _serve_fleet(cfg, served, filename, port, fleet, dev, no_client);
     if fleet_rc is not None {
@@ -1333,6 +1328,9 @@ impl serve(
     }
     ServerClass = Jac.get_api_server_class();
     server = ServerClass(module_name=mod, base_path=base, settings=settings);
+    if prepared.client_compiler is not None or (dev and not no_client) {
+        server.introspector._bundle_builder = Jac.get_client_bundle_builder();
+    }
     if prepared.client_compiler is not None {
         server.introspector._bundle_builder._compiler = prepared.client_compiler;
     }
@@ -1657,7 +1655,7 @@ def _start_vite_dev_server(
 
         try {
             import from jaclang.server.hmr { HotReloader }
-            reloader = HotReloader._active;
+            reloader = BuildMonitor.active;
             if reloader is not None {
                 reloader.attach_client_bundler(bundler);
             }

@@ -1,14 +1,14 @@
 import os;
 import sys;
 import from jaclang.cli.command { Arg, ArgKind, CommandSpec, arg_consumes_value }
-import from jaclang.cli.config_errors { apply_overlay_or_exit, exit_on_config_error }
+import from jaclang.cli.config_errors { exit_on_config_error }
 
-def _discover_project_config {
+def _discover_project_config(profile: str | None = None) {
     try {
         import from jaclang.project.config { get_config }
         import from jaclang.project.pyvenv { add_venv_to_path }
 
-        config = get_config();
+        config = get_config(profile=profile);
         if config is not None {
             add_venv_to_path(config);
         }
@@ -90,20 +90,11 @@ def _apply_profile(meta: CommandSpec, args_dict: dict) {
     try {
         import from jaclang.project.config { get_config }
 
-        config = get_config();
+        profile = args_dict.pop('profile', None) or None;
+        config = get_config(profile=profile);
         if config is None {
             return;
         }
-
-        profile = args_dict.pop('profile', None);
-        if not profile {
-            profile = os.environ.get('JAC_PROFILE');
-        }
-        if not profile and config.environment.default_profile {
-            profile = config.environment.default_profile;
-        }
-
-        apply_overlay_or_exit(config, profile or None);
         _apply_config_defaults(
             _command_config(config, meta, args_dict), meta, args_dict
         );
@@ -253,8 +244,6 @@ impl run_selected_command(command_name: str) -> None {
     import from jaclang.cli.executor { get_executor }
     import from jaclang.cli.loader { load_handler }
 
-    _discover_project_config();
-
     script_args = _extract_script_args(meta);
     (args, unknown) = parser.parse_known_args(cmd_argv);
     if unknown {
@@ -272,6 +261,7 @@ impl run_selected_command(command_name: str) -> None {
     }
 
     args_dict = vars(args);
+    _discover_project_config(profile=args_dict.get('profile') or None);
     if script_args {
         args_dict['args'] = script_args;
     }

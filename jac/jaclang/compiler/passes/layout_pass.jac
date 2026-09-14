@@ -17,6 +17,7 @@ import from jaclang.compiler.frontend.unitree {
     Module,
     ModuleItem,
     Name,
+    Null,
     TupleVal,
     TypeParam,
     UnaryExpr,
@@ -300,6 +301,21 @@ def adopt_imported_bases(module: Module) -> list[str] {
                 if mslot.name not in lay.method_index {
                     absent = True;
                 }
+            }
+        }
+
+        inherited_methods: set[str] = set();
+        inherited_index = 0;
+        for anc_lay in ancestors {
+            for mslot in anc_lay.methods {
+                if mslot.name in inherited_methods {
+                    continue;
+                }
+                inherited_methods.add(mslot.name);
+                if lay.method_index.get(mslot.name, -1) != inherited_index {
+                    absent = True;
+                }
+                inherited_index += 1;
             }
         }
         if not absent {
@@ -630,6 +646,7 @@ walker LayoutPass(Transform) {
     def _split_top_level(s: str, sep: str) -> list[str];
     def _build_vtable_layout(arch_name: str, arch_map: dict[str, Archetype]) -> None;
     def _validate_obj_fields(arch: Archetype, arch_map: dict[str, Archetype]) -> None;
+    def _is_layout_compatible_semantic_type(typ: TypeBase | None) -> bool;
     def _is_layout_compatible_type(
         type_node: (UniNode | None), arch_map: dict[str, Archetype]
     ) -> bool;

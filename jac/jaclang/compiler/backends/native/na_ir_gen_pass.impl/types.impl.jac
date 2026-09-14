@@ -70,6 +70,7 @@ impl NaIRGenPass._lower_type(t: any) -> (ir.Type | None) {
                 and len(_members) == 1
                 and _mlow is not None
                 and not isinstance(_mlow, ir.VoidType)
+                and _mlow != self.jacval_type
             ) {
                 lowered = self._jac_optional_type(_mlow);
             } else {
@@ -521,6 +522,35 @@ impl NaIRGenPass._struct_array_elem_ptr(ptr: ir.Value, idx_val: ir.Value) -> ir.
     return self.builder.gep(ptr, [_wide_idx], name="ptr.elem.ptr");
 }
 
+impl NaIRGenPass._restore_list_read(
+    value: (ir.Value | None), collection: uni.UniNode
+) -> (ir.Value | None) {
+    """Restore a list element's declared layout from shared container storage.
+
+    Integer list slots use i64 even for sized integers. Reading such a slot
+    recovers the declared bits; it is not an implicit narrowing conversion of
+    an arbitrary expression. Pointer slots likewise recover their pointee.
+    """;
+    if value is None {
+        return None;
+    }
+    expected = self._list_elem_llvm_of(collection);
+    if isinstance(expected, ir.FloatType) and isinstance(value.type, ir.DoubleType) {
+        return self.builder.fptrunc(value, expected, name="list.elem.float");
+    }
+    if isinstance(expected, ir.IntType)
+        and isinstance(value.type, ir.IntType)
+        and expected.width < value.type.width {
+        return self.builder.trunc(value, expected, name="list.elem.bits");
+    }
+    if isinstance(expected, ir.PointerType)
+        and isinstance(value.type, ir.PointerType)
+        and expected != value.type {
+        return self.builder.bitcast(value, expected, name="list.elem.ptr");
+    }
+    return value;
+}
+
 impl NaIRGenPass._list_elem_llvm_of(expr: (uni.UniNode | None)) -> (ir.Type | None) {
     return self._typed_elem_llvm_of(expr, "list[");
 }
@@ -693,7 +723,7 @@ impl NaIRGenPass._elem_spec_of(expr: (uni.UniNode | None)) -> (str | None) {
     if self._str_desc_ty is not None and et == self._str_desc_ty {
         return "ptr";
     }
-    if isinstance(et, ir.DoubleType) {
+    if isinstance(et, (ir.DoubleType, ir.FloatType)) {
         return "f64";
     }
     if isinstance(et, ir.PointerType) {
@@ -1154,6 +1184,10 @@ impl NaIRGenPass._widened_tuple_decl_type(
 }
 
 impl NaIRGenPass._tuple_struct_of(elem_types: list[ir.Type]) -> ir.LiteralStructType {
+    elem_types = [
+        ir.IntType(8).as_pointer() if isinstance(t, ir.VoidType) else t
+        for t in elem_types
+    ];
     tuple_key = f"Tuple.{len(elem_types)}." + ".".join([str(x) for x in elem_types]);
     if tuple_key not in self.tuple_types {
         self.tuple_types[tuple_key] = ir.LiteralStructType(elem_types);
@@ -2096,7 +2130,7 @@ impl NaIRGenPass._coerce_type_inner(val: ir.Value, target_type: ir.Type) -> ir.V
                 self._emit_str_desc_helpers();
             }
 
-            return self.builder.call(self.str_wrap_raw_fn, [val], name="s.desc");
+            return self.builder.call(self.str_wrap_fn, [val], name="s.desc");
         }
         if val.type == _sd and target_type == _i8p_sd {
             return self._str_materialize(val);
@@ -2106,9 +2140,7 @@ impl NaIRGenPass._coerce_type_inner(val: ir.Value, target_type: ir.Type) -> ir.V
                 self._emit_str_desc_helpers();
             }
             return self.builder.call(
-                self.str_wrap_raw_fn,
-                [self._unbox_from_jacval(val, _i8p_sd)],
-                name="s.desc"
+                self.str_wrap_fn, [self._unbox_from_jacval(val, _i8p_sd)], name="s.desc"
             );
         }
         if target_type == _sd
@@ -2118,7 +2150,7 @@ impl NaIRGenPass._coerce_type_inner(val: ir.Value, target_type: ir.Type) -> ir.V
                 self._emit_str_desc_helpers();
             }
             return self.builder.call(
-                self.str_wrap_raw_fn,
+                self.str_wrap_fn,
                 [self.builder.inttoptr(val, _i8p_sd, name="s.unbox")],
                 name="s.desc"
             );
@@ -2134,14 +2166,63 @@ impl NaIRGenPass._coerce_type_inner(val: ir.Value, target_type: ir.Type) -> ir.V
 
     _opt_tgt = self._opt_payload_of(target_type);
     if _opt_tgt is not None {
+        _source_payload_type = self._opt_payload_of(val.type);
+        if _source_payload_type is not None {
+            _source_tag = self.builder.extract_value(val, 0, name="opt.cast.tag");
+            _source_present = self.builder.icmp_unsigned(
+                "!=", _source_tag, ir.Constant(ir.IntType(8), 0), name="opt.cast.has"
+            );
+            _source_block = self.builder.block;
+            _present_block = self.builder.function.append_basic_block(
+                "opt.cast.present"
+            );
+            _merge_block = self.builder.function.append_basic_block("opt.cast.end");
+            self.builder.cbranch(_source_present, _present_block, _merge_block);
+            self.builder.position_at_end(_present_block);
+            _source_payload = self.builder.extract_value(
+                val, 1, name="opt.cast.payload"
+            );
+            _converted_payload = self._coerce_type_inner(_source_payload, _opt_tgt);
+            _converted = self.builder.insert_value(
+                ir.Constant(target_type, None),
+                ir.Constant(ir.IntType(8), 1),
+                0,
+                name="opt.cast.tagset"
+            );
+            _converted = self.builder.insert_value(
+                _converted, _converted_payload, 1, name="opt.cast.wrap"
+            );
+            if isinstance(_opt_tgt, ir.PointerType) {
+                _nonnull = self.builder.icmp_unsigned(
+                    "!=", _converted_payload, ir.Constant(_opt_tgt, None)
+                );
+                _converted = self.builder.select(
+                    _nonnull, _converted, ir.Constant(target_type, None)
+                );
+            }
+            _converted_block = self.builder.block;
+            self.builder.branch(_merge_block);
+            self.builder.position_at_end(_merge_block);
+            _optional_result = self.builder.phi(target_type, name="opt.cast.result");
+            _optional_result.add_incoming(
+                ir.Constant(target_type, None), _source_block
+            );
+            _optional_result.add_incoming(_converted, _converted_block);
+            return _optional_result;
+        }
         _tgt_is_ptr = isinstance(_opt_tgt, ir.PointerType);
+        _tgt_is_jacval = bool(self?.jacval_type) and _opt_tgt == self.jacval_type;
         _val_is_none = isinstance(val.type, ir.VoidType)
             or (
                 isinstance(val, ir.Constant)
                 and isinstance(val.type, ir.PointerType)
                 and val.constant is None
             )
-            or (isinstance(val.type, ir.PointerType) and not _tgt_is_ptr);
+            or (
+                isinstance(val.type, ir.PointerType)
+                and not _tgt_is_ptr
+                and not _tgt_is_jacval
+            );
         if _val_is_none {
             return ir.Constant(target_type, None);
         }
@@ -2178,6 +2259,17 @@ impl NaIRGenPass._coerce_type_inner(val: ir.Value, target_type: ir.Type) -> ir.V
             );
             return self.builder.select(
                 _pv_nn, _ov, ir.Constant(target_type, None), name="opt.wrap.sel"
+            );
+        }
+        if _tgt_is_jacval and isinstance(val.type, ir.PointerType) {
+            _object_present = self.builder.icmp_unsigned(
+                "!=", val, ir.Constant(val.type, None), name="opt.object.has"
+            );
+            return self.builder.select(
+                _object_present,
+                _ov,
+                ir.Constant(target_type, None),
+                name="opt.object.wrap"
             );
         }
         return _ov;
@@ -4412,7 +4504,7 @@ impl NaIRGenPass._lower_list_for_elem(elem_llvm: ir.Type) -> ir.Type {
         _elem = ir.IntType(8).as_pointer();
     }
     spec = "i64";
-    if isinstance(_elem, ir.DoubleType) {
+    if isinstance(_elem, (ir.DoubleType, ir.FloatType)) {
         spec = "f64";
     } elif isinstance(_elem, ir.PointerType) {
         spec = "ptr";

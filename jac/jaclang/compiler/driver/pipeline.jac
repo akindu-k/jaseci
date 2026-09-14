@@ -340,7 +340,7 @@ glob SYMTAB_SCHED_DEPS: tuple = ('jaclang.compiler.symbol_utils', ),
          'jaclang.compiler.driver.bccache',
          'jaclang.compiler.frontend.codeinfo',
          'jaclang.compiler.frontend.diagnostic_utils',
-         'jaclang.compiler.driver.modresolver',
+         'jaclang.project.modresolver',
          'jaclang.project.tomlio',
          'jaclang.project.mobui_scope',
          'jaclang.project.config',
@@ -608,7 +608,7 @@ def native_pipeline_available -> tuple[bool, str] {
     }
     reason = '';
     try {
-        import from jaclang.compiler.backends.native.llvm.binding.ffi { _find_shim }
+        import from jaclang.compiler.backends.native.llvm { _find_shim }
         _find_shim();
     } except ModuleNotFoundError {
         reason = (

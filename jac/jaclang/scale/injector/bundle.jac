@@ -90,7 +90,7 @@ obj BundleSourceFilter {
     has ignore_patterns: list[str];
 
     def parks(rel: Path) -> bool {
-        import from jaclang.compiler.frontend.helpers { path_matches_exclude }
+        import from jaclang.project.source { path_matches_exclude }
 
         return path_matches_exclude(rel.as_posix(), self.ignore_patterns);
     }
@@ -124,7 +124,7 @@ obj BundleSourceFilter {
     }
 
     def matching_ignore_pattern(rel: Path) -> str {
-        import from jaclang.compiler.frontend.helpers { path_matches_exclude }
+        import from jaclang.project.source { path_matches_exclude }
 
         for pattern in self.ignore_patterns {
             if path_matches_exclude(rel.as_posix(), [pattern]) {
@@ -166,30 +166,17 @@ obj BundleSourceFilter {
 
 
 def source_filter_for(base: Path) -> BundleSourceFilter {
-    import from jaclang.compiler.frontend.helpers { read_jacignore_patterns }
+    import from jaclang.project.source { read_jacignore_patterns }
 
     return BundleSourceFilter(ignore_patterns=read_jacignore_patterns(str(base)));
 }
 
 
 def _project_config(project_dir: str) -> any {
-    import from jaclang.project.config {
-        JacConfig,
-        active_profile_name,
-        get_config_for_path,
-        project_scope_is_pinned
-    }
+    import from jaclang.project.config { get_config_for_path }
 
     try {
-        config = get_config_for_path(Path(project_dir));
-        if config is None or config.active_profile or project_scope_is_pinned() {
-            return config;
-        }
-        profile = active_profile_name(config);
-        if not profile {
-            return config;
-        }
-        return JacConfig.discover(start_path=config.project_root, profile=profile);
+        return get_config_for_path(Path(project_dir));
     } except Exception as exc {
         raise ValueError(
             f"jac.toml under '{project_dir}' cannot be parsed ({exc}), so the "

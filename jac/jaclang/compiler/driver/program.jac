@@ -17,7 +17,7 @@ import from jaclang.compiler.driver.progstate {
 import type from jaclang.compiler.frontend.codeinfo { ClientArtifact }
 import type from jaclang.compiler.types.type_evaluator { TypeEvaluator }
 import type from jaclang.compiler.driver.compiler { JacCompiler }
-import type from jaclang.compiler.driver.mtp { Info }
+import type from jaclang.runtime.semantic { Info }
 import type from jaclang.compiler.passes.transform { Transform }
 import type from jaclang.compiler.driver.compilation_context { SourceStore }
 
@@ -46,7 +46,10 @@ class JacProgram {
     def get_type_evaluator(self: JacProgram) -> TypeEvaluator;
     def stub_catalog(self: JacProgram) -> StubCatalog | None;
     def clear_type_system(self: JacProgram, clear_hub: bool = False) -> None;
-    def release_compile_closure(self: JacProgram, collect: bool = True) -> None;
+    def release_compile_closure(
+        self: JacProgram, collect: bool = True, retain_stubs: bool = True
+    ) -> None;
+
     def release_native_dep_units(self: JacProgram) -> None;
     def release_check_caches(self: JacProgram) -> None;
     def hub_cache_stamp(self: JacProgram, resolved_path: str) -> None;
