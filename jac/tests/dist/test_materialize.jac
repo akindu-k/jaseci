@@ -1,13 +1,10 @@
 """Cold-start runtime cache maintenance.
 
 `gc_stale` sweeps the runtime generations the freshly extracted one replaced.
-The new generation is published before the sweep runs, so a generation that
-refuses to delete costs disk, not correctness, and must not take the process
-down with it (issue #9053).
-
-The probe is compiled and JIT-run the way the launcher is: forced into the
-native codespace over the fused runtime library staged beside it, exactly as
-the desktop builder stages it.
+The new one is published first, so a generation that refuses to delete costs
+disk, not correctness, and must not take the process down (issue #9053). The
+probe is compiled the way the launcher is: forced native over the fused runtime
+staged beside it.
 """
 
 import ctypes;
@@ -23,6 +20,38 @@ glob _CACHE: str = "/tmp/jac_gc_stale_probe",
      _KEEP: str = "1111111111111111-aaaaaaaaaaaaaaaa";
 
 
+# (generation, locked against deletion, survives the sweep, what that pins)
+def _generations -> list[tuple[str, bool, bool, str]] {
+    return [
+        (
+            "2222222222222222-aaaaaaaaaaaaaaaa",
+            True,
+            True,
+            "a generation that will not delete stays put"
+        ),
+        (
+            "3333333333333333-aaaaaaaaaaaaaaaa",
+            False,
+            False,
+            "a generation that will delete still goes, whatever the sweep hit"
+        ),
+        (
+            "2222222222222222-bbbbbbbbbbbbbbbb",
+            False,
+            True,
+            "another binary's generations are not this sweep's"
+        ),
+        (
+            "4444444444444444-aaaaaaaaaaaaaaaa.tmp.4242",
+            False,
+            True,
+            "an in-flight extraction is not swept"
+        ),
+        (_KEEP, False, True, "the live generation must survive the sweep")
+    ];
+}
+
+
 """Source of a native probe that sweeps the crafted cache once."""
 def _probe_source -> str {
     return (
@@ -36,17 +65,37 @@ def _probe_source -> str {
 }
 
 
-"""Lay down a runtime generation holding one file."""
-def _generation(name: str) -> str {
-    full = os.path.join(_CACHE, "rt", name);
-    os.makedirs(full, exist_ok=True);
-    (open(os.path.join(full, "pinned.py"), "w")).close();
-    return full;
+"""Path of one runtime generation in the crafted cache."""
+def _generation_path(name: str) -> str {
+    return os.path.join(_CACHE, "rt", name);
+}
+
+
+"""Lay the crafted cache down, each generation holding one file."""
+def _seed_cache {
+    shutil.rmtree(_CACHE, ignore_errors=True);
+    for (name, locked, _, _) in _generations() {
+        full = _generation_path(name);
+        os.makedirs(full, exist_ok=True);
+        (open(os.path.join(full, "pinned.py"), "w")).close();
+        os.chmod(full, 0o555 if locked else 0o755);
+    }
+}
+
+
+"""Give back the write bit the seed withheld, so the cache can be removed."""
+def _unlock_cache {
+    for (name, locked, _, _) in _generations() {
+        full = _generation_path(name);
+        if locked and os.path.isdir(full) {
+            os.chmod(full, 0o755);
+        }
+    }
 }
 
 
 """Compile the sweep probe over a staged fused runtime and hand back its entry."""
-def _sweep_probe(work: str) -> object {
+def _sweep_probe(work: str) -> any {
     _stage_fused_runtime(Path(work));
     (Path(os.path.join(work, "gc_probe.jac"))).write_text(_probe_source());
     (eng, _) = compile_native("gc_probe.jac", work);
@@ -62,25 +111,15 @@ test "gc_stale clears replaced generations and survives one it cannot delete" {
         testskip("root ignores the mode bits this test pins the directory with");
     }
     work = tempfile.mkdtemp(prefix="jac_gc_stale_");
-    shutil.rmtree(_CACHE, ignore_errors=True);
-    pinned = _generation("2222222222222222-aaaaaaaaaaaaaaaa");
-    sweepable = _generation("3333333333333333-aaaaaaaaaaaaaaaa");
-    other = _generation("2222222222222222-bbbbbbbbbbbbbbbb");
-    inflight = _generation("4444444444444444-aaaaaaaaaaaaaaaa.tmp.4242");
-    live = _generation(_KEEP);
-    os.chmod(pinned, 0o555);
+    _seed_cache();
     try {
         sweep = _sweep_probe(work);
         assert sweep() == 1 , "the sweep must return, not abort the process";
-        assert os.path.isdir(pinned) , "a generation that will not delete stays put";
-        assert not os.path.isdir(sweepable) , (
-            "a generation that will delete still goes, whatever the sweep hit"
-        );
-        assert os.path.isdir(other) , "another binary's generations are not this sweep's";
-        assert os.path.isdir(inflight) , "an in-flight extraction is not swept";
-        assert os.path.isdir(live) , "the live generation must survive the sweep";
+        for (name, _, kept, pins) in _generations() {
+            assert os.path.isdir(_generation_path(name)) == kept , pins;
+        }
     } finally {
-        os.chmod(pinned, 0o755);
+        _unlock_cache();
         shutil.rmtree(_CACHE, ignore_errors=True);
         shutil.rmtree(work, ignore_errors=True);
     }
