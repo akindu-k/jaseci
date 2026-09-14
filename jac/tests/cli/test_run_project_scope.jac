@@ -90,10 +90,7 @@ def show_from(cwd: str, filename: str, takeover: (bool | None) = None) -> str {
 """Put the ambient config on *profile*, the way dispatch does before a command."""
 def _activate_profile(profile: str) {
     import from jaclang.project { config as config_mod }
-    ambient = config_mod.get_config();
-    if ambient is not None {
-        ambient.apply_profile_overlay(profile);
-    }
+    config_mod.get_config(profile=profile);
 }
 
 

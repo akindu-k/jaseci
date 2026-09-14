@@ -91,7 +91,11 @@ def _apply_profile(meta: CommandSpec, args_dict: dict) {
         import from jaclang.project.config { get_config }
 
         profile = args_dict.pop('profile', None) or None;
-        config = get_config(profile=profile);
+        try {
+            config = get_config(profile=profile);
+        } except ValueError as exc {
+            exit_on_config_error(exc);
+        }
         if config is None {
             return;
         }
