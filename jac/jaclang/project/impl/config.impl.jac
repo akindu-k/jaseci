@@ -21,9 +21,14 @@ impl interpolate_env_vars(value: str) -> str {
             return operand;
         } elif operator == ":?" {
             raise ValueError(f"Environment variable {var_name} is required: {operand}");
-        } else {
-            raise ValueError(f"Environment variable {var_name} is not set");
         }
+
+        # No process can export a name like "1" or "#ARR[@]", so reporting these
+        # shell expansions as unset variables would leave the user no way out.
+        if not var_name.isidentifier() {
+            return `match.group(0);
+        }
+        raise ValueError(f"Environment variable {var_name} is not set");
     }
     return re.sub(pattern, replace_env_var, value);
 }

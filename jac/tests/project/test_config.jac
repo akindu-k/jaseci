@@ -106,6 +106,30 @@ test "interpolate required env var missing" {
     assert raised , "Expected ValueError for missing required env var";
 }
 
+test "interpolate leaves shell expansions that are not variable names" {
+    config_mod._config = None;
+    os.environ.pop("REQUIRED_VAR", None);
+    # No process can export "1" or "#ARR[@]", so "export it" is not a fix
+    # available to the user and the value has to survive verbatim.
+    for value in [
+        "sh -c 'echo ${1}' -- world",
+        "${#ARR[@]}",
+        "${REQUIRED_VAR%%.txt}",
+        "${REQUIRED_VAR^^}"
+    ] {
+        assert interpolate_env_vars(value) == value , (
+            f"{value} should pass through untouched"
+        );
+    }
+    raised = False;
+    try {
+        interpolate_env_vars("${1:?positional}");
+    } except ValueError {
+        raised = True;
+    }
+    assert raised , "an explicit :? still fails, whatever the name";
+}
+
 test "interpolate required env var with custom error" {
     config_mod._config = None;
     os.environ.pop("MY_SECRET", None);
