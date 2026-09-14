@@ -90,7 +90,7 @@ obj BundleSourceFilter {
     has ignore_patterns: list[str];
 
     def parks(rel: Path) -> bool {
-        import from jaclang.compiler.frontend.helpers { path_matches_exclude }
+        import from jaclang.project.source { path_matches_exclude }
 
         return path_matches_exclude(rel.as_posix(), self.ignore_patterns);
     }
@@ -124,7 +124,7 @@ obj BundleSourceFilter {
     }
 
     def matching_ignore_pattern(rel: Path) -> str {
-        import from jaclang.compiler.frontend.helpers { path_matches_exclude }
+        import from jaclang.project.source { path_matches_exclude }
 
         for pattern in self.ignore_patterns {
             if path_matches_exclude(rel.as_posix(), [pattern]) {
@@ -166,7 +166,7 @@ obj BundleSourceFilter {
 
 
 def source_filter_for(base: Path) -> BundleSourceFilter {
-    import from jaclang.compiler.frontend.helpers { read_jacignore_patterns }
+    import from jaclang.project.source { read_jacignore_patterns }
 
     return BundleSourceFilter(ignore_patterns=read_jacignore_patterns(str(base)));
 }
@@ -205,7 +205,11 @@ def _entry_module_spec(project_dir: str) -> (tuple[Path, Path] | None) {
     if not config.project.entry_point {
         return None;
     }
-    return (proj_root.resolve(), Path(config.project.entry_point));
+    import from jaclang.project.apps { resolve_entry_path }
+    return (
+        proj_root.resolve(),
+        Path(resolve_entry_path(config.project.entry_point, str(proj_root)))
+    );
 }
 
 
@@ -700,6 +704,34 @@ def _precompile_app(
         jac_path.write_bytes(seal_binary);
         jac_path.chmod(0o755);
 
+        manifest_script = stage_root / "_serve_payloads.jac";
+        manifest_script.write_text(
+            "import from pathlib { Path }\n"
+                + "import from jaclang.project.config { get_config_for_path }\n"
+                + "import from jaclang.dist.seal { bake_serve_payloads }\n"
+                + "with entry {\n"
+                + "    project = Path('app').resolve();\n"
+                + "    config = get_config_for_path(project);\n"
+                + "    if not bake_serve_payloads(config, project, bake_client=False) {\n"
+                + "        raise RuntimeError('Serving metadata preparation failed');\n"
+                + "    }\n}\n"
+        );
+        prepared = subprocess.run(
+            [str(jac_path), "run", str(manifest_script)],
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            env=seal_step_env(),
+            cwd=str(stage_root)
+        );
+        manifest_script.unlink();
+        if prepared.returncode != 0 {
+            raise RuntimeError(
+                "App serving metadata preparation failed: "
+                    + (prepared.stderr or prepared.stdout).strip()[-4000:]
+            );
+        }
+
         result = subprocess.run(
             [str(jac_path), "precompile", str(stage_root), "--seal"],
             capture_output=True,
@@ -1022,7 +1054,7 @@ def pack_jab(
             try {
                 _venv_stage(staged, seal_binary, seal_timeout_setting(project_dir));
             } except Exception as exc {
-                shutil.rmtree(str(staged / ".jac"), ignore_errors=True);
+                shutil.rmtree(str(staged / ".jac" / "venv"), ignore_errors=True);
                 logger.warning(
                     f"Seal-time venv staging failed; pods will build the venv "
                     f"at boot instead. {exc}"
@@ -1046,6 +1078,15 @@ def pack_jab(
                 logger.info(
                     f"Sealed {count} precompiled app-module artifacts into the .jab."
                 );
+                import from jaclang.server.sealed_serve { SERVE_MANIFEST_REL }
+                serve_manifest = staged / SERVE_MANIFEST_REL;
+                if serve_manifest.is_file() {
+                    tar.add(
+                        str(serve_manifest),
+                        arcname=SERVE_MANIFEST_REL,
+                        filter=det_tar_member
+                    );
+                }
                 ven = staged / "_vendor";
                 if ven.is_dir() {
                     wheel_count = 0;

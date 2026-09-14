@@ -7,6 +7,7 @@ import io;
 import json;
 import logging;
 import os;
+import types;
 import re;
 import shutil;
 import uuid;
@@ -16,6 +17,14 @@ import from jaclang.data.serializer { Serializer }
 import from jaclang.testing.testing { JacTestClient }
 
 glob FIXTURES = str(Path(__file__).parent / "fixtures");
+
+# Direct introspection follows the same explicit preparation contract as serving.
+def prepare_source(path: str) {
+    import from jaclang.compiler.driver.application { prepare_application }
+    import from jaclang.runtime.runtime { JacRuntime as Jac }
+    prepare_application(path, Jac.get_program(), str(Path(path).parent));
+}
+
 
 def _as_any(v: any) -> any {
     return v;
@@ -140,13 +149,7 @@ def make_dualrole_client(tmp_path: str) -> JacTestClient {
     with open(str(dest / "jac.toml"), "w") as tf {
         tf.write(
             "[project]\nname = \"dualrole\"\n\n"
-            f"[apps.web]\nkind = \"web-app\"\npath = \".\"\nentry-point = \"{module_name}.jac\"\n\n"
-            "[apps.analytics]\nkind = \"service\"\n"
-            "entry-point = \"dualrole_analytics.jac\"\n"
-            "route = \"/analytics\"\n\n"
-            "[placement.pins]\n"
-            "\"dualrole_guestbook\" = \"server\"\n"
-            "\"dualrole_analytics\" = \"server\"\n"
+            f'[apps.web]\nkind = "web-app"\nentry-point = "{module_name}"\n\n[apps.analytics]\nkind = "service"\nentry-point = "dualrole_analytics"\nroute = "/analytics"\n\n[placement.pins]\n"dualrole_guestbook" = "server"\n"dualrole_analytics" = "server"\n'
         );
     }
     for name in [
@@ -709,9 +712,11 @@ test "serve root app inference follows intent not incidence" {
     # (`client_page`), reachable at /cl/client_page. That is an incidental page,
     # not a declared entry point, so it must NOT be promoted to / -- the root
     # path stays the JSON API index.
+    prepare_source(fixture_abs_path("serve_api.jac"));
     api_intro = ModuleIntrospector("serve_api", FIXTURES);
     assert api_intro.resolve_root_app() == "";
     # A conventionally-named entry page (`app`) signals intent and IS inferred.
+    prepare_source(fixture_abs_path("client_fullstack_app.jac"));
     app_intro = ModuleIntrospector("client_fullstack_app", FIXTURES);
     assert app_intro.resolve_root_app() == "app";
 }
@@ -1769,6 +1774,7 @@ test "serve blocking sync walkers run concurrently via to_thread" {
         introspector = ModuleIntrospector(
             module_name="serve_blocking_io", base_path=str(Path(jac_file).parent)
         );
+        prepare_source(jac_file);
         introspector.load();
         walkers = introspector.get_walkers();
         assert "slow_blocking" in walkers , "slow_blocking walker not found";
@@ -1811,6 +1817,7 @@ test "endpoint effect classifier follows helper calls" {
     introspector = ModuleIntrospector(
         module_name="serve_helper_effects", base_path=str(Path(jac_file).parent)
     );
+    prepare_source(jac_file);
     introspector.load();
     effects = introspector._client_manifest.get("endpoint_effects", {});
     import json;
@@ -1844,6 +1851,7 @@ test "spawn_walker_sync and spawn_walker_async dispatch to explicit paths" {
         introspector = ModuleIntrospector(
             module_name="serve_blocking_io", base_path=str(Path(jac_file).parent)
         );
+        prepare_source(jac_file);
         introspector.load();
         walker_cls = introspector.get_walkers()["slow_blocking"];
         user_mgr = UserManager(base_path=tmpdir);
@@ -1888,6 +1896,7 @@ test "concurrent async walkers run concurrently end-to-end" {
         introspector = ModuleIntrospector(
             module_name="serve_blocking_io", base_path=str(Path(jac_file).parent)
         );
+        prepare_source(jac_file);
         introspector.load();
         walker_cls = introspector.get_walkers()["slow_async"];
         assert getattr(walker_cls, "__jac_async__", False) , "slow_async walker must be async";
@@ -2102,6 +2111,7 @@ test "concurrent multi-user requests do not race on ctx.user_root" {
         introspector = ModuleIntrospector(
             module_name="serve_blocking_io", base_path=str(Path(jac_file).parent)
         );
+        prepare_source(jac_file);
         introspector.load();
         walkers = introspector.get_walkers();
         async_walker = walkers["whoami_async"];
@@ -2256,7 +2266,8 @@ test "ensure_bundle retries a missing-bun failure and a build error alike" {
     import from jaclang.server.server { ModuleIntrospector }
     import from jaclang.client.client_bundle { ClientBundleError, MissingBunError }
     intro = ModuleIntrospector("serve_api", FIXTURES);
-    intro._module = object();
+    intro._module = types.ModuleType("serve_api");
+    intro._module.__file__ = fixture_abs_path("serve_api.jac");
     bun_missing = MagicMock();
     bun_missing.build.side_effect = MissingBunError("bun is not available");
     intro._bundle_builder = bun_missing;
@@ -2269,7 +2280,8 @@ test "ensure_bundle retries a missing-bun failure and a build error alike" {
     assert bun_missing.build.call_count == 2 , "missing bun must be re-checked on every call, not memoized";
 
     intro2 = ModuleIntrospector("serve_api", FIXTURES);
-    intro2._module = object();
+    intro2._module = types.ModuleType("serve_api");
+    intro2._module.__file__ = fixture_abs_path("serve_api.jac");
     broken = MagicMock();
     broken.build.side_effect = RuntimeError("vite exploded");
     intro2._bundle_builder = broken;
@@ -2312,7 +2324,8 @@ test "concurrent ensure_bundle callers share one build instead of each running t
     import from concurrent.futures { ThreadPoolExecutor }
     import from jaclang.server.server { ModuleIntrospector }
     intro = ModuleIntrospector("serve_api", FIXTURES);
-    intro._module = object();
+    intro._module = types.ModuleType("serve_api");
+    intro._module.__file__ = fixture_abs_path("serve_api.jac");
     builder = _SlowRealBuilder();
     intro._bundle_builder = builder;
 
@@ -2339,7 +2352,8 @@ test "a module reload during a build wins over the build's result" {
     import time;
     import from jaclang.server.server { ModuleIntrospector }
     intro = ModuleIntrospector("serve_api", FIXTURES);
-    intro._module = object();
+    intro._module = types.ModuleType("serve_api");
+    intro._module.__file__ = fixture_abs_path("serve_api.jac");
     builder = _SlowRealBuilder();
     intro._bundle_builder = builder;
 
@@ -2420,6 +2434,10 @@ test "spa fallback status is route aware when pages exist" {
         proj = Path(tmpdir);
         shutil.copy(fixture_abs_path("client_app.jac"), proj / "routed_app.jac");
         write_routed_pages(proj);
+        if not (proj / "routed_app.jac").exists() {
+            (proj / "routed_app.jac").write_text("def:pub app -> int { return 1; }\n");
+        }
+        prepare_source(str(proj / "routed_app.jac"));
         intro = ModuleIntrospector("routed_app", str(proj));
         assert intro.spa_fallback_status("/") == 200;
         assert intro.spa_fallback_status("/about") == 200;
@@ -2490,8 +2508,8 @@ test "serve spa fallback keeps 200 for known page routes" {
 }
 
 """The route table must follow the app across reloads: every reload path goes
-through _load_manifest, which clears the cached patterns so the next fallback
-request rescans pages/. Without the reset, a page added after first request
+through preparation followed by _load_manifest, which clears the cached patterns
+so the next fallback request reads the newly prepared route table. Without the reset, a page added after first request
 404s until restart and a deleted page keeps answering 200."""
 test "spa fallback route table refreshes on manifest reload" {
     import from jaclang.server.server { ModuleIntrospector }
@@ -2499,14 +2517,20 @@ test "spa fallback route table refreshes on manifest reload" {
         proj = Path(tmpdir);
         shutil.copy(fixture_abs_path("client_app.jac"), proj / "routed_app.jac");
         write_routed_pages(proj);
+        if not (proj / "routed_app.jac").exists() {
+            (proj / "routed_app.jac").write_text("def:pub app -> int { return 1; }\n");
+        }
+        prepare_source(str(proj / "routed_app.jac"));
         intro = ModuleIntrospector("routed_app", str(proj));
         assert intro.spa_fallback_status("/pricing") == 404;
         page_src = "def:pub View() -> JsxPage {\n    return <div>p</div>;\n}\n";
         (proj / "pages" / "pricing.jac").write_text(page_src);
         assert intro.spa_fallback_status("/pricing") == 404 , "table is cached until a reload";
+        prepare_source(str(proj / "routed_app.jac"));
         intro._load_manifest();
         assert intro.spa_fallback_status("/pricing") == 200 , f"patterns={intro._load_spa_routes()}";
         (proj / "pages" / "about.jac").unlink();
+        prepare_source(str(proj / "routed_app.jac"));
         intro._load_manifest();
         assert intro.spa_fallback_status("/about") == 404;
         assert intro.spa_fallback_status("/pricing") == 200;
@@ -2523,6 +2547,10 @@ test "spa fallback root is route aware without an index page" {
         pages.mkdir(parents=True, exist_ok=True);
         page_src = "def:pub View() -> JsxPage {\n    return <div>p</div>;\n}\n";
         (pages / "dashboard.jac").write_text(page_src);
+        if not (proj / "routed_app.jac").exists() {
+            (proj / "routed_app.jac").write_text("def:pub app -> int { return 1; }\n");
+        }
+        prepare_source(str(proj / "routed_app.jac"));
         intro = ModuleIntrospector("routed_app", str(proj));
         assert intro.spa_fallback_status("/") == 404;
         assert intro.spa_fallback_status("/dashboard") == 200;
@@ -2541,7 +2569,7 @@ import from jaclang.server.bridge {
     BridgeUnavailable,
     bridge_error_from
 }
-import from jaclang.compiler.frontend.constant { Constants as Con }
+import from jaclang.runtime.constants { Constants as Con }
 import from jaclang.server.outbox {
     SqliteOutboxStore,
     cached_result,
@@ -2698,11 +2726,7 @@ test "sv_client: register_local short-circuits function calls in-process" {
 }
 
 glob _READ_CACHE_TOML: str = (
-         '[project]\nname = "rc"\n\n'
-         '[apps.web]\nkind = "web-app"\npath = "web"\n\n'
-         '[apps.cli]\nkind = "cli"\npath = "cli"\n\n'
-         '[apps.social]\nkind = "service"\nentry-point = "social.jac"\n\n'
-         '[apps.web.scale]\nread_cache = true\n'
+         '[project]\nname = "rc"\n\n[apps.web]\nkind = "web-app"\nentry-point = "web.main"\n\n[apps.cli]\nkind = "cli"\nentry-point = "cli.main"\n\n[apps.social]\nkind = "service"\nentry-point = "social"\n\n[apps.web.scale]\nread_cache = true\n'
      );
 
 test "sv_client: read_cache serves effect-free bridged calls from memory" {

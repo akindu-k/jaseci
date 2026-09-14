@@ -1,3 +1,4 @@
+import from jaclang.compiler.driver.pipeline_types { AnalysisFact }
 import type from jaclang.compiler.types.stubcat.reader { StubCatalog }
 import ast as py_ast;
 import marshal;
@@ -35,7 +36,7 @@ import type from jaclang.compiler.frontend.codeinfo {
     ClientArtifact,
     NativeModuleLayout
 }
-import from jaclang.compiler.frontend.helpers { read_file_with_encoding }
+import from jaclang.project.source { read_file_with_encoding }
 import from jaclang.compiler.frontend.constant { CodeContext, Tokens as Tok }
 import from jaclang.compiler.backends.py.jcir_gen_pass { JcirGenPass }
 import from jaclang.compiler.passes.boundary_analysis_pass { BoundaryAnalysisPass }
@@ -51,7 +52,9 @@ import from jaclang.compiler.driver.pass_driver {
     run_pass,
     setup_progress
 }
-import from jaclang.compiler.driver.schedules {
+import from jaclang.compiler.driver.pipeline {
+    run_utility,
+    UtilityProduct,
     get_analysis_sched,
     get_boundary_analysis_sched,
     get_format_sched,
@@ -62,6 +65,7 @@ import from jaclang.compiler.driver.schedules {
     native_pipeline_available,
     native_schedule_failure,
     providers_of,
+    pass_provides,
     validate_schedule
 }
 import from jaclang.compiler.driver.source_failures {
@@ -104,6 +108,7 @@ obj JacCompiler {
 
     has selfhost: SelfHostCache { getter; }
 
+    def release_compile_state(target_program: JacProgram) -> None;
     def stub_catalog -> StubCatalog | None;
     def ensure_stub_catalog -> StubCatalog | None;
     def note_stub_tree_served(path: str, program: JacProgram) -> None;
@@ -121,6 +126,14 @@ obj JacCompiler {
     ) -> (types.CodeType | None);
 
     def get_client_artifact(
+        full_target: str, target_program: JacProgram
+    ) -> (ClientArtifact | None);
+
+    def _get_bytecode(
+        full_target: str, target_program: JacProgram
+    ) -> (types.CodeType | None);
+
+    def _get_client_artifact(
         full_target: str, target_program: JacProgram
     ) -> (ClientArtifact | None);
 
@@ -148,7 +161,10 @@ obj JacCompiler {
     ) -> None;
 
     def _restore_sections(
-        full_target: str, actual_program: JacProgram, secs: dict[int, bytes]
+        full_target: str,
+        actual_program: JacProgram,
+        secs: dict[int, bytes],
+        base_dir: str = ""
     ) -> None;
 
     def _get_precompiled_jir_bytecode(
@@ -168,7 +184,6 @@ obj JacCompiler {
     def resolve_absorb_imports(mod: uni.Module, target_program: JacProgram) -> None;
     def stamp_boundary_facts(mod: uni.Module, target_program: JacProgram) -> None;
     def stamp_app_facts(mod: uni.Module, target_program: JacProgram) -> None;
-    static def _module_defines_owned_elements(mod: uni.Module) -> bool;
     def stamp_access_check_facts(mod: uni.Module) -> None;
     def stamp_native_import_facts(mod: uni.Module, target_program: JacProgram) -> None;
     def _persist_module_cache(

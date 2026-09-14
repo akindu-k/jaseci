@@ -1,3 +1,4 @@
+import from jaclang.compiler.driver.pipeline_types { AnalysisFact }
 def scalar_llvm_type(`entry: JacTypeEntry) -> ir.Type {
     if `entry.is_float {
         return ir.FloatType() if `entry.width == 32 else ir.DoubleType();
@@ -130,6 +131,7 @@ impl NaIRGenPass._run_impl(ir_in: uni.Module) -> uni.Module {
     self._forward_declare_archetype_names(self.ir_in);
 
     self._register_imported_struct_types();
+    self._declare_pending_clib_abilities();
     self._register_globals(self.ir_in);
     self._register_entry_globals(self.ir_in);
 
@@ -661,8 +663,8 @@ impl NaIRGenPass._register_imported_struct_types -> None {
         }
         self._ensure_dep_inference(imported_mod);
         processed_modules.add(abs_key);
-        _canon_src[abs_key] = _kernel_owner or src_mod_str;
-        imported_mods.append((_kernel_owner or src_mod_str, imported_mod));
+        _canon_src[abs_key] = _kernel_owner or os.path.realpath(full_path);
+        imported_mods.append((_canon_src[abs_key], imported_mod));
         _src_keys[_canon_src[abs_key]] = ""
             if _kernel_owner
             else native_module_key(full_path);
@@ -723,6 +725,8 @@ impl NaIRGenPass._register_imported_struct_types -> None {
     for (_, imported_mod) in imported_mods {
         self._walk_imported_module_type_names(imported_mod);
     }
+
+    self._declare_pending_clib_abilities();
 
     for (_, imported_mod) in imported_mods {
         self._register_imported_hierarchy(imported_mod);
@@ -890,7 +894,8 @@ impl NaIRGenPass._walk_imported_module_abilities(
         import os as _wl_os2;
 
         _wl_abs = _wl_os2.path.abspath(imported_mod.loc.mod_path);
-        _wl_jac_internal = imported_mod.decided_codespace != 'native'
+        _wl_jac_internal = not self.prog.options.native_required_for(_wl_abs)
+            and imported_mod.decided_codespace != 'native'
             and (_wl_os2.sep + "jaclang" + _wl_os2.sep) in _wl_abs
             and (_wl_os2.sep + "na_stdlib" + _wl_os2.sep) not in _wl_abs;
         if _wl_jac_internal {
@@ -1202,7 +1207,9 @@ impl NaIRGenPass._forward_declare_imported_ability(
             in self._module_functions {
         return;
     }
-    if name in self.func_symtab {
+    private = nd.access is not None and nd.access.tag.name == Tok.KW_PRIV;
+
+    if name in self.func_symtab and not private {
         import from jaclang.compiler.frontend.codeinfo {
             native_library_function_symbol
         }
@@ -1220,6 +1227,7 @@ impl NaIRGenPass._forward_declare_imported_ability(
         _fd_demoted = (unavailable is not None and name in unavailable)
             or (
                 imp_layout is not None
+                and not private
                 and not name.startswith("__")
                 and name not in imp_layout.functions
             );
@@ -1246,21 +1254,15 @@ impl NaIRGenPass._record_linked_decl(
 }
 
 impl NaIRGenPass._ensure_dep_inference(dep_mod: uni.Module) -> None {
-    _provided = self.prog.analysis.analyses_run.provided(dep_mod);
-    if 'TypeOf' in _provided {
+    if self.prog.analysis.analyses_run.provides(dep_mod, AnalysisFact.TYPE_OF) {
         return;
     }
-    _provided.add('TypeOf');
-    try {
-        import from jaclang.compiler.driver.pass_driver { run_pass }
-        import from jaclang.compiler.passes.cfg_build_pass { CFGBuildPass }
-        import from jaclang.compiler.passes.type_checker_pass { TypeCheckPass }
-        if 'CfgSucc' not in _provided {
-            run_pass(CFGBuildPass, dep_mod, self.prog);
-            _provided.add('CfgSucc');
-        }
-        run_pass(TypeCheckPass, dep_mod, self.prog);
-    } except Exception {}
+    import from jaclang.compiler.driver.pipeline { require_product, CompilationProduct }
+    if not require_product(self.prog, dep_mod, CompilationProduct.ANALYSIS) {
+        raise RuntimeError(
+            f"Native dependency analysis failed: {dep_mod.loc.mod_path}"
+        );
+    }
 }
 
 impl NaIRGenPass._imported_function_demotions(
@@ -1461,7 +1463,7 @@ impl NaIRGenPass._process_clib_imports(module: uni.Module) -> None {
                     self.emit(E5060, name=fn_name);
                     continue;
                 }
-                self._declare_clib_ability(decl);
+                self._pending_clib_abilities.append(decl);
                 if fn_name {
                     self.clib_extern_names.add(fn_name);
                     if _cur_lib is not None {
@@ -1476,6 +1478,14 @@ impl NaIRGenPass._process_clib_imports(module: uni.Module) -> None {
             module.gen._clib_symbol_lib = self._clib_symbol_lib;
             self.has_native_code = True;
         }
+    }
+}
+
+impl NaIRGenPass._declare_pending_clib_abilities -> None {
+    pending = self._pending_clib_abilities;
+    self._pending_clib_abilities = [];
+    for ability in pending {
+        self._declare_clib_ability(ability);
     }
 }
 
@@ -1584,6 +1594,10 @@ impl NaIRGenPass._dispatch_primitive_method(
         return None;
     }
     _ctx = NativeEmitCtx(pass_ref=self, type_key=type_key, call_kwargs=(kwargs or {}));
+    if isinstance(kw_node, uni.FuncCall)
+        and isinstance(kw_node.target, uni.AtomTrailer) {
+        _ctx.receiver_node = kw_node.target.target;
+    }
     try {
         return _emit_fn(_ctx, target, args);
     } except Exception as _pm_exc {

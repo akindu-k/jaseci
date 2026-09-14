@@ -115,6 +115,8 @@ impl Model.ainvoke(mt_run: MTRuntime) -> object {
         return await super.ainvoke(mt_run);
     }
 
+    delegate: BaseLLM | None = self._mock_delegate or self._local_delegate;
+
     _parent = _current_invocation_id.get(None);
     mt_run._parent_invocation_id = _parent;
     mt_run._invocation_id = str(uuid.uuid4());
@@ -122,7 +124,9 @@ impl Model.ainvoke(mt_run: MTRuntime) -> object {
     _start = time.time();
 
     try {
-        result = await super.ainvoke(mt_run);
+        result = await delegate.ainvoke(mt_run)
+            if delegate
+            else await super.ainvoke(mt_run);
 
         if isinstance(result, _types_mod.AsyncGeneratorType) {
             _current_invocation_id.reset(_ctx_token);
@@ -149,13 +153,13 @@ impl Model.ainvoke(mt_run: MTRuntime) -> object {
 }
 
 async def _astream_with_telemetry(
-    agen: AsyncGenerator[object, None], mt: object, model_name: str, start: float
+    agen: AsyncGenerator[object, None], mt: MTRuntime, model_name: str, start: float
 ) -> AsyncGenerator[object, None] {
     import asyncio;
     import contextvars;
     import time;
 
-    invocation_id = mt?._invocation_id;
+    invocation_id = mt._invocation_id;
     ctx = contextvars.copy_context();
     if invocation_id is not None {
         ctx.run(_current_invocation_id.set, invocation_id);
@@ -192,12 +196,12 @@ async def _astream_with_telemetry(
 }
 
 def _stream_with_telemetry(
-    gen: object, mt: object, model_name: str, start: float
-) -> object {
+    gen: Iterator[object], mt: MTRuntime, model_name: str, start: float
+) -> Generator[object, None, None] {
     import contextvars;
     import time;
 
-    invocation_id = mt?._invocation_id;
+    invocation_id = mt._invocation_id;
     ctx = contextvars.copy_context();
     if invocation_id is not None {
         ctx.run(_current_invocation_id.set, invocation_id);
@@ -253,6 +257,7 @@ impl Model._raise_mapped_provider_error(e: Exception) -> None {
 }
 
 impl Model.model_call_no_stream(params: dict) -> dict {
+    response: object;
     try {
         if self.http_client {
             response = self.model_call_http(
@@ -274,10 +279,10 @@ impl Model.model_call_no_stream(params: dict) -> dict {
     } except Exception as e {
         self._raise_mapped_provider_error(e);
     }
-    return response;
+    return response_dict(response);
 }
 
-impl Model.model_call_with_stream(params: dict) {
+impl Model.model_call_with_stream(params: dict) -> Iterable[object] {
     params["stream_options"] = (params.get("stream_options") or {})
         | {"include_usage": True};
     try {
@@ -312,7 +317,7 @@ impl Model.model_call_with_stream(params: dict) {
 
 impl Model.model_call_http(
     url: str, token: str, payload: dict, ca_bundle: (str | bool | None)
-) -> object {
+) -> dict {
     import httpx;
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"};
     client = httpx.Client(verify=ca_bundle or True, timeout=60.0);
@@ -323,6 +328,7 @@ impl Model.model_call_http(
 }
 
 impl Model.model_call_no_stream_async(params: dict) -> dict {
+    response: object;
     try {
         if self.http_client {
             response = await self.model_call_http_async(
@@ -350,10 +356,11 @@ impl Model.model_call_no_stream_async(params: dict) -> dict {
     } except Exception as e {
         self._raise_mapped_provider_error(e);
     }
-    return response;
+    return response_dict(response);
 }
 
-impl Model.model_call_with_stream_async(params: dict) {
+impl Model.model_call_with_stream_async(params: dict) -> AsyncIterator[object] {
+    response: object;
     params["stream_options"] = (params.get("stream_options") or {})
         | {"include_usage": True};
     try {
@@ -388,12 +395,18 @@ impl Model.model_call_with_stream_async(params: dict) {
     } except Exception as e {
         self._raise_mapped_provider_error(e);
     }
+    import from collections.abc { AsyncIterator as AsyncStreamIterator }
+    if not isinstance(response, AsyncStreamIterator) {
+        raise TypeError(
+            'The model transport returned a non-streaming response for a streaming request'
+        );
+    }
     return response;
 }
 
 impl Model.model_call_http_async(
     url: str, token: str, payload: dict, ca_bundle: (str | bool | None)
-) -> object {
+) -> dict {
     import httpx;
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"};
     client = httpx.AsyncClient(verify=ca_bundle or True, timeout=60.0);

@@ -691,6 +691,11 @@ impl TypeEvaluator.get_type_of_class(node_: Archetype) -> ClassType {
         flags=TypeFlags.Instantiable,
     );
 
+    if any(
+        isinstance(base, UnknownType) and not base.is_diagnosed for base in base_classes
+    ) {
+        cls_type.shared._provisional = True;
+    }
     compute_mro_linearization(cls_type);
 
     if is_typeddict {
@@ -811,6 +816,15 @@ impl TypeEvaluator._extern_scalar_type(type_expr: Expr | None) -> TypeBase {
         }
         if JAC_TYPE_REGISTRY.is_numeric(name) {
             return AnyType(is_foreign=True, foreign_scalar=name);
+        }
+    }
+    if type_expr is not None {
+        declared = self.get_type_of_expression(type_expr);
+        if isinstance(declared, ClassType) and not declared.is_builtin() {
+            scope = declared.shared.symbol_table;
+            if isinstance(scope, Archetype) {
+                return self._convert_to_instance(declared);
+            }
         }
     }
     return AnyType(is_foreign=True);

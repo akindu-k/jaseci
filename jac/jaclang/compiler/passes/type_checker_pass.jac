@@ -21,6 +21,7 @@ import from jaclang.compiler.frontend.unitree {
     FString,
     FuncCall,
     FuncSignature,
+    GenCompr,
     HasVar,
     ImplDef,
     Import,
@@ -150,8 +151,7 @@ walker TypeCheckPass(UniPass) {
 
     def postinit -> None;
 
-    static has PROVIDES: tuple = ('TypeOf', ),
-        HOST_PASS: bool = True;
+    static has HOST_PASS: bool = True;
 
     def transform(ir_in: Module) -> Module;
     def before_pass -> None;
@@ -175,6 +175,7 @@ walker TypeCheckPass(UniPass) {
     can exit_compare_expr with CompareExpr exit;
     def _diag_erased_membership(nd: CompareExpr, hay: Expr, op_text: str) -> None;
     can exit_func_call with FuncCall exit;
+    can exit_gen_compr with GenCompr exit;
     def _check_intrinsic_call(nd: FuncCall) -> None;
     def _check_intrinsic_collision(nd: Ability) -> None;
     can exit_jsx_element with JsxElement exit;

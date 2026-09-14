@@ -1,6 +1,7 @@
 import from jaclang.compiler.tools.unparse_pass { unparse_node }
 
 impl JacAutoLintPass.postinit -> None {
+    import from jaclang.compiler.driver.compilation_context { context_app }
     import from jaclang.compiler.driver.pass_driver { diagnostic_policy_for }
     import from jaclang.project.config {
         JacConfig,
@@ -15,7 +16,7 @@ impl JacAutoLintPass.postinit -> None {
     )
         or JacConfig();
     if mod_path {
-        _app = config.app_for_path(str(Path(mod_path).resolve()));
+        _app = context_app(str(Path(mod_path).resolve()));
         if _app is not None and not _app.implicit and _app.name in config.apps {
             config = config.effective_for_app(_app.name);
         }
@@ -35,7 +36,7 @@ impl JacAutoLintPass.postinit -> None {
 }
 
 impl JacAutoLintPass._is_file_excluded(file_path: str) -> bool {
-    import from jaclang.compiler.frontend.helpers { path_matches_exclude }
+    import from jaclang.project.source { path_matches_exclude }
     return path_matches_exclude(file_path, self._exclude_patterns, self._project_root);
 }
 
@@ -1357,7 +1358,7 @@ impl JacAutoLintPass._base_decl_archetypes(annex_path: str) -> list[uni.Archetyp
     self._base_decls_loaded = True;
     import from jaclang.compiler.driver.bccache { discover_base_file }
     import from jaclang.compiler.frontend.parser { parse as rd_parse }
-    import from jaclang.compiler.frontend.helpers { read_file_with_encoding }
+    import from jaclang.project.source { read_file_with_encoding }
     import from jaclang.compiler.driver.program { JacProgram }
     base_path = discover_base_file(annex_path);
     if base_path is None {

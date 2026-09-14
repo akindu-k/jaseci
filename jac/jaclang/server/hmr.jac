@@ -1,19 +1,14 @@
 import threading;
-import from enum { StrEnum }
 import from pathlib { Path }
 import type from jaclang.server.watcher { JacFileWatcher, FileChangeEvent, ChangeType }
 
-enum BuildStatus(StrEnum) {
-    OK = "ok",
-    COMPILING = "compiling",
-    ERROR = "error",
-    UNAVAILABLE = "unavailable"
-}
+import from jaclang.server.build_status { BuildStatus, BuildMonitor }
 
 obj HotReloader {
     has base_path: str,
         module_name: str,
         watcher: any,
+        entry_path: str = "",
         client_compiler: any = None,
         _client_output_dir: str = ".jac/client/compiled",
         _running: bool = False,
@@ -24,8 +19,7 @@ obj HotReloader {
         _runtime_diagnostics: list = [],
         _reload_nonce: int = 0;
 
-    static has _active: (HotReloader | None) = None,
-        _build_lock: threading.Lock = threading.Lock();
+    static has _build_lock: threading.Lock = threading.Lock();
 
     def start -> None;
     def stop -> None;
@@ -67,5 +61,3 @@ obj HotReloader {
     def _get_js_filename(file_path: str) -> str;
     def _copy_frontend_files(file_path: str) -> None;
 }
-
-def get_build_status -> dict;

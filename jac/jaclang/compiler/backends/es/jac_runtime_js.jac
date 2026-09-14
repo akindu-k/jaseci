@@ -1198,6 +1198,24 @@ glob JAC_RUNTIME_JS_OBJECT: str = r"""{
       const f = Math.pow(10, ndigits);
       return Math.round(n * f) / f;
     },
+    min(iterable, key) {
+      let found = false, best, bestKey;
+      for (const v of _jac.builtin.iter(iterable)) {
+        const k = key ? key(v) : v;
+        if (!found || k < bestKey) { best = v; bestKey = k; found = true; }
+      }
+      if (!found) throw new _jac.exc.ValueError("min() arg is an empty sequence");
+      return best;
+    },
+    max(iterable, key) {
+      let found = false, best, bestKey;
+      for (const v of _jac.builtin.iter(iterable)) {
+        const k = key ? key(v) : v;
+        if (!found || k > bestKey) { best = v; bestKey = k; found = true; }
+      }
+      if (!found) throw new _jac.exc.ValueError("max() arg is an empty sequence");
+      return best;
+    },
     sum(iterable, start) {
       let total = start || 0;
       for (const v of iterable) total += v;
@@ -1898,8 +1916,11 @@ def build_osp_core_js -> str {
         file_path=cl_copy,
         options=CompileOptions(force_codespace='client', no_cgen=True)
     );
-    import from jaclang.compiler.driver.pass_driver { run_pass }
-    program = run_pass(EsastGenPass, ir, prog).ir_out.gen.es_ast;
+    import from jaclang.compiler.driver.pipeline { require_product, CompilationProduct }
+    if not require_product(prog, ir, CompilationProduct.CLIENT) {
+        raise RuntimeError("Could not compile OSP client runtime");
+    }
+    program = ir.gen.es_ast;
     kept: list = [];
     if isinstance(program, es.Program) {
         for stmt in program.body {

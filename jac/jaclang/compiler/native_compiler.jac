@@ -31,17 +31,23 @@ glob CLASS_MODULES: tuple = (
      );
 
 
-def _enum_class(name: str) -> any {
-    import importlib;
-    for modname in (
-        "jaclang.compiler.frontend.constant",
-        "jaclang.compiler.frontend.parser.tokens",
-        "jaclang.compiler.frontend.diagnostics"
-    ) {
-        mod = importlib.import_module(modname);
-        cls = getattr(mod, name, None);
-        if isinstance(cls, `type) {
-            return cls;
+def _enum_class(name: str, owner: type) -> type | None {
+    import from enum { Enum }
+    for base in owner.__mro__ {
+        module = sys.modules.get(base.__module__);
+        if module is None {
+            continue;
+        }
+        candidate = getattr(module, name, None);
+        if isinstance(candidate, `type) and issubclass(candidate, Enum) {
+            return candidate;
+        }
+        for candidate in vars(module).values() {
+            if isinstance(candidate, `type)
+                and issubclass(candidate, Enum)
+                and candidate.__name__ == name {
+                return candidate;
+            }
         }
     }
     return None;
@@ -81,6 +87,8 @@ class NativeCompiler {
         L = self.lib;
         L.jac_str_new.argtypes = [c_char_p, c_int64];
         L.jac_str_new.restype = c_void_p;
+        L.jac_release.argtypes = [c_void_p];
+        L.jac_release.restype = None;
         for name in ("jc_run", "jc_annex") {
             fn = getattr(L, name);
             fn.argtypes = [c_void_p, c_void_p, c_int64, c_void_p, c_void_p, c_int64];
@@ -198,10 +206,12 @@ class NativeCompiler {
             } elif code == "str" {
                 nat_code = CODE_STR;
             } elif code == "enum" {
-                ecls = _enum_class(aux);
+                ecls = _enum_class(aux, cls);
                 table = _enum_table(ecls) if ecls else None;
                 if table is None {
-                    continue;
+                    raise ValueError(
+                        f'Native field {cls.__module__}.{name}.{fname} has unresolved enum {aux}'
+                    );
                 }
                 nat_code = CODE_ENUM;
                 enum_h = self._hold(table);
@@ -231,7 +241,7 @@ class NativeCompiler {
                 if not m {
                     continue;
                 }
-                ecls = _enum_class(m.group(1));
+                ecls = _enum_class(m.group(1), cls);
                 table = _enum_table(ecls) if ecls else None;
                 if table is None {
                     continue;
@@ -395,15 +405,21 @@ class NativeCompiler {
         ab = a.encode();
         bb = b.encode();
         pa = self.lib.jac_str_new(ab, len(ab));
-        pb = self.lib.jac_str_new(bb, len(bb));
-        return fn(
-            c_void_p(pa),
-            c_void_p(pa),
-            c_int64(len(ab)),
-            c_void_p(pb),
-            c_void_p(pb),
-            c_int64(len(bb))
-        );
+        pb = None;
+        try {
+            pb = self.lib.jac_str_new(bb, len(bb));
+            return fn(
+                c_void_p(pa),
+                c_void_p(pa),
+                c_int64(len(ab)),
+                c_void_p(pb),
+                c_void_p(pb),
+                c_int64(len(bb))
+            );
+        } finally {
+            self.lib.jac_release(pb);
+            self.lib.jac_release(pa);
+        }
     }
 
     def annex(self: NativeCompiler, annex_src: str, annex_path: str) -> int {

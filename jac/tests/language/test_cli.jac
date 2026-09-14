@@ -11,7 +11,7 @@ import sys;
 import tempfile;
 import traceback;
 import from pathlib { Path }
-import from tests.support { JAC_ROOT }
+import from tests.support { jac_command, compiler_python_command, JAC_ROOT }
 import jaclang;
 import from jaclang.cli.commands {
     analysis,
@@ -240,7 +240,7 @@ test "jac run with no filename and no resolvable entry errors cleanly" {
     env = dict(os.environ);
     env["PYTHONPATH"] = JAC_ROOT;
     result = subprocess.run(
-        [sys.executable, "-m", "jaclang", "run"],
+        jac_command("run"),
         cwd=JAC_ROOT,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -1334,7 +1334,7 @@ test "install editable outside any project errors" {
         pkg_dir = (Path(_tmpdir) / "my-lib").resolve();
         pkg_dir.mkdir();
         (pkg_dir / "jac.toml").write_text(
-            '[project]\nname = "my-lib"\nversion = "0.1.0"\ndescription = "Test lib"\nentry-point = "main.jac"\n'
+            '[project]\nname = "my-lib"\nversion = "0.1.0"\ndescription = "Test lib"\nentry-point = "main"\n'
         );
         # cwd (_tmpdir) has no jac.toml of its own; clear any cached config from a
         # prior test so discovery actually runs against this project-less cwd.
@@ -1357,7 +1357,7 @@ test "install editable resolves config from cwd when given dot path" {
     try {
         resolved_tmpdir = Path(_tmpdir).resolve();
         (resolved_tmpdir / "jac.toml").write_text(
-            '[project]\nname = "dot-lib"\nversion = "0.1.0"\ndescription = "Test lib"\nentry-point = "main.jac"\n'
+            '[project]\nname = "dot-lib"\nversion = "0.1.0"\ndescription = "Test lib"\nentry-point = "main"\n'
         );
         os.chdir(_tmpdir);
 
@@ -1395,17 +1395,17 @@ test "jac install -e accepts space-separated and repeated flag forms" {
         pkg_b.mkdir();
         pkg_c.mkdir();
         (pkg_a / "jac.toml").write_text(
-            '[project]\nname = "pkg-a"\nversion = "0.1.0"\ndescription = ""\nentry-point = "main.jac"\n'
+            '[project]\nname = "pkg-a"\nversion = "0.1.0"\ndescription = ""\nentry-point = "main"\n'
         );
         (pkg_b / "jac.toml").write_text(
-            '[project]\nname = "pkg-b"\nversion = "0.1.0"\ndescription = ""\nentry-point = "main.jac"\n'
+            '[project]\nname = "pkg-b"\nversion = "0.1.0"\ndescription = ""\nentry-point = "main"\n'
         );
         (pkg_c / "jac.toml").write_text(
-            '[project]\nname = "pkg-c"\nversion = "0.1.0"\ndescription = ""\nentry-point = "main.jac"\n'
+            '[project]\nname = "pkg-c"\nversion = "0.1.0"\ndescription = ""\nentry-point = "main"\n'
         );
         # The host project (cwd) receives the editable links in its .jac/venv.
         (Path(_tmpdir) / "jac.toml").write_text(
-            '[project]\nname = "host"\nversion = "0.1.0"\ndescription = ""\nentry-point = "main.jac"\n'
+            '[project]\nname = "host"\nversion = "0.1.0"\ndescription = ""\nentry-point = "main"\n'
         );
 
         # -e pkg_a pkg_b exercises space-separated; -e pkg_c exercises repeated flag
@@ -1452,17 +1452,17 @@ test "jac install -e links all packages for space-separated and repeated flag fo
         pkg_b.mkdir();
         pkg_c.mkdir();
         (pkg_a / "jac.toml").write_text(
-            '[project]\nname = "pkg-a"\nversion = "0.1.0"\ndescription = ""\nentry-point = "main.jac"\n'
+            '[project]\nname = "pkg-a"\nversion = "0.1.0"\ndescription = ""\nentry-point = "main"\n'
         );
         (pkg_b / "jac.toml").write_text(
-            '[project]\nname = "pkg-b"\nversion = "0.1.0"\ndescription = ""\nentry-point = "main.jac"\n'
+            '[project]\nname = "pkg-b"\nversion = "0.1.0"\ndescription = ""\nentry-point = "main"\n'
         );
         (pkg_c / "jac.toml").write_text(
-            '[project]\nname = "pkg-c"\nversion = "0.1.0"\ndescription = ""\nentry-point = "main.jac"\n'
+            '[project]\nname = "pkg-c"\nversion = "0.1.0"\ndescription = ""\nentry-point = "main"\n'
         );
         # The host project (cwd) receives the editable links in its .jac/venv.
         (Path(_tmpdir) / "jac.toml").write_text(
-            '[project]\nname = "host"\nversion = "0.1.0"\ndescription = ""\nentry-point = "main.jac"\n'
+            '[project]\nname = "host"\nversion = "0.1.0"\ndescription = ""\nentry-point = "main"\n'
         );
         os.chdir(_tmpdir);
 
@@ -1503,7 +1503,7 @@ test "jac install <pkg> routes package names to the project venv installer" {
     original_cwd = os.getcwd();
     try {
         (Path(_tmpdir) / "jac.toml").write_text(
-            '[project]\nname = "host"\nversion = "0.1.0"\ndescription = ""\nentry-point = "main.jac"\n'
+            '[project]\nname = "host"\nversion = "0.1.0"\ndescription = ""\nentry-point = "main"\n'
         );
         os.chdir(_tmpdir);
         # `install` now records to jac.toml, so discovery must resolve to this
@@ -2771,5 +2771,39 @@ test "jac install --extras all expands groups in output" {
         assert "Extras: all" in combined , (
             f"Expected 'Extras: all' in output; got:\n{combined}"
         );
+    }
+}
+
+test "CLI subprocess keeps the selected compiler when cwd contains another jaclang" {
+    with tempfile.TemporaryDirectory() as tmp {
+        shadow = Path(tmp) / "jaclang";
+        shadow.mkdir();
+        (shadow / "__init__.py").write_text(
+            "raise RuntimeError('selected the cwd compiler')\n"
+        );
+        result = subprocess.run(
+            jac_command("--version"),
+            cwd=tmp,
+            capture_output=True,
+            text=True,
+            timeout=30
+        );
+        assert result.returncode == 0 , result.stderr;
+        assert "jac " in result.stdout , result.stdout;
+    }
+}
+
+test "compiler subprocess preserves imports from its working directory" {
+    with tempfile.TemporaryDirectory() as tmp {
+        (Path(tmp) / "cwd_probe.py").write_text("value = 42\n");
+        result = subprocess.run(
+            compiler_python_command("import cwd_probe; print(cwd_probe.value)"),
+            cwd=tmp,
+            capture_output=True,
+            text=True,
+            timeout=30
+        );
+        assert result.returncode == 0 , result.stderr;
+        assert result.stdout.strip() == "42" , result.stdout;
     }
 }
