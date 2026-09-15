@@ -8,7 +8,7 @@ import from jaclang.scale.config.config_loader {
     normalize_gateway_config
 }
 import from jaclang.scale.runtime.fleet { FleetSpec, fleet_from_config, solo_fleet }
-import from jaclang.scale.models.deploy_context { DeployContext }
+import from jaclang.scale.models.deploy_context { DATABASE_URL_ENV, DeployContext }
 import from jaclang.scale.deploy.target.kubernetes.kubernetes_config {
     KubernetesConfig
 }
@@ -689,7 +689,101 @@ obj ManifestBuilder {
                 );
             }
         }
+        self._check_pod_config_resolves(deployments, user_secret);
         return bundle;
+    }
+
+    def _check_pod_config_resolves(
+        deployments: dict[str, dict[str, any]], user_secret: dict[str, any] | None
+    ) {
+        import from pathlib { Path }
+        import from jaclang.scale.injector.bundle {
+            nested_sanitized_tomls,
+            sanitized_jac_toml,
+            unresolved_toml_references
+        }
+        base = Path(self.project_dir);
+        base_toml = sanitized_jac_toml(base);
+        if base_toml is None {
+            return;
+        }
+        nested = nested_sanitized_tomls(base);
+        secret_keys = set(dict(dict(user_secret or {}).get("stringData", {})).keys());
+        affected: dict[str, list[str]] = {};
+        for (svc_name, deployment) in deployments.items() {
+            container = deployment["spec"]["template"]["spec"]["containers"][0];
+            environ = self._pod_environ(container, secret_keys);
+            if environ is None {
+                continue;
+            }
+            tomls = {"jac.toml": base_toml};
+            nearest = self._nearest_nested_toml(nested, environ.get("JAC_SV_FILE", ""));
+            if nearest {
+                tomls[nearest] = nested[nearest];
+            }
+            for (rel, text) in tomls.items() {
+                for problem in unresolved_toml_references(text, environ) {
+                    affected.setdefault(f"{rel}: {problem}", []).append(svc_name);
+                }
+            }
+        }
+        if not affected {
+            return;
+        }
+        lines: list[str] = [];
+        for (problem, pods) in affected.items() {
+            scope = "every pod" if len(pods) == len(deployments) else ", ".join(pods);
+            lines.append(f"  {problem} ({scope})");
+        }
+        raise ValueError(
+            "jac.toml reads environment variables the deployed pods will not have, "
+            "so these settings cannot resolve at boot:\n"
+                + "\n".join(lines)
+                + "\nSupply each one through [scale.secrets] or the app's env, or give "
+                "it a ${VAR:-default}."
+        );
+    }
+
+    def _pod_environ(
+        container: dict[str, any], secret_keys: set[str]
+    ) -> dict[str, str] | None {
+        environ: dict[str, str] = {
+            name: ""
+            for name in (
+                "HOSTNAME",
+                "KUBERNETES_SERVICE_HOST",
+                "KUBERNETES_SERVICE_PORT"
+            )
+        };
+        for `entry in container.get("env", []) or [] {
+            environ[str(`entry.get("name"))] = str(`entry.get("value", ""));
+        }
+        for source in container.get("envFrom", []) or [] {
+            if dict(source.get("secretRef") or {}).get("name")
+                != self._user_secret_name() {
+                return None;
+            }
+            for key in secret_keys {
+                environ.setdefault(key, "");
+            }
+        }
+        if self.dry_run and self.k8s_config.database_enabled() {
+            environ.setdefault(DATABASE_URL_ENV, "");
+        }
+        return environ;
+    }
+
+    def _nearest_nested_toml(nested: dict[str, str], sv_file: str) -> str {
+        import from pathlib { PurePosixPath }
+        nearest = "";
+        for rel in nested {
+            if sv_file
+                and PurePosixPath(sv_file).is_relative_to(PurePosixPath(rel).parent)
+                and len(rel) > len(nearest) {
+                nearest = rel;
+            }
+        }
+        return nearest;
     }
 
     def generate_service_pod_specs(

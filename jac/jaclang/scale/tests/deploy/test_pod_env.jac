@@ -543,6 +543,87 @@ test "a routed service with no module fails manifest generation, dry run include
 }
 
 
+test "a shipped jac.toml value the pods cannot resolve fails manifest generation, dry run included" {
+    import tempfile;
+    host_only = (
+        "[scale.kubernetes]\n"
+        "image_registry = \"${ECR_REGISTRY}\"\n"
+        "service_account_name = \"${K8S_SERVICE_ACCOUNT_NAME}\"\n"
+        "[scale.sso.github]\npublic_link = \"${GITHUB_PUBLIC_LINK}\"\n"
+        "[[scale.gateway.shared_volumes]]\nname = \"${SHARED_DATA_PVC}\"\n"
+    );
+    pod_supplied = (
+        "[plugins.demo]\napp = \"${K8S_APP_NAME}\"\nkey = \"${DEMO_API_KEY}\"\n"
+        "region = \"${DEMO_REGION:-us-east-1}\"\nscript = \"sh -c 'echo ${1}'\"\n"
+        "database = \"${JAC_DB_URL}\"\n"
+    );
+    cases = [
+        (
+            "host-only values",
+            {"jac.toml": host_only},
+            [
+                "jac.toml: scale.kubernetes.image_registry: Environment variable ECR_REGISTRY is not set (every pod)",
+                "jac.toml: scale.kubernetes.service_account_name: Environment variable K8S_SERVICE_ACCOUNT_NAME is not set (every pod)",
+                "jac.toml: scale.sso.github.public_link: Environment variable GITHUB_PUBLIC_LINK is not set (every pod)",
+                "jac.toml: scale.gateway.shared_volumes[0].name: Environment variable SHARED_DATA_PVC is not set (every pod)"
+            ]
+        ),
+        ("values the pod env supplies", {"jac.toml": pod_supplied}, []),
+        (
+            "a nested app project",
+            {"lib/jac.toml": "[plugins.demo]\nroot = \"${LIB_ONLY}\"\n"},
+            [
+                "lib/jac.toml: plugins.demo.root: Environment variable LIB_ONLY is not set (svc)"
+            ]
+        )
+    ];
+    host_env = {
+        "ECR_REGISTRY": "123.dkr.ecr.example.com",
+        "K8S_SERVICE_ACCOUNT_NAME": "deployer",
+        "GITHUB_PUBLIC_LINK": "https://example.com",
+        "SHARED_DATA_PVC": "shared-data",
+        "LIB_ONLY": "host-value"
+    };
+    for (label, tomls, expected) in cases {
+        with tempfile.TemporaryDirectory() as tmp {
+            project = _routed_project(tmp, ["lib/svc.jac", "main.jac"]);
+            for (rel, extra) in tomls.items() {
+                path = Path(project) / rel;
+                header = path.read_text()
+                    if path.exists()
+                    else "[project]\nname = \"lib\"\n";
+                path.write_text(header + extra);
+            }
+            builder = ManifestBuilder(
+                k8s_config=KubernetesConfig(
+                    app_name="jac-shop", namespace="ns", bundle_storage_class="efs-sc"
+                ),
+                project_dir=project,
+                secrets={"DEMO_API_KEY": "sk-test"},
+                fleet=fleet_of(
+                    {"svc": "/svc"}, root_app="main", files={"svc": "./lib/svc.jac"}
+                ),
+                dry_run=True
+            );
+            caught = "";
+            with mock.patch.dict(os.environ, host_env) {
+                try {
+                    builder.generate_manifests(
+                        AppConfig(code_folder=project, app_name="jac-shop"), "img"
+                    );
+                } except ValueError as e {
+                    caught = str(e);
+                }
+            }
+            assert bool(caught) == bool(expected) , f"{label}: {caught!r}";
+            for fragment in expected {
+                assert fragment in caught , f"{label}: {caught}";
+            }
+        }
+    }
+}
+
+
 test "user env cannot point a pod at an arbitrary service file" {
     cfg = KubernetesConfig(app_name="jac-shop", namespace="ns");
     builder = ManifestBuilder(k8s_config=cfg);
