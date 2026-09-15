@@ -693,6 +693,18 @@ obj ManifestBuilder {
         return bundle;
     }
 
+    def check_pod_config(app_config: AppConfig, image: str) {
+        self.project_dir = self.project_dir or app_config.code_folder;
+        pod_specs = self.generate_service_pod_specs(app_config, image);
+        deployments = {
+            svc_name: self._build_deployment_manifest(svc_name, pod_spec)
+            for (svc_name, pod_spec) in pod_specs.items()
+        };
+        self._check_pod_config_resolves(
+            deployments, self._build_user_secret_manifest()
+        );
+    }
+
     def _check_pod_config_resolves(
         deployments: dict[str, dict[str, any]], user_secret: dict[str, any] | None
     ) {
@@ -771,7 +783,7 @@ obj ManifestBuilder {
                 environ.setdefault(key, "");
             }
         }
-        if self.dry_run and self.k8s_config.database_enabled() {
+        if self.k8s_config.database_enabled() {
             environ.setdefault(DATABASE_URL_ENV, "");
         }
         return environ;

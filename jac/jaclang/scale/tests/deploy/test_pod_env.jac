@@ -27,6 +27,11 @@ import from jaclang.scale.runtime.gateway.service_registry {
 }
 import from jaclang.server.sv_client { peer_url_env_key }
 import from jaclang.scale.runtime.fleet { FLEET_ENV, fleet_of }
+import from jaclang.scale.deploy.target.kubernetes.target { KubernetesTarget }
+import from jaclang.scale.deploy.target.kubernetes.database_provisioner {
+    DatabaseProvisioner
+}
+import jaclang.scale.injector.binary as binary_mod;
 
 
 glob _K8S_E2E_FIXTURE: Path = Path(__file__).parents[1] / "fixtures" / "k8s_e2e",
@@ -543,7 +548,7 @@ test "a routed service with no module fails manifest generation, dry run include
 }
 
 
-test "a shipped jac.toml value the pods cannot resolve fails manifest generation, dry run included" {
+test "a shipped jac.toml value the pods cannot resolve stops the deploy before provisioning, dry run included" {
     import tempfile;
     host_only = (
         "[scale.kubernetes]\n"
@@ -617,30 +622,49 @@ test "a shipped jac.toml value the pods cannot resolve fails manifest generation
                 }
                 path.write_text(header + extra);
             }
+            k8s_config = KubernetesConfig(
+                app_name="jac-shop", namespace="ns", bundle_storage_class="efs-sc"
+            );
+            fleet = fleet_of(
+                {"svc": "/svc"}, root_app="main", files={"svc": "./lib/svc.jac"}
+            );
+            app_config = AppConfig(code_folder=project, app_name="jac-shop");
             builder = ManifestBuilder(
-                k8s_config=KubernetesConfig(
-                    app_name="jac-shop", namespace="ns", bundle_storage_class="efs-sc"
-                ),
+                k8s_config=k8s_config,
                 project_dir=project,
                 secrets={"DEMO_API_KEY": "sk-test"},
-                fleet=fleet_of(
-                    {"svc": "/svc"}, root_app="main", files={"svc": "./lib/svc.jac"}
-                ),
+                fleet=fleet,
                 dry_run=True
+            );
+            target = KubernetesTarget(
+                config=k8s_config, secrets={"DEMO_API_KEY": "sk-test"}, fleet=fleet
             );
             caught = "";
             with mock.patch.dict(os.environ, host_env) {
                 try {
-                    builder.generate_manifests(
-                        AppConfig(code_folder=project, app_name="jac-shop"), "img"
-                    );
+                    builder.generate_manifests(app_config, "img");
                 } except ValueError as e {
                     caught = str(e);
                 }
             }
+            with mock.patch.dict(os.environ, host_env), mock.patch.object(
+                target, "_load_cluster_config"
+            ), mock.patch.object(
+                binary_mod, "deploy_generation_refusal", return_value=""
+            ), mock.patch.object(
+                binary_mod, "preflight_pod_runtime", return_value="0.0.0"
+            ), mock.patch.object(binary_mod, "node_arch", return_value="x86_64"), mock.patch.object(
+                DatabaseProvisioner,
+                "provision",
+                side_effect=RuntimeError("provisioned")
+            ) {
+                deployed = target.deploy(app_config).message;
+            }
             assert bool(caught) == bool(expected) , f"{label}: {caught!r}";
+            assert ("provisioned" in deployed) != bool(expected) , f"{label}: {deployed}";
             for fragment in expected {
                 assert fragment in caught , f"{label}: {caught}";
+                assert fragment in deployed , f"{label}: {deployed}";
             }
         }
     }
