@@ -575,6 +575,23 @@ test "a shipped jac.toml value the pods cannot resolve fails manifest generation
             [
                 "lib/jac.toml: plugins.demo.root: Environment variable LIB_ONLY is not set (svc)"
             ]
+        ),
+        (
+            "the active profile overlay and jac.local.toml",
+            {
+                "jac.toml": "[environment]\ndefault_profile = \"prod\"\n",
+                "jac.prod.toml": "[plugins.demo]\nprod = \"${PROD_ONLY}\"\n",
+                "jac.local.toml": "[plugins.demo]\nlocal = \"${LOCAL_ONLY}\"\n"
+            },
+            [
+                "jac.prod.toml: plugins.demo.prod: Environment variable PROD_ONLY is not set (every pod)",
+                "jac.local.toml: plugins.demo.local: Environment variable LOCAL_ONLY is not set (every pod)"
+            ]
+        ),
+        (
+            "an inactive profile overlay",
+            {"jac.staging.toml": "[plugins.demo]\nstaging = \"${STAGING_ONLY}\"\n"},
+            []
         )
     ];
     host_env = {
@@ -582,16 +599,22 @@ test "a shipped jac.toml value the pods cannot resolve fails manifest generation
         "K8S_SERVICE_ACCOUNT_NAME": "deployer",
         "GITHUB_PUBLIC_LINK": "https://example.com",
         "SHARED_DATA_PVC": "shared-data",
-        "LIB_ONLY": "host-value"
+        "LIB_ONLY": "host-value",
+        "PROD_ONLY": "host-value",
+        "LOCAL_ONLY": "host-value",
+        "STAGING_ONLY": "host-value"
     };
     for (label, tomls, expected) in cases {
         with tempfile.TemporaryDirectory() as tmp {
             project = _routed_project(tmp, ["lib/svc.jac", "main.jac"]);
             for (rel, extra) in tomls.items() {
                 path = Path(project) / rel;
-                header = path.read_text()
-                    if path.exists()
-                    else "[project]\nname = \"lib\"\n";
+                header = "";
+                if path.exists() {
+                    header = path.read_text();
+                } elif path.name == "jac.toml" {
+                    header = "[project]\nname = \"lib\"\n";
+                }
                 path.write_text(header + extra);
             }
             builder = ManifestBuilder(

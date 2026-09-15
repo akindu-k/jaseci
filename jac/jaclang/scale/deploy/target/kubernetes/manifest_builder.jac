@@ -700,6 +700,7 @@ obj ManifestBuilder {
         import from jaclang.scale.injector.bundle {
             nested_sanitized_tomls,
             sanitized_jac_toml,
+            source_filter_for,
             unresolved_toml_references
         }
         base = Path(self.project_dir);
@@ -708,6 +709,7 @@ obj ManifestBuilder {
             return;
         }
         nested = nested_sanitized_tomls(base);
+        excluded = source_filter_for(base);
         secret_keys = set(dict(dict(user_secret or {}).get("stringData", {})).keys());
         affected: dict[str, list[str]] = {};
         for (svc_name, deployment) in deployments.items() {
@@ -716,10 +718,12 @@ obj ManifestBuilder {
             if environ is None {
                 continue;
             }
-            tomls = {"jac.toml": base_toml};
+            tomls = self._pod_tomls(base, excluded, "jac.toml", base_toml, environ);
             nearest = self._nearest_nested_toml(nested, environ.get("JAC_SV_FILE", ""));
             if nearest {
-                tomls[nearest] = nested[nearest];
+                tomls.update(
+                    self._pod_tomls(base, excluded, nearest, nested[nearest], environ)
+                );
             }
             for (rel, text) in tomls.items() {
                 for problem in unresolved_toml_references(text, environ) {
@@ -771,6 +775,28 @@ obj ManifestBuilder {
             environ.setdefault(DATABASE_URL_ENV, "");
         }
         return environ;
+    }
+
+    def _pod_tomls(
+        base: any, excluded: any, toml_rel: str, toml_text: str, environ: dict[str, str]
+    ) -> dict[str, str] {
+        import tomllib;
+        import from pathlib { Path, PurePosixPath }
+        environment = dict(tomllib.loads(toml_text).get("environment", {}) or {});
+        profile = environ.get("JAC_PROFILE", "").strip()
+            or str(environment.get("default_profile", "") or "").strip();
+        names = [f"jac.{profile}.toml"] if profile else [];
+        names.append("jac.local.toml");
+        folder = PurePosixPath(toml_rel).parent;
+        tomls = {toml_rel: toml_text};
+        for name in names {
+            rel = (folder / name).as_posix();
+            path = Path(base) / rel;
+            if path.is_file() and not excluded.excludes(Path(rel)) {
+                tomls[rel] = path.read_text(encoding="utf-8");
+            }
+        }
+        return tomls;
     }
 
     def _nearest_nested_toml(nested: dict[str, str], sv_file: str) -> str {
