@@ -933,7 +933,7 @@ base_url = "${BASE_URL:?Base URL is required}"      # Required with error
 
 Interpolation happens when the config loads, so every command that reads `jac.toml` needs the variable set, not just the command that consumes the value. Use `${VAR:-default}` for values that only some commands need, such as deploy-time settings you do not want to export before running `jac check`. Errors name the setting that needs the variable, for example `scale.kubernetes.namespace: Environment variable K8S_NAMESPACE is not set`.
 
-This applies to inline `[profiles.<name>]` sections too: they live in `jac.toml`, so their variables are resolved on every command even when that profile is never activated. A separate `jac.<profile>.toml` file is only read when the profile is active, so it is the better home for variables that only one profile needs.
+This applies to inline `[environments.<name>]` sections too: they live in `jac.toml`, so their variables are resolved on every command even when that profile is never activated. A separate `jac.<profile>.toml` file is only read when the profile is active, so it is the better home for variables that only one profile needs.
 
 Only a `${...}` holding a variable name is resolved. Other shell expansions are left exactly as written, so a `[scripts]` command keeps its positionals and a value such as `${#ARR[@]}` reaches the shell intact:
 
