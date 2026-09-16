@@ -261,57 +261,102 @@ test "staging a project cleans up after itself" {
 }
 
 
-test "a real pod binary seals and serves an entry named app" {
+test "a real pod binary seals the app each pod serves and boots it from the seal" {
     # The checkout's own binary stands in for the downloaded pod binary; the
     # mechanism (stage -> precompile_bytecode.jac --seal -> pack _precompiled/**)
     # is identical for release binaries.
     jac_bin = require_pod_binary();
     import json;
-    base = Path(_mini_app());
-    (base / "jac.toml").write_text(
-        '[project]\nname="mini"\nkind="service"\nentry-point="app"\n'
-    );
-    (base / "app.jac").write_text(
-        'import from svc { ping }\n'
-            + 'walker:pub echo { can run with Root entry { report "hello"; } }\n'
-    );
-    raw = pack_jab(str(base), jac_bin.read_bytes());
-    names = _names(raw);
-    assert "svc.jac" in names;
-    assert ".jac/serve_manifest.json" in names;
-    with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as archive {
-        serving = archive.extractfile(".jac/serve_manifest.json");
-        assert serving is not None;
-        assert json.loads(serving.read())["func_access"]["ping"] is False;
-        manifest = archive.extractfile("_precompiled/MANIFEST.json");
-        assert manifest is not None;
-        assert ".jac/serve_manifest.json" in json.loads(manifest.read())["payloads"];
-    }
-    # The sealed manifest sits at the tar root, which is what makes this a .jab.
-    assert "_precompiled/MANIFEST.json" in names;
-    pre = [
-        n
-        for n in names
-        if n.startswith("_precompiled/")
+    import from jaclang.project.config { get_config_for_path }
+    import from jaclang.scale.runtime.fleet { fleet_from_config }
+    cases = [
+        (
+            "an entry named app",
+            '[project]\nname="mini"\nkind="service"\nentry-point="app"\n',
+            {
+                "app.jac": 'import from svc { ping }\n'
+                    + 'walker:pub echo { can run with Root entry { report "hello"; } }\n'
+            },
+            "",
+            "app.jac",
+            "ping",
+            "/walker/echo"
+        ),
+        (
+            "a web-app that is not the default app",
+            '[project]\nname="mini"\ndefault-app="svc"\n'
+                + '[apps.web]\nkind="web-app"\nentry-point="web"\nroute="/"\n'
+                + '[apps.svc]\nkind="service"\nentry-point="svc"\nroute="/api/svc"\n',
+            {"web.jac": 'def:pub hello -> str { return "web"; }\n'},
+            "web",
+            "web.jac",
+            "hello",
+            "/function/hello"
+        )
     ];
-    assert any([n.endswith("svc.jir") for n in pre]) , pre;
-    with tempfile.TemporaryDirectory(prefix="jac-sealed-entry-") as tmp {
-        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as archive {
-            archive.extractall(tmp, filter="data");
+    for (label, toml, files, served, served_entry, func, endpoint) in cases {
+        base = Path(_mini_app());
+        (base / "jac.toml").write_text(toml);
+        for (name, text) in files.items() {
+            (base / name).write_text(text);
         }
-        env = dict(os.environ);
-        env["JAC_NO_DEV_SOURCE"] = "1";
-        result = subprocess.run(
-            [str(jac_bin), "run", "--serve", "--faux", "app.jac"],
-            cwd=tmp,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=90
-        );
-        assert result.returncode == 0 , result.stdout + result.stderr;
-        assert "/walker/echo" in result.stdout , result.stdout;
-        assert "Preparing dynamically imported module" not in result.stdout;
+        fleet = fleet_from_config(
+            get_config_for_path(base),
+            served,
+            project_root=str(base),
+            relative_to=str(base)
+        )
+            if served
+            else None;
+        raw = pack_jab(str(base), jac_bin.read_bytes(), fleet=fleet);
+        names = _names(raw);
+        assert "svc.jac" in names , label;
+        assert ".jac/serve_manifest.json" in names , label;
+        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as archive {
+            serving = archive.extractfile(".jac/serve_manifest.json");
+            assert serving is not None;
+            assert json.loads(serving.read())["func_access"][func] is False , label;
+            manifest = archive.extractfile("_precompiled/MANIFEST.json");
+            assert manifest is not None;
+            assert ".jac/serve_manifest.json"
+                in json.loads(manifest.read())["payloads"];
+        }
+        # The sealed manifest sits at the tar root, which is what makes this a .jab.
+        assert "_precompiled/MANIFEST.json" in names , label;
+        pre = [
+            n
+            for n in names
+            if n.startswith("_precompiled/")
+        ];
+        for module in ("svc.jir", served_entry.replace(".jac", ".jir")) {
+            assert any([n.endswith(module) for n in pre]) , (label, module, pre);
+        }
+        with tempfile.TemporaryDirectory(prefix="jac-sealed-entry-") as tmp {
+            with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as archive {
+                archive.extractall(tmp, filter="data");
+            }
+            env = dict(os.environ);
+            env["JAC_NO_DEV_SOURCE"] = "1";
+            result = subprocess.run(
+                [str(jac_bin), "run", "--serve", "--no-client", "--faux", served_entry],
+                cwd=tmp,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=90
+            );
+            assert result.returncode == 0 , result.stdout + result.stderr;
+            assert endpoint in result.stdout , (label, result.stdout);
+            assert "Loading sealed application artifacts" in result.stdout , (
+                label,
+                result.stdout
+            );
+            assert "Compiling server modules" not in result.stdout , (
+                label,
+                result.stdout
+            );
+            assert "Preparing dynamically imported module" not in result.stdout;
+        }
     }
 }
 
