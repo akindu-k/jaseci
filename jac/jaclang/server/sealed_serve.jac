@@ -42,18 +42,38 @@ def _image_module_keys(img_root: str) -> set {
 }
 
 
+def _image_key(abs_path: str, img_root: str) -> str {
+    rel = os.path.relpath(abs_path, img_root).replace(os.sep, "/");
+    return rel[:-3] + ".jac" if rel.endswith(".py") else rel;
+}
+
+
 def sealed_root_for(path: str) -> (str | None) {
     abs_path = os.path.normpath(os.path.abspath(path));
     d = os.path.dirname(abs_path);
     while True {
+        if os.path.isfile(os.path.join(d, "_precompiled", MANIFEST_NAME))
+            and _image_key(abs_path, d) in _image_module_keys(d) {
+            return d;
+        }
+        parent = os.path.dirname(d);
+        if parent == d {
+            return None;
+        }
+        d = parent;
+    }
+}
+
+
+def unlisted_image_root(path: str) -> (str | None) {
+    abs_path = os.path.normpath(os.path.abspath(path));
+    d = os.path.dirname(abs_path);
+    while True {
         if os.path.isfile(os.path.join(d, "_precompiled", MANIFEST_NAME)) {
-            rel = os.path.relpath(abs_path, d).replace(os.sep, "/");
-            if rel.endswith(".py") {
-                rel = rel[:-3] + ".jac";
-            }
-            if rel in _image_module_keys(d) {
-                return d;
-            }
+            return None if _image_key(abs_path, d) in _image_module_keys(d) else d;
+        }
+        if os.path.isfile(os.path.join(d, "jac.toml")) {
+            return None;
         }
         parent = os.path.dirname(d);
         if parent == d {
