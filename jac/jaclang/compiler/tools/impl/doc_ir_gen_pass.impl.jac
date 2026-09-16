@@ -2496,7 +2496,7 @@ impl DocIRGenPass._assign_space_group(nd: uni.UniNode) -> None {
 }
 
 impl DocIRGenPass._assign_operator_chain(
-    nd: uni.UniNode, operands: list, ops: list
+    nd: uni.UniNode, operands: list[uni.UniNode], ops: list[uni.UniNode]
 ) -> None {
     rest: list[doc.DocType] = [];
     for i in range(len(ops)) {
@@ -2712,7 +2712,7 @@ impl DocIRGenPass.finish_doc_comments with uni.UniNode exit {
 
 impl DocIRGenPass._comment_is_live(c: uni.CommentToken) -> bool {
     if self._live_comment_ids is None {
-        src = self.ir_in.source if isinstance(self.ir_in, uni.Module) else None;
+        src = self.module.source if isinstance(self.module, uni.Module) else None;
         self._live_comment_ids = {id(lc) for lc in (src.comments if src else [])};
     }
     return id(c) in self._live_comment_ids;

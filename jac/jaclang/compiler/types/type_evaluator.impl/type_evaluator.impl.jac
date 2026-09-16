@@ -2291,7 +2291,6 @@ impl TypeEvaluator._bind_filter_compare(cmp: Expr, filter_type: ClassType) -> No
     self._bind_filter_member(left, filter_type);
 }
 
-
 impl TypeEvaluator._filter_order_name(expr: Expr) -> (Name | None) {
     inner = expr;
     if isinstance(inner, UnaryExpr) {
@@ -2303,7 +2302,6 @@ impl TypeEvaluator._filter_order_name(expr: Expr) -> (Name | None) {
     return inner if isinstance(inner, Name) else None;
 }
 
-
 impl TypeEvaluator._bind_filter_member(target: Name, filter_type: ClassType) -> None {
     if sym := filter_type.lookup_member_symbol(target.value) {
         self._set_symbol_to_expr(target, sym);
@@ -2311,7 +2309,6 @@ impl TypeEvaluator._bind_filter_member(target: Name, filter_type: ClassType) -> 
     }
     self.emit_diag(E1033, target, member=target.value, type=str(filter_type));
 }
-
 
 impl TypeEvaluator._widen_literal_for_declaration(ty: TypeBase) -> TypeBase {
     if isinstance(ty, ClassType) {
@@ -2971,7 +2968,6 @@ impl TypeEvaluator._is_protocol_class(cls_type: ClassType) -> bool {
     return False;
 }
 
-
 impl TypeEvaluator._solve_protocol_type_args(
     src_type: ClassType, proto_type: ClassType, bindings: dict[str, TypeBase]
 ) -> bool {
@@ -3014,7 +3010,6 @@ impl TypeEvaluator._solve_protocol_type_args(
     }
     return solved;
 }
-
 
 impl TypeEvaluator.is_sub_class(super_cls: ClassType, sub_cls: ClassType) -> bool {
     import from jaclang.compiler.types.type_utils { ensure_mro_fresh }
@@ -3292,7 +3287,7 @@ impl TypeEvaluator._in_native_context -> bool {
     if self._pass is None {
         return False;
     }
-    cur = self._pass?.cur_node;
+    cur = self._pass?.current_node;
     if cur is None or not isinstance(cur, UniNode) {
         return False;
     }
@@ -4834,7 +4829,6 @@ impl TypeEvaluator._classify_edge(pred: IfStmt, succ: UniCFGNode) -> str {
     return "unconditional";
 }
 
-
 impl TypeEvaluator.create_key_for_reference(expr: Expr) -> str | None {
     if isinstance(expr, AtomUnit) and isinstance(expr.value, Expr) {
         return self.create_key_for_reference(expr.value);
@@ -4973,7 +4967,6 @@ impl TypeEvaluator.classify_condition(condition: Expr) -> ConditionInfo | None {
     }
     return None;
 }
-
 
 impl TypeEvaluator._find_predicate_for(
     target: NarrowingTarget, condition: Expr
@@ -5128,9 +5121,7 @@ impl TypeEvaluator._find_predicate_for(
         match info.kind {
             case NarrowingKind.ISINSTANCE
                 | NarrowingKind.TYPE_IS
-                | NarrowingKind.TYPE_GUARD
-                | NarrowingKind.LITERAL_EQ
-                | NarrowingKind.LITERAL_NE:
+                | NarrowingKind.TYPE_GUARD:
                 narrowed_type = info.narrow_type;
                 if narrowed_type is None {
                     return None;
@@ -5138,7 +5129,7 @@ impl TypeEvaluator._find_predicate_for(
                 return NarrowingPredicate(
                     key=key,
                     narrow_type=narrowed_type,
-                    is_inverted=info.kind == NarrowingKind.LITERAL_NE,
+                    is_inverted=False,
                     narrows_on_false=info.narrows_on_false
                         and info.kind != NarrowingKind.TYPE_GUARD,
                     replaces_declared=info.kind == NarrowingKind.TYPE_GUARD
@@ -5187,6 +5178,30 @@ impl TypeEvaluator._find_predicate_for(
                         key=key, narrow_type=none_inst, is_inverted=True
                     );
                 }
+
+            case NarrowingKind.LITERAL_EQ:
+                literal_type = info.narrow_type;
+                if literal_type is None {
+                    return None;
+                }
+                return NarrowingPredicate(
+                    key=key,
+                    narrow_type=literal_type,
+                    is_inverted=False,
+                    narrows_on_false=False
+                );
+
+            case NarrowingKind.LITERAL_NE:
+                literal_type = info.narrow_type;
+                if literal_type is None {
+                    return None;
+                }
+                return NarrowingPredicate(
+                    key=key,
+                    narrow_type=literal_type,
+                    is_inverted=True,
+                    narrows_on_true=False
+                );
 
             case NarrowingKind.TRUTHINESS:
                 if self.prefetch and self.prefetch.none_type_class {
@@ -5339,7 +5354,7 @@ impl TypeEvaluator._specialize_narrow_from_base(
         if not isinstance(m, ClassType) {
             continue;
         }
-        args = m.private.type_args or [];
+        args: list[TypeBase] = m.private.type_args or [];
         if len(args) != want or m.shared.same_class(narrow_type.shared) {
             continue;
         }

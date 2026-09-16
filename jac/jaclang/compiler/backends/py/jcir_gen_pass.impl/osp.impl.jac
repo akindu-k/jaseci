@@ -104,7 +104,7 @@ impl JcirGenPass._fold_sorted_traversal(nd: FuncCall) -> bool {
     (node_ty, edge_ty) = self._final_hop_types(trav);
     specs = self._sort_order_specs(key_expr, node_ty, edge_ty);
     if specs is None {
-        self.emit(
+        self.ctx.emit(
             W5096,
             node_override=key_expr,
             reason='sort key is not a field access, so it has no ORDER BY form'
@@ -203,7 +203,7 @@ impl JcirGenPass._sort_order_specs(
     if body is None {
         return None;
     }
-    parts: list = list(body.values) if isinstance(body, TupleVal) else [body];
+    parts: list[UniNode] = list(body.values) if isinstance(body, TupleVal) else [body];
     out: list[tuple[str, bool, bool]] = [];
     for part in parts {
         if not isinstance(part, Expr) {
@@ -278,7 +278,7 @@ impl JcirGenPass._cmp_op_str(op: CgNode) -> (str | None) {
 
 impl JcirGenPass._query_filter_kws(
     fc: FilterCompr, type_arg: str, preds_arg: str
-) -> list {
+) -> list[CgNode] {
     return self._query_filter_kws_ord(fc, type_arg, preds_arg, False, [])[0];
 }
 
@@ -343,7 +343,7 @@ impl JcirGenPass._query_filter_kws_ord(
             continue;
         }
         if saw_order {
-            self.emit(
+            self.ctx.emit(
                 E5094,
                 node_override=x,
                 reason='ordering terms must come after every predicate'
@@ -416,7 +416,7 @@ impl JcirGenPass._query_filter_kws_ord(
             }
         }
         if reason {
-            self.emit(E5094, node_override=x, reason=reason);
+            self.ctx.emit(E5094, node_override=x, reason=reason);
         } else {
             preds.append(
                 self.call_node(
@@ -489,7 +489,7 @@ impl JcirGenPass._warn_inplace_sort(nd: FuncCall) -> None {
         if isinstance(assign, Assignment)
             and assign.value is not None
             and isinstance(assign.value, EdgeRefTrailer) {
-            self.emit(
+            self.ctx.emit(
                 W5096,
                 node_override=nd,
                 reason=(
@@ -588,7 +588,7 @@ impl JcirGenPass.exit_edge_ref_trailer with EdgeRefTrailer exit {
     }
     origin: (CgNode | None) = None;
     cur = here.chain[0];
-    chomp = [*here.chain[1:]];
+    chomp: list[Expr | FilterCompr] = [*here.chain[1:]];
     from_visit = bool(isinstance(here.parent, VisitStmt));
     if not isinstance(cur, EdgeOpRef) {
         origin = self.val(cur);
@@ -599,7 +599,7 @@ impl JcirGenPass.exit_edge_ref_trailer with EdgeRefTrailer exit {
     order_terms: list[CgNode] = [];
     while True {
         if not isinstance(cur, EdgeOpRef) {
-            raise RuntimeError(self.ice('edge ref chain hop is not an EdgeOpRef'));
+            raise RuntimeError(self.ctx.ice('edge ref chain hop is not an EdgeOpRef'));
         }
         keywords = [
             self.nod(
@@ -628,7 +628,7 @@ impl JcirGenPass.exit_edge_ref_trailer with EdgeRefTrailer exit {
         }
         hops.append(self.call_node(self.jaclib_obj('QHop'), [], keywords));
         if hop_order and chomp {
-            self.emit(
+            self.ctx.emit(
                 E5094,
                 node_override=here,
                 reason='ordering applies to the final hop of a traversal'
