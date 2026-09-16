@@ -607,7 +607,10 @@ test "a shipped jac.toml value the pods cannot resolve stops the deploy before p
         "LIB_ONLY": "host-value",
         "PROD_ONLY": "host-value",
         "LOCAL_ONLY": "host-value",
-        "STAGING_ONLY": "host-value"
+        "STAGING_ONLY": "host-value",
+        "K8S_APP_NAME": "host-value",
+        "DEMO_API_KEY": "sk-test",
+        "JAC_DB_URL": "postgresql://host/db"
     };
     for (label, tomls, expected) in cases {
         with tempfile.TemporaryDirectory() as tmp {
