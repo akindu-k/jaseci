@@ -1,0 +1,130 @@
+name: TEMP verify 9139 sealed boot reason
+
+on:
+  push:
+    branches: [tmp/verify-9139]
+  workflow_dispatch:
+
+jobs:
+  cluster:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      JAC_NO_DEV_SOURCE: "1"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - name: Build the jac binary from this branch (pod runtime with the fix)
+        uses: ./.github/actions/setup-jac
+
+      - name: Stage both pod binaries
+        run: |
+          set -euxo pipefail
+          mkdir -p "$RUNNER_TEMP/bins"
+          cp jac/zig-out/bin/jac "$RUNNER_TEMP/bins/jac-fix"
+          base=https://github.com/jaseci-labs/jac/releases/download/dev
+          curl -fsSL -o "$RUNNER_TEMP/bins/jac-main" "$base/jac-dev-linux-x86_64"
+          curl -fsSL -o "$RUNNER_TEMP/bins/jac-main.sha256" "$base/jac-dev-linux-x86_64.sha256"
+          (cd "$RUNNER_TEMP/bins" && echo "$(cut -d' ' -f1 jac-main.sha256)  jac-main" | sha256sum -c -)
+          chmod +x "$RUNNER_TEMP/bins/jac-main" "$RUNNER_TEMP/bins/jac-fix"
+          "$RUNNER_TEMP/bins/jac-main" --version
+          "$RUNNER_TEMP/bins/jac-fix" --version
+          which jac && jac --version
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install scale deploy deps
+        run: jac install "python-dotenv>=1.2.1,<2.0.0" "kubernetes>=34.1.0,<35.0.0" "docker>=7.1.0,<8.0.0" --global
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Set up MicroK8s
+        run: |
+          set -euxo pipefail
+          sudo snap install microk8s --classic --channel=1.31/stable
+          sudo microk8s status --wait-ready
+          sudo microk8s enable hostpath-storage dns
+          sudo microk8s kubectl -n kube-system rollout status deploy/coredns --timeout=180s
+          sudo microk8s kubectl -n kube-system rollout status deploy/hostpath-provisioner --timeout=180s || true
+          mkdir -p "$HOME/.kube"
+          sudo microk8s config > "$HOME/.kube/config"
+          sudo chown "$(id -u):$(id -g)" "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+          kubectl get nodes -o wide
+
+      - name: Deploy with pods on main's jac, then on this branch's jac
+        run: |
+          set +e -uo pipefail
+          LOGS="$RUNNER_TEMP/logs"; mkdir -p "$LOGS"
+          status=0
+
+          make_ws() {
+            ws="$RUNNER_TEMP/ws-$1"; rm -rf "$ws"; mkdir -p "$ws"
+            printf '%s\n' \
+              '[project]' "name = \"boot9139$1\"" 'version = "0.1.0"' 'default-app = "svc"' '' \
+              '[apps.web]' 'kind = "web-app"' 'entry-point = "web"' 'route = "/"' '' \
+              '[apps.svc]' 'kind = "service"' 'entry-point = "svc"' 'route = "/api/svc"' '' \
+              '[dependencies.npm]' 'react = "^19.2.0"' 'react-dom = "^19.2.0"' 'react-router-dom = "^6.22.0"' 'react-error-boundary = "^5.0.0"' 'zod = "^4.3.6"' '' \
+              '[dependencies.npm.dev]' 'vite = "^6.4.1"' '"@vitejs/plugin-react" = "^4.2.1"' 'typescript = "^5.3.3"' '"@types/react" = "^19.2.0"' '"@types/react-dom" = "^19.2.0"' '' \
+              '[client]' '' \
+              '[scale.kubernetes]' 'bundle_storage_class = "microk8s-hostpath"' "namespace = \"boot9139$1\"" \
+              > "$ws/jac.toml"
+            printf 'def:pub app -> any {\n    <div>web</div>\n}\n\ndef:pub hello() -> str {\n    return "web";\n}\n' > "$ws/web.jac"
+            printf 'def:pub ping() -> str {\n    return "svc";\n}\n' > "$ws/svc.jac"
+            echo "$ws"
+          }
+
+          run_phase() {
+            phase="$1"; ns="boot9139$phase"; ws="$(make_ws "$phase")"
+            export JAC_SCALE_BINARY_PATH="$RUNNER_TEMP/bins/jac-$phase"
+            echo "::group::deploy ($phase, pods run $JAC_SCALE_BINARY_PATH)"
+            (cd "$ws" && jac scale deploy web.jac --target kubernetes) 2>&1 | grep -v "^  Compiling jaclang" | tee "$LOGS/$phase-deploy.log"
+            echo "deploy exit: ${PIPESTATUS[0]}"
+            echo "::endgroup::"
+            kubectl get deploy,pods -n "$ns" -o wide || true
+            for d in web svc; do
+              dep="deployment/${d}-deployment"
+              kubectl rollout status "$dep" -n "$ns" --timeout=900s
+              kubectl logs -n "$ns" "$dep" --all-containers --tail=500 > "$LOGS/$phase-$d.log" 2>&1
+              echo "== $phase $d pod log (boot lines)"
+              grep -nE "Preparing application|Sealed image at|Loading sealed application artifacts|Compiling server modules|Server ready|Error" "$LOGS/$phase-$d.log" || true
+            done
+
+            echo "== $phase case B: copy the deployed bundle out of the svc pod"
+            b="$RUNNER_TEMP/bundle-$phase"; rm -rf "$b"; mkdir -p "$b"
+            kubectl exec -n "$ns" deployment/svc-deployment -- sh -c 'cd "$PWD" && tar czf - --exclude=./.jac/venv --exclude=./_vendor --exclude=./node_modules .' | tar xzf - -C "$b"
+            ls -la "$b" "$b/.jac" "$b/_precompiled" | head -30
+            python3 - "$b/_precompiled/MANIFEST.json" <<'PY'
+          import json, sys
+          p = sys.argv[1]; d = json.load(open(p))
+          d.get("payloads", {}).pop(".jac/serve_manifest.json", None)
+          json.dump(d, open(p, "w"))
+          PY
+            rm -f "$b/.jac/serve_manifest.json"
+            (cd "$b" && timeout 120 "$JAC_SCALE_BINARY_PATH" run --serve svc.jac) > "$LOGS/$phase-caseB.log" 2>&1
+            echo "case B exit: $?"
+            grep -nE "Preparing application|Loading sealed|Error|serving manifest|No such file" "$LOGS/$phase-caseB.log" | head -8 || true
+          }
+
+          run_phase main
+          kubectl delete namespace boot9139main --wait=false || true
+          run_phase fix
+
+          echo "=== verdict ==="
+          if grep -q "Compiling server modules" "$LOGS/main-web.log" && ! grep -q "Sealed image at" "$LOGS/main-web.log"; then echo "OK main: web pod compiled with no reason given (bug reproduced)"; else echo "UNEXPECTED main web log"; status=1; fi
+          if grep -q "does not list web.jac; preparing from source" "$LOGS/fix-web.log"; then echo "OK fix: web pod names the sealed image that missed web.jac"; else echo "FAIL fix: web pod gave no reason"; status=1; fi
+          if grep -q "Loading sealed application artifacts" "$LOGS/fix-svc.log" && ! grep -q "Sealed image at" "$LOGS/fix-svc.log"; then echo "OK fix: svc pod still loads sealed with no extra line"; else echo "FAIL fix: svc pod log changed"; status=1; fi
+          if grep -q "No such file or directory" "$LOGS/main-caseB.log"; then echo "OK main case B: bare FileNotFoundError (bug reproduced)"; else echo "UNEXPECTED main case B log"; status=1; fi
+          if grep -q "Sealed application has no serving manifest" "$LOGS/fix-caseB.log"; then echo "OK fix case B: named error"; else echo "FAIL fix case B: no named error"; status=1; fi
+          exit $status
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-9139-logs
+          path: ${{ runner.temp }}/logs
