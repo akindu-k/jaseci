@@ -278,9 +278,8 @@ test "a real pod binary seals the app each pod serves and boots it from the seal
                     + 'walker:pub echo { can run with Root entry { report "hello"; } }\n'
             },
             "",
-            "app.jac",
             "ping",
-            "/walker/echo"
+            {"app.jac": "/walker/echo"}
         ),
         (
             "a web-app that is not the default app",
@@ -289,12 +288,11 @@ test "a real pod binary seals the app each pod serves and boots it from the seal
                 + '[apps.svc]\nkind="service"\nentry-point="svc"\nroute="/api/svc"\n',
             {"web.jac": 'def:pub hello -> str { return "web"; }\n'},
             "web",
-            "web.jac",
             "hello",
-            "/function/hello"
+            {"web.jac": "/function/hello", "svc.jac": "/function/ping"}
         )
     ];
-    for (label, toml, files, served, served_entry, func, endpoint) in cases {
+    for (label, toml, files, served, func, boots) in cases {
         base = Path(_mini_app());
         (base / "jac.toml").write_text(toml);
         for (name, text) in files.items() {
@@ -315,7 +313,15 @@ test "a real pod binary seals the app each pod serves and boots it from the seal
         with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as archive {
             serving = archive.extractfile(".jac/serve_manifest.json");
             assert serving is not None;
-            assert json.loads(serving.read())["func_access"][func] is False , label;
+            serve_manifest = json.loads(serving.read());
+            assert serve_manifest["func_access"][func] is False , label;
+            for boot_file in boots {
+                assert boot_file in serve_manifest["module_manifests"] , (
+                    label,
+                    boot_file,
+                    list(serve_manifest["module_manifests"])
+                );
+            }
             manifest = archive.extractfile("_precompiled/MANIFEST.json");
             assert manifest is not None;
             assert ".jac/serve_manifest.json"
@@ -328,7 +334,7 @@ test "a real pod binary seals the app each pod serves and boots it from the seal
             for n in names
             if n.startswith("_precompiled/")
         ];
-        for module in ("svc.jir", served_entry.replace(".jac", ".jir")) {
+        for module in ["svc.jir"] + [f.replace(".jac", ".jir") for f in boots] {
             assert any([n.endswith(module) for n in pre]) , (label, module, pre);
         }
         with tempfile.TemporaryDirectory(prefix="jac-sealed-entry-") as tmp {
@@ -337,25 +343,36 @@ test "a real pod binary seals the app each pod serves and boots it from the seal
             }
             env = dict(os.environ);
             env["JAC_NO_DEV_SOURCE"] = "1";
-            result = subprocess.run(
-                [str(jac_bin), "run", "--serve", "--no-client", "--faux", served_entry],
-                cwd=tmp,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=90
-            );
-            assert result.returncode == 0 , result.stdout + result.stderr;
-            assert endpoint in result.stdout , (label, result.stdout);
-            assert "Loading sealed application artifacts" in result.stdout , (
-                label,
-                result.stdout
-            );
-            assert "Compiling server modules" not in result.stdout , (
-                label,
-                result.stdout
-            );
-            assert "Preparing dynamically imported module" not in result.stdout;
+            for (boot_file, endpoint) in boots.items() {
+                result = subprocess.run(
+                    [
+                        str(jac_bin),
+                        "run",
+                        "--serve",
+                        "--no-client",
+                        "--faux",
+                        boot_file
+                    ],
+                    cwd=tmp,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=90
+                );
+                assert result.returncode == 0 , result.stdout + result.stderr;
+                assert endpoint in result.stdout , (label, boot_file, result.stdout);
+                assert "Loading sealed application artifacts" in result.stdout , (
+                    label,
+                    boot_file,
+                    result.stdout
+                );
+                assert "Compiling server modules" not in result.stdout , (
+                    label,
+                    boot_file,
+                    result.stdout
+                );
+                assert "Preparing dynamically imported module" not in result.stdout;
+            }
         }
     }
 }
