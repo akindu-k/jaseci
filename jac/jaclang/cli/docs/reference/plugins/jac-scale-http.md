@@ -347,19 +347,30 @@ The HTTP concerns stay on the declaration, so the body remains an ordinary
 #### Limits
 
 - **Functions only.** A walker can `report` any number of times, so there is
-  no single value to project onto a raw body. `envelope=False` on a walker
-  has no effect.
-- **Text only.** A `bytes` return is stringified by `Serializer` before the
-  response layer sees it, so binary payloads are not yet expressible. Serve
-  those as static assets.
+  no single value to project onto a raw body. `envelope=False` and `produces`
+  on a walker have no effect, and the decorator logs a warning saying so at
+  import time. A route that needs a raw body has to be a `def`.
 - **Errors keep the envelope.** A failing call still returns the JSON error
   envelope with its usual status code, so a 500 is never mistaken for a valid
   payload of the declared content type. Callers should check the status, and
   `curl -f` does this for you.
 
-Omitting `produces` yields `text/plain; charset=utf-8`. A non-`str` return is
-JSON-encoded into the body, but still without the envelope around it -- useful
-when a third-party client expects a bare JSON document:
+A `bytes` return is written to the body unchanged, so a raw endpoint can hand
+the browser a file -- a spreadsheet, an image, a PDF -- without base64 in a JSON
+field:
+
+```jac
+@restspec(method=HTTPMethod.GET, path="/report.xlsx",
+          produces="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          envelope=False)
+def :pub report_xlsx() -> bytes {
+    return build_workbook();   # body is exactly these bytes
+}
+```
+
+Omitting `produces` yields `text/plain; charset=utf-8`. A non-`str`, non-`bytes`
+return is JSON-encoded into the body, but still without the envelope around it
+-- useful when a third-party client expects a bare JSON document:
 
 ```jac
 @restspec(method=HTTPMethod.GET, path="/.well-known/jac.json",

@@ -297,7 +297,7 @@ def serving_app_for(config: any, entry_file: Path, backend: str) -> str {
 def stage_program(
     entry_file: Path,
     project_dir: Path,
-    output_dir: Path,
+    image_dir: Path,
     backend: str,
     dist_dir: (Path | None)
 ) -> dict[str, str] {
@@ -309,7 +309,7 @@ def stage_program(
             assets = client_assets_dir(config, project_dir, str(entry_file));
             if assets.is_dir() {
                 shutil.copytree(
-                    assets, output_dir / "dist" / "assets", dirs_exist_ok=True
+                    assets, image_dir / "dist" / "assets", dirs_exist_ok=True
                 );
             }
         }
@@ -328,6 +328,6 @@ def stage_program(
     console.print(
         "  Sealing the app image" + (f" for '{app}'" if app else ""), style="muted"
     );
-    build_jab(config, output_dir / "app.jab", app=app, bake_client=False);
+    build_jab(config, image_dir / "app.jab", app=app, bake_client=False);
     return {"jab": "app.jab"};
 }
