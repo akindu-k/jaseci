@@ -250,14 +250,12 @@ def with_config_revision(manifest: dict[str, any], revision: str) -> dict[str, a
 }
 
 
-def _setting_value(start: object, key: str) -> object {
-    import re;
+def _setting_value(start: object, keys: list[str | int]) -> object {
     value: object = start;
-    for part in re.findall(r"[^.\[\]]+|\[\d+\]", key) {
-        if part.startswith("[") {
-            index = int(part[1:-1]);
-            value = value[index]
-                if isinstance(value, list) and index < len(value)
+    for part in keys {
+        if isinstance(part, int) {
+            value = value[part]
+                if isinstance(value, list) and part < len(value)
                 else None;
         } elif isinstance(value, dict) {
             value = value.get(part);
@@ -805,12 +803,12 @@ obj ManifestBuilder {
     }
 
     def _deploys_literal(ref: UnresolvedRef) -> bool {
-        (section, key) = ref.deploy_setting();
+        (section, keys) = ref.deploy_setting();
         if not section {
             return False;
         }
         source = self.secrets if section == "secrets" else self.k8s_config;
-        return _setting_value(source, key) == ref.raw;
+        return _setting_value(source, keys) == ref.raw;
     }
 
     def _pod_environ(

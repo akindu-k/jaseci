@@ -258,9 +258,10 @@ obj UnresolvedRef {
         var: str,
         required: bool,
         message: str,
-        raw: str;
+        raw: str,
+        keys: list[str | int] = [];
 
-    def deploy_setting -> tuple[str, str];
+    def deploy_setting -> tuple[str, list[str | int]];
 }
 
 def interpolate_env_vars(value: str, environ: dict[str, str] | None = None) -> str;
@@ -270,7 +271,7 @@ def resolve_env_refs(
 ) -> tuple[any, list[UnresolvedRef]];
 
 def _unresolved_in(
-    value: str, path: str, environ: dict[str, str] | None
+    value: str, path: str, keys: list[str | int], environ: dict[str, str] | None
 ) -> list[UnresolvedRef];
 
 def report_env_findings(

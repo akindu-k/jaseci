@@ -705,6 +705,25 @@ test "a deploy setting this machine cannot resolve stops manifest generation" {
             ]
         ),
         (
+            "an unset secret under a quoted dotted key",
+            {
+                "jac.toml": "[scale.secrets]\n\"SERVICE.API.KEY\" = \"${DEMO_HOST_KEY}\"\n"
+            },
+            [
+                "scale.secrets.SERVICE.API.KEY: Environment variable DEMO_HOST_KEY is not set"
+            ]
+        ),
+        (
+            "an unset label under a quoted dotted key",
+            {
+                "jac.toml": "[scale.kubernetes.labels]\n"
+                "\"app.kubernetes.io/part-of\" = \"${K8S_NAMESPACE}\"\n"
+            },
+            [
+                "scale.kubernetes.labels.app.kubernetes.io/part-of: Environment variable K8S_NAMESPACE is not set"
+            ]
+        ),
+        (
             "a secret the active profile replaces",
             {
                 "jac.toml": "[environment]\ndefault_profile = \"prod\"\n" + secret,

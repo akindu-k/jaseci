@@ -241,7 +241,8 @@ test "config load records unset environment variables instead of failing" {
                 for ref in refs {
                     assert ref.var == var_name , label;
                     assert ref.raw.startswith(f"${{{var_name}") , label;
-                    assert ref.deploy_setting() == ("secrets", "SOME_API_KEY") , label;
+                    assert ref.deploy_setting()
+                        == ("secrets", ["SOME_API_KEY"]) , label;
                 }
             }
         }

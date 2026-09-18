@@ -41,26 +41,29 @@ impl resolve_env_refs(
     data: any, environ: dict[str, str] | None = None, path: str = ""
 ) -> tuple[any, list[UnresolvedRef]] {
     refs: list[UnresolvedRef] = [];
-    def walk(item: any, at: str) -> any {
+    def walk(item: any, at: str, keys: list[str | int]) -> any {
         if isinstance(item, str) {
             try {
                 return interpolate_env_vars(item, environ);
             } except UnresolvedEnvVar {
-                refs.extend(_unresolved_in(item, at, environ));
+                refs.extend(_unresolved_in(item, at, keys, environ));
                 return item;
             }
         } elif isinstance(item, dict) {
-            return {k: walk(v, _child_config_path(at, k)) for (k, v) in item.items()};
+            return {
+                k: walk(v, _child_config_path(at, k), keys + [k])
+                for (k, v) in item.items()
+            };
         } elif isinstance(item, list) {
-            return [walk(v, f"{at}[{i}]") for (i, v) in enumerate(item)];
+            return [walk(v, f"{at}[{i}]", keys + [i]) for (i, v) in enumerate(item)];
         }
         return item;
     }
-    return (walk(data, path), refs);
+    return (walk(data, path, [path] if path else []), refs);
 }
 
 impl _unresolved_in(
-    value: str, path: str, environ: dict[str, str] | None
+    value: str, path: str, keys: list[str | int], environ: dict[str, str] | None
 ) -> list[UnresolvedRef] {
     import re;
     found: list[UnresolvedRef] = [];
@@ -70,7 +73,12 @@ impl _unresolved_in(
         } except UnresolvedEnvVar as e {
             found.append(
                 UnresolvedRef(
-                    path=path, var=e.var, required=e.required, message=str(e), raw=value
+                    path=path,
+                    var=e.var,
+                    required=e.required,
+                    message=str(e),
+                    raw=value,
+                    keys=keys
                 )
             );
         }
@@ -96,20 +104,20 @@ impl report_env_findings(
     console.warning(message);
 }
 
-impl UnresolvedRef.deploy_setting -> tuple[str, str] {
-    parts = self.path.split(".");
-    if parts[0] in ("apps", "environments") {
-        parts = parts[2:];
+impl UnresolvedRef.deploy_setting -> tuple[str, list[str | int]] {
+    keys = list(self.keys);
+    if keys and keys[0] in ("apps", "environments") {
+        keys = keys[2:];
     }
-    if parts and parts[0] == "plugins" {
-        parts = parts[1:];
+    if keys and keys[0] == "plugins" {
+        keys = keys[1:];
     }
-    if len(parts) < 3
-        or parts[0] != "scale"
-        or parts[1] not in ("secrets", "kubernetes") {
-        return ("", "");
+    if len(keys) < 3
+        or keys[0] != "scale"
+        or keys[1] not in ("secrets", "kubernetes") {
+        return ("", []);
     }
-    return (parts[1], ".".join(parts[2:]));
+    return (str(keys[1]), keys[2:]);
 }
 
 impl find_project_root(start: Path | None = None) -> tuple[Path, Path] | None {
@@ -1473,10 +1481,11 @@ impl _profile_refs(
             var=ref.var,
             required=ref.required,
             message=ref.message,
-            raw=ref.raw
+            raw=ref.raw,
+            keys=ref.keys[2:]
         )
         for ref in refs
-        if ref.path.startswith(prefix)
+        if ref.keys[:2] == ["environments", profile_name]
     ];
 }
 
