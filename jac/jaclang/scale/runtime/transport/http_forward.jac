@@ -3,7 +3,7 @@ import from jaclang.server.serving.client { ClientConnectionError, arequest }
 import from jaclang.server.serving.datatypes { Response, StreamingResponse }
 
 glob _logger = logging.getLogger(__name__),
-     _HOP_BY_HOP: set[str] = {
+     HOP_BY_HOP_HEADERS: set[str] = {
          "host",
          "transfer-encoding",
          "connection",
@@ -20,7 +20,7 @@ glob _logger = logging.getLogger(__name__),
 def _filtered_headers(resp: any) -> dict[str, str] {
     resp_headers: dict[str, str] = {};
     for (k, v) in resp.headers.items() {
-        if str(k).lower() not in _HOP_BY_HOP {
+        if str(k).lower() not in HOP_BY_HOP_HEADERS {
             resp_headers[str(k)] = str(v);
         }
     }

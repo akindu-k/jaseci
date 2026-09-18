@@ -2,7 +2,11 @@
 
 import asyncio;
 import gc;
+import time;
 import weakref;
+import from jaclang.server.serving.app { ServingApp }
+import from jaclang.server.serving.endpoint { HTTPMethod, JEndPoint }
+import from jaclang.server.serving.server { ServingServer }
 import from jaclang.server.serving.client {
     ClientConnectionError,
     ConnectionPool,
@@ -331,18 +335,55 @@ test "the buffered byte check reads asyncio's real buffer" {
 }
 
 
-test "the pool keeps no empty or expired buckets" {
+test "the pool keeps no empty, expired or overaged connections" {
+    now = time.monotonic();
     expiring = ConnectionPool(idle_timeout=0.0);
-    expiring.release("http://a:80", _FakeReader(), _FakeWriter());
+    expiring.release("http://a:80", _FakeReader(), _FakeWriter(), now);
     assert expiring.idle_count() == 1;
-    expiring.release("http://b:80", _FakeReader(), _FakeWriter());
+    expiring.release("http://b:80", _FakeReader(), _FakeWriter(), now);
     assert "http://a:80" not in expiring._idle;
     assert expiring.idle_count() == 1;
     rejecting = ConnectionPool();
-    rejecting.release("http://a:80", _FakeReader(), _FakeWriter(closing=True));
+    rejecting.release("http://a:80", _FakeReader(), _FakeWriter(closing=True), now);
     assert rejecting._idle == {};
     assert rejecting.acquire("http://b:80") is None;
     assert rejecting._idle == {};
+    aging = ConnectionPool(max_age=60.0);
+    aging.release("http://a:80", _FakeReader(), _FakeWriter(), now - 61.0);
+    assert aging._idle == {};
+    aging.release("http://a:80", _FakeReader(), _FakeWriter(), now - 30.0);
+    (_reader, _writer, _opened_at, expires_at) = aging._idle["http://a:80"][0];
+    assert expires_at <= now + 30.0;
+}
+
+
+def _pong -> dict[str, any] {
+    return {"ok": True};
+}
+
+
+test "a worker at its request budget closes the connection it answers on" {
+    app = ServingApp();
+    app.add_endpoint(JEndPoint(method=HTTPMethod.GET, path="/ping", callback=_pong));
+    server = ServingServer(app=app, host="127.0.0.1", port=0, request_budget=1);
+    stop = server.serve_background();
+
+    async def work -> tuple[str, int] {
+        try {
+            resp = await arequest("GET", f"http://127.0.0.1:{server.bound_port}/ping");
+            return (
+                str(resp.headers.get("Connection")),
+                connection_pool().idle_count()
+            );
+        } finally {
+            close_connection_pool();
+        }
+    }
+    try {
+        assert _run(work()) == ("close", 0);
+    } finally {
+        stop();
+    }
 }
 
 

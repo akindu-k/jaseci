@@ -17,7 +17,8 @@ glob DEFAULT_TIMEOUT: float = 30.0,
      DEFAULT_CONNECT_TIMEOUT: float = 10.0,
      MAX_IDLE_PER_HOST: int = 32,
      MAX_IDLE_TOTAL: int = 256,
-     IDLE_TIMEOUT: float = 60.0;
+     IDLE_TIMEOUT: float = 60.0,
+     MAX_CONNECTION_AGE: float = 120.0;
 
 glob _TLS_CONTEXT: dict[str, any] = {},
      _FRAMING_HEADERS: set[str] = {'content-length', 'transfer-encoding'},
@@ -82,7 +83,8 @@ obj ConnectionPool {
     has max_idle_per_host: int = MAX_IDLE_PER_HOST,
         max_idle_total: int = MAX_IDLE_TOTAL,
         idle_timeout: float = IDLE_TIMEOUT,
-        _idle: dict[str, list[tuple[any, any, float]]] = {};
+        max_age: float = MAX_CONNECTION_AGE,
+        _idle: dict[str, list[tuple[any, any, float, float]]] = {};
 
     def idle_count -> int {
         return sum([len(bucket) for bucket in self._idle.values()]);
@@ -93,7 +95,7 @@ obj ConnectionPool {
         for (origin, bucket) in list(self._idle.items()) {
             live = [];
             for idle in bucket {
-                (_reader, writer, expires_at) = idle;
+                (_reader, writer, _opened_at, expires_at) = idle;
                 if now >= expires_at {
                     _close_writer(writer);
                 } else {
@@ -108,15 +110,15 @@ obj ConnectionPool {
         }
     }
 
-    def acquire(origin: str) -> (tuple[any, any] | None) {
+    def acquire(origin: str) -> (tuple[any, any, float] | None) {
         bucket = self._idle.get(origin) or [];
         while bucket {
-            (reader, writer, expires_at) = bucket.pop();
+            (reader, writer, opened_at, expires_at) = bucket.pop();
             if time.monotonic() >= expires_at or _is_unusable(reader, writer) {
                 _close_writer(writer);
                 continue;
             }
-            return (reader, writer);
+            return (reader, writer, opened_at);
         }
         if origin in self._idle and not self._idle[origin] {
             del self._idle[origin];
@@ -124,8 +126,10 @@ obj ConnectionPool {
         return None;
     }
 
-    def release(origin: str, reader: any, writer: any) {
-        if _is_unusable(reader, writer) {
+    def release(origin: str, reader: any, writer: any, opened_at: float) {
+        now = time.monotonic();
+        retire_at = opened_at + self.max_age;
+        if now >= retire_at or _is_unusable(reader, writer) {
             _close_writer(writer);
             return;
         }
@@ -136,13 +140,15 @@ obj ConnectionPool {
             _close_writer(writer);
             return;
         }
-        bucket.append((reader, writer, time.monotonic() + self.idle_timeout));
+        bucket.append(
+            (reader, writer, opened_at, min(now + self.idle_timeout, retire_at))
+        );
         self._idle[origin] = bucket;
     }
 
     def close_all {
         for bucket in self._idle.values() {
-            for (_reader, writer, _expires_at) in bucket {
+            for (_reader, writer, _opened_at, _expires_at) in bucket {
                 _close_writer(writer);
             }
         }
@@ -184,6 +190,7 @@ obj ClientResponse {
         has_body: bool = True,
         _pool: any = None,
         _origin: str = '',
+        _opened_at: float = 0.0,
         _reusable: bool = False,
         _drained: bool = False;
 
@@ -297,7 +304,7 @@ obj ClientResponse {
             return;
         }
         if self._drained and self._reusable and self._pool is not None {
-            self._pool.release(self._origin, reader, writer);
+            self._pool.release(self._origin, reader, writer, self._opened_at);
         } else {
             _close_writer(writer);
         }
@@ -470,12 +477,12 @@ def _request_blob(
 async def _read_response(
     pool: ConnectionPool,
     origin: str,
-    reader: any,
-    writer: any,
+    conn: tuple[any, any, float],
     head: tuple[str, int, str, Headers],
     method: str,
     stream: bool
 ) -> ClientResponse {
+    (reader, writer, opened_at) = conn;
     (version, status, reason, resp_headers) = head;
     chunked = 'chunked' in (resp_headers.get('Transfer-Encoding') or '').lower();
     has_body = _expects_body(method, status);
@@ -489,6 +496,7 @@ async def _read_response(
         has_body=has_body,
         _pool=pool,
         _origin=origin,
+        _opened_at=opened_at,
         _reusable=status >= 200
             and _is_reusable(version, resp_headers, chunked, has_body)
     );
@@ -542,9 +550,12 @@ async def arequest(
     replayable = method.upper() in _IDEMPOTENT_METHODS;
     while True {
         pooled = None if retried else pool.acquire(origin);
-        (reader, writer) = pooled
-            if pooled is not None
-            else await _open_stream(scheme, host, port, connect_timeout);
+        conn = pooled;
+        if conn is None {
+            (reader, writer) = await _open_stream(scheme, host, port, connect_timeout);
+            conn = (reader, writer, time.monotonic());
+        }
+        (reader, writer, _opened_at) = conn;
         try {
             writer.write(blob);
             await writer.drain();
@@ -570,7 +581,7 @@ async def arequest(
                 detail=f"connection lost during or after send: {e!r}"
             );
         }
-        return await _read_response(pool, origin, reader, writer, head, method, stream);
+        return await _read_response(pool, origin, conn, head, method, stream);
     }
 }
 
