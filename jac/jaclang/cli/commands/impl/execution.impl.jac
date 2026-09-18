@@ -646,15 +646,32 @@ def _file_app(cfg: any, target: str, takeover: (bool | None)) -> any {
 }
 
 def _env_refs_resolve(cfg: any) -> bool {
-    import from jaclang.project.config { report_env_findings }
+    import from jaclang.project.config { CAPABILITY_SECTIONS, report_env_findings }
 
     if cfg is None {
         return True;
     }
+
+    run_sections = {
+        "project",
+        "run",
+        "build",
+        "native",
+        "memory",
+        "placement",
+        "serve",
+        "cache",
+        "storage",
+        "environment",
+        "client_errors",
+        "check",
+        "plugins",
+        *CAPABILITY_SECTIONS
+    };
     live = [
         ref
         for ref in cfg.live_unresolved()
-        if not ref.deploy_setting()[0]
+        if ref.keys[0] in run_sections and not ref.deploy_setting()[0]
     ];
     report_env_findings(
         [

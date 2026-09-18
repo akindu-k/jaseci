@@ -355,11 +355,13 @@ impl JacConfig.live_unresolved -> list[UnresolvedRef] {
 impl JacConfig._record_unresolved(
     layer: any, refs: list[UnresolvedRef], prefix: str = ""
 ) -> None {
-    redefined = set(_leaf_paths(layer, prefix));
+    replaced = set(_replaced_keys(layer, [prefix] if prefix else []));
     self.unresolved = [
         ref
         for ref in self.unresolved
-        if ref.path not in redefined
+        if not any(
+            tuple(ref.keys[:depth]) in replaced for depth in range(1, len(ref.keys) + 1)
+        )
     ]
         + refs;
 }
@@ -1489,19 +1491,14 @@ impl _profile_refs(
     ];
 }
 
-impl _leaf_paths(item: any, path: str) -> list[str] {
-    if isinstance(item, dict) {
-        return [
-            leaf for (k, v) in item.items()
-            for leaf in _leaf_paths(v, _child_config_path(path, k))
-        ];
-    } elif isinstance(item, list) {
-        return [
-            leaf for (i, v) in enumerate(item)
-            for leaf in _leaf_paths(v, f"{path}[{i}]")
-        ];
+impl _replaced_keys(item: any, keys: list[str | int]) -> list[tuple[str | int, ...]] {
+    if not isinstance(item, dict) {
+        return [tuple(keys)];
     }
-    return [path];
+    return [
+        replaced for (k, v) in item.items()
+        for replaced in _replaced_keys(v, keys + [k])
+    ];
 }
 
 impl _child_config_path(parent: str, key: str) -> str {

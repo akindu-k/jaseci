@@ -400,7 +400,7 @@ def _parse_include(raw: dict[str, any]) -> PackageIncludeConfig;
 
 def _profile_refs(refs: list[UnresolvedRef], profile_name: str) -> list[UnresolvedRef];
 
-def _leaf_paths(item: any, path: str) -> list[str];
+def _replaced_keys(item: any, keys: list[str | int]) -> list[tuple[str | int, ...]];
 
 def _child_config_path(parent: str, key: str) -> str;
 

@@ -291,7 +291,17 @@ test "a run warns on an unset ${VAR} and stops on an unset ${VAR:?}" {
             "",
             0,
             False
-        )
+        ),
+        ("a shell script", base + setting("scripts", ":?x"), "", "", 0, False),
+        (
+            "a script in the active profile",
+            base,
+            setting("scripts", ":?x"),
+            "prod",
+            0,
+            False
+        ),
+        ("an unknown table", base + setting("made_up", ":?x"), "", "", 0, False)
     ];
     previous = os.environ.pop(var_name, None);
     try {

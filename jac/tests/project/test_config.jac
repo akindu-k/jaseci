@@ -100,30 +100,6 @@ test "interpolate required env var missing" {
     assert raised , "Expected ValueError for missing required env var";
 }
 
-test "interpolate leaves shell expansions that are not variable names" {
-    config_mod._config = None;
-    os.environ.pop("REQUIRED_VAR", None);
-    # No process can export "1" or "#ARR[@]", so "export it" is not a fix
-    # available to the user and the value has to survive verbatim.
-    for value in [
-        "sh -c 'echo ${1}' -- world",
-        "${#ARR[@]}",
-        "${REQUIRED_VAR%%.txt}",
-        "${REQUIRED_VAR^^}"
-    ] {
-        assert interpolate_env_vars(value) == value , (
-            f"{value} should pass through untouched"
-        );
-    }
-    raised = False;
-    try {
-        interpolate_env_vars("${1:?positional}");
-    } except ValueError {
-        raised = True;
-    }
-    assert raised , "an explicit :? still fails, whatever the name";
-}
-
 test "interpolate required env var with custom error" {
     config_mod._config = None;
     os.environ.pop("MY_SECRET", None);
@@ -154,6 +130,10 @@ test "interpolate against a given environment instead of the process one" {
         ("${POD_VAR}", "from-pod"),
         ("${JAC_PROCESS_ONLY:-fallback}", "fallback"),
         ("echo ${1}", "echo ${1}"),
+        ("${#ARR[@]}", "${#ARR[@]}"),
+        ("${JAC_PROCESS_ONLY%%.txt}", "${JAC_PROCESS_ONLY%%.txt}"),
+        ("${JAC_PROCESS_ONLY^^}", "${JAC_PROCESS_ONLY^^}"),
+        ("${1:?positional}", "Environment variable 1 is required: positional"),
         ("${JAC_PROCESS_ONLY}", "Environment variable JAC_PROCESS_ONLY is not set"),
         (
             "${JAC_PROCESS_ONLY:?pods need it}",
@@ -189,6 +169,8 @@ test "config load records unset environment variables instead of failing" {
     literal = "[scale.secrets]\nSOME_API_KEY = \"sk-literal\"\n";
     inline = f"[environments.prod.scale.secrets]\nSOME_API_KEY = \"${{{var_name}}}\"\n";
     setting = "scale.secrets.SOME_API_KEY";
+    origins = f"[serve]\ncors_origins = [\"${{{var_name}:?set it}}\"]\n";
+    listed = "serve.cors_origins[0]";
     cases = [
         ("bare in jac.toml", {"jac.toml": base + bare}, "", [(setting, False)]),
         ("required in jac.toml", {"jac.toml": base + required}, "", [(setting, True)]),
@@ -228,6 +210,22 @@ test "config load records unset environment variables instead of failing" {
             },
             "",
             []
+        ),
+        ("required inside a list", {"jac.toml": base + origins}, "", [(listed, True)]),
+        (
+            "a list the active profile file empties",
+            {
+                "jac.toml": base + origins,
+                "jac.prod.toml": "[serve]\ncors_origins = []\n"
+            },
+            "prod",
+            []
+        ),
+        (
+            "an empty table in the active profile file",
+            {"jac.toml": base + required, "jac.prod.toml": "[scale.secrets]\n"},
+            "prod",
+            [(setting, True)]
         )
     ];
     previous = os.environ.pop(var_name, None);
@@ -242,7 +240,11 @@ test "config load records unset environment variables instead of failing" {
                     assert ref.var == var_name , label;
                     assert ref.raw.startswith(f"${{{var_name}") , label;
                     assert ref.deploy_setting()
-                        == ("secrets", ["SOME_API_KEY"]) , label;
+                        == (
+                            ("secrets", ["SOME_API_KEY"])
+                                if ref.path == setting
+                                else ("", [])
+                        ) , label;
                 }
             }
         }
