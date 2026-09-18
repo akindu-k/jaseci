@@ -119,6 +119,7 @@ import from jaclang.compiler.frontend.constant {
     TOKEN_MAP,
     BindingKind,
     CodeContext,
+    ImmutabilityKind,
     SymbolType,
     Tokens as Tok,
     SymbolAccess,
@@ -223,6 +224,7 @@ import from jaclang.compiler.frontend.diagnostics {
     E1052,
     E1053,
     E1054,
+    E1055,
     E1056,
     E1057,
     E1062,
@@ -502,7 +504,11 @@ walker TypeEvaluator {
     ) -> (TypeBase | None);
 
     def _install_synth_member(
-        scope: UniScopeNode, synth_src: Source, mname: str, member_type: TypeBase
+        scope: UniScopeNode,
+        synth_src: Source,
+        mname: str,
+        member_type: TypeBase,
+        immutability: ImmutabilityKind = ImmutabilityKind.NONE
     ) -> None;
 
     def _ts_synth_class_types(
@@ -526,6 +532,14 @@ walker TypeEvaluator {
     ) -> Symbol | None;
 
     def _metaclass_of(cls_type: ClassType) -> (ClassType | None);
+    def _declared_metaclass_member(
+        cls_type: ClassType, name: str
+    ) -> (ClassMember | None);
+
+    def _report_rejected_method_call(
+        receiver: ClassType, member: ClassMember, args: list[Expr], site: UniNode
+    ) -> None;
+
     def _extract_type_params(node_: Archetype) -> list[TypeVarType];
     def _type_var_from_param(node_: TypeParam) -> TypeVarType;
     def _extract_ct_params(node_: Archetype) -> (list[str] | None);
@@ -616,6 +630,11 @@ walker TypeEvaluator {
 
     def _get_type_of_symbol(symbol: Symbol) -> TypeBase;
     def _get_type_of_symbol_decl(symbol: Symbol, decl: NameAtom) -> TypeBase;
+    def _as_final_form(ty: TypeBase) -> (ClassType | None);
+    def _final_declared_type(
+        annotation_type: TypeBase, symbol: (Symbol | None), value: (Expr | None)
+    ) -> (TypeBase | None);
+
     def _get_enum_member_type_for_decl(node_: Name) -> (EnumMemberType | None);
     def get_type_of_member(member: ClassMember, class_type: ClassType) -> TypeBase;
     def declaring_class_of(symbol: Symbol, base_type: ClassType) -> (ClassType | None);
@@ -708,6 +727,7 @@ walker TypeEvaluator {
     def _bind_filter_member(target: Name, filter_type: ClassType) -> None;
     def _filter_order_name(expr: Expr) -> (Name | None);
     def _is_type_subscript(class_type: ClassType) -> bool;
+    def _subscript_index_expr(right: Expr) -> Expr;
     def _get_type_for_member_lookup(object_type: ClassType) -> ClassType;
     def _get_getattr_return_type(base_type: ClassType) -> TypeBase | None;
     def _resolve_enum_value_type(enum_type: ClassType) -> TypeBase | None;
