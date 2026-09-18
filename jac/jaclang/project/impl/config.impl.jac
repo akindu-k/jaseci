@@ -6,7 +6,7 @@ impl interpolate_env_vars(value: str, environ: dict[str, str] | None = None) -> 
     }
     source = os.environ if environ is None else environ;
 
-    pattern = r"\$\{([^}:]+)(?:(:[-?])([^}]*))?\}";
+    pattern = ENV_REF_PATTERN;
     def replace_env_var(`match: re.Match) -> str {
         var_name = `match.group(1);
         operator = `match.group(2);
@@ -45,16 +45,8 @@ impl resolve_env_refs(
         if isinstance(item, str) {
             try {
                 return interpolate_env_vars(item, environ);
-            } except UnresolvedEnvVar as e {
-                refs.append(
-                    UnresolvedRef(
-                        path=at,
-                        var=e.var,
-                        required=e.required,
-                        message=str(e),
-                        raw=item
-                    )
-                );
+            } except UnresolvedEnvVar {
+                refs.extend(_unresolved_in(item, at, environ));
                 return item;
             }
         } elif isinstance(item, dict) {
@@ -65,6 +57,25 @@ impl resolve_env_refs(
         return item;
     }
     return (walk(data, path), refs);
+}
+
+impl _unresolved_in(
+    value: str, path: str, environ: dict[str, str] | None
+) -> list[UnresolvedRef] {
+    import re;
+    found: list[UnresolvedRef] = [];
+    for `match in re.finditer(ENV_REF_PATTERN, value) {
+        try {
+            interpolate_env_vars(`match.group(0), environ);
+        } except UnresolvedEnvVar as e {
+            found.append(
+                UnresolvedRef(
+                    path=path, var=e.var, required=e.required, message=str(e), raw=value
+                )
+            );
+        }
+    }
+    return found;
 }
 
 impl report_env_findings(

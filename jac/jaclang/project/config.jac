@@ -4,7 +4,8 @@ import sys;
 import tomllib;
 import from pathlib { Path }
 import from jaclang.project.apps { AppConfig, implicit_app, parse_apps }
-glob CAPABILITY_SECTIONS: tuple[str, ...] = (
+glob ENV_REF_PATTERN: str = r"\$\{([^}:]+)(?:(:[-?])([^}]*))?\}",
+     CAPABILITY_SECTIONS: tuple[str, ...] = (
          "byllm",
          "scale",
          "client",
@@ -267,6 +268,10 @@ def interpolate_env_vars(value: str, environ: dict[str, str] | None = None) -> s
 def resolve_env_refs(
     data: any, environ: dict[str, str] | None = None, path: str = ""
 ) -> tuple[any, list[UnresolvedRef]];
+
+def _unresolved_in(
+    value: str, path: str, environ: dict[str, str] | None
+) -> list[UnresolvedRef];
 
 def report_env_findings(
     refs: list[UnresolvedRef], context: str, strict: bool, hint: str = ""

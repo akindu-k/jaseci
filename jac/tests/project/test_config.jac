@@ -193,6 +193,15 @@ test "config load records unset environment variables instead of failing" {
         ("bare in jac.toml", {"jac.toml": base + bare}, "", [(setting, False)]),
         ("required in jac.toml", {"jac.toml": base + required}, "", [(setting, True)]),
         (
+            "required after a bare reference in one value",
+            {
+                "jac.toml": base
+                    + f"[scale.secrets]\nSOME_API_KEY = \"${{{var_name}}}/${{{var_name}:?set it}}\"\n"
+            },
+            "",
+            [(setting, False), (setting, True)]
+        ),
+        (
             "required in a profile file",
             {"jac.toml": base, "jac.prod.toml": required},
             "prod",

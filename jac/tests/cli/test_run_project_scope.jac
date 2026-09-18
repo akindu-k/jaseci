@@ -274,6 +274,14 @@ test "a run warns on an unset ${VAR} and stops on an unset ${VAR:?}" {
         ("bare in jac.toml", base + setting("plugins.demo", ""), "", "", 0, True),
         ("required in jac.toml", base + required, "", "", 2, True),
         ("required in the active profile", base, required, "prod", 2, True),
+        (
+            "required after a bare reference in one value",
+            base + setting("plugins.demo", "}/${" + var_name + ":?x"),
+            "",
+            "",
+            2,
+            True
+        ),
         ("a default", base + setting("plugins.demo", ":-x"), "", "", 0, False),
         ("a deploy secret", base + setting("scale.secrets", ":?x"), "", "", 0, False),
         (

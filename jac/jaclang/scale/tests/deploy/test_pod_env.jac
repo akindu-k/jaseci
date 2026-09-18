@@ -695,6 +695,16 @@ test "a deploy setting this machine cannot resolve stops manifest generation" {
             ]
         ),
         (
+            "an unset nested setting the pods would resolve differently",
+            {
+                "jac.toml": "[scale.kubernetes.http_activation]\n"
+                "interceptor_service_address = \"${K8S_NAMESPACE}.svc\"\n"
+            },
+            [
+                "scale.kubernetes.http_activation.interceptor_service_address: Environment variable K8S_NAMESPACE is not set"
+            ]
+        ),
+        (
             "a secret the active profile replaces",
             {
                 "jac.toml": "[environment]\ndefault_profile = \"prod\"\n" + secret,
@@ -720,6 +730,7 @@ test "a deploy setting this machine cannot resolve stops manifest generation" {
             with mock.patch.dict(os.environ, {}) {
                 os.environ.pop("DEMO_HOST_KEY", None);
                 os.environ.pop("DEMO_NS", None);
+                os.environ.pop("K8S_NAMESPACE", None);
                 scale = JacScaleConfig(Path(project));
                 k8s_config = KubernetesConfig.from_dict(
                     KubernetesConfig,
