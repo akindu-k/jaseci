@@ -239,7 +239,8 @@ test "sealed preparation consumes baked artifacts without compiling retained sou
     import from jaclang.server.sealed_serve { client_dist_for }
     import from jaclang.cli.console { console }
     for package_name in ['prepared_sealed_test', 'site'] {
-        with tempfile.TemporaryDirectory(prefix='jac-prepared-sealed-') as tmp {
+        with tempfile.TemporaryDirectory(prefix='jac-prepared-sealed-') as raw_tmp {
+            tmp = os.path.realpath(raw_tmp);
             base = Path(tmp);
             path = base / f'{package_name}.jac';
             package_init = base / '__init__.jac';
