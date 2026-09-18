@@ -2,7 +2,7 @@ import os;
 import from jaclang.cli.console { console }
 import from jaclang.cli.commands.cli_helpers { proc_file as _proc_file }
 
-impl tool(tool: str, args: list = []) -> int {
+impl tool(tool: str, args: list[str] = []) -> int {
     import importlib;
     import from jaclang.compiler.tools.lang_tools { AstTool }
     if tool in ("jac2py", "py2jac", "jac2js") {
@@ -67,7 +67,7 @@ impl dot(
     initial: str = "",
     depth: int = -1,
     traverse: bool = False,
-    connection: list = [],
+    connection: list[str] = [],
     bfs: bool = False,
     edge_limit: int = 512,
     node_limit: int = 512,
@@ -84,7 +84,7 @@ impl dot(
         mod_ns = vars(module) if module else {};
         try {
             nd = mod_ns.get(initial, eval(initial, mod_ns)) if initial else None;
-            graph = printgraph(
+            rendered_graph = printgraph(
                 nd=nd,
                 depth=depth,
                 traverse=traverse,
@@ -100,11 +100,11 @@ impl dot(
             return 1;
         }
         if to_screen {
-            console.print(graph);
+            console.print(rendered_graph);
         } else {
             file_name = saveto or f"{mod}.dot";
             with open(file_name, 'w') as file {
-                file.write(graph);
+                file.write(rendered_graph);
             }
             console.print(
                 f">>> Graph content saved to {os.path.join(os.getcwd(), file_name)}"
@@ -144,7 +144,7 @@ impl completions(shell: str = "bash", install: bool = False) -> int {
     return 0;
 }
 
-def _extract_commands(specs: list) -> list {
+def _extract_commands(specs: list[CommandSpec]) -> list[dict[str, any]] {
     import from jaclang.cli.command { ArgKind }
     commands = [];
     for spec in sorted(specs, key=lambda (s: any) { s.name; }) {

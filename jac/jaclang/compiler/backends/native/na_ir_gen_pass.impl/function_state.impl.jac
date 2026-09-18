@@ -95,16 +95,16 @@ impl NaIRGenPass._bind_function_parameter(
         slot = self._emit_closure_cell(name, value.type);
         self.builder.store(value, slot);
         self.local_vars[name] = slot;
-        if borrowed and isinstance(value.type, ir.PointerType) {
-            self._emit_rc_retain(value, op="param_cell", loc=name);
+        if borrowed {
+            self._emit_take_ref(value, op="param_cell", loc=name);
         }
         return;
     }
     slot = self._entry_alloca(value.type, name);
     self.builder.store(value, slot);
     self.local_vars[name] = slot;
-    if rebound and isinstance(value.type, ir.PointerType) {
-        self._emit_rc_retain(value, op="param_promote", loc=name);
+    if borrowed and rebound and self._is_reference_type(value.type) {
+        self._emit_take_ref(value, op="param_promote", loc=name);
     } elif borrowed {
         self.param_vars.add(name);
     }

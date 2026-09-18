@@ -4,7 +4,8 @@ import os;
 import sys;
 import from ctypes { c_char_p, c_double, c_int64, c_void_p, cast, py_object }
 import from jaclang.runtime.osp_tag { stable_osp_tag }
-import type from jaclang.compiler.passes.transform { PassResult }
+import type from jaclang.compiler.passes.context { Alert, PassResult }
+import type from jaclang.compiler.frontend.parser.tokens { CommentData, SrcDiag }
 
 glob CODE_INT: int = 1,
      CODE_BOOL: int = 2,
@@ -17,7 +18,7 @@ glob CODE_INT: int = 1,
      CODE_OPTENUM: int = 9,
      CODE_NATDICT: int = 10;
 
-glob CLASS_MODULES: tuple = (
+glob CLASS_MODULES: tuple[str, ...] = (
          "jaclang.compiler.frontend.unitree",
          "jaclang.compiler.frontend.codeinfo",
          "jaclang.compiler.frontend.srcloc",
@@ -26,34 +27,39 @@ glob CLASS_MODULES: tuple = (
          "jaclang.compiler.frontend.roles",
          "jaclang.compiler.frontend.relations",
          "jaclang.compiler.frontend.diagnostics",
-         "jaclang.compiler.passes.transform",
+         "jaclang.compiler.passes.context",
 
      );
 
-
-def _enum_class(name: str) -> any {
-    import importlib;
-    for modname in (
-        "jaclang.compiler.frontend.constant",
-        "jaclang.compiler.frontend.parser.tokens",
-        "jaclang.compiler.frontend.diagnostics"
-    ) {
-        mod = importlib.import_module(modname);
-        cls = getattr(mod, name, None);
-        if isinstance(cls, `type) {
-            return cls;
+def _enum_class(name: str, owner: type) -> type | None {
+    import from enum { Enum }
+    for base in owner.__mro__ {
+        module = sys.modules.get(base.__module__);
+        if module is None {
+            continue;
+        }
+        candidate = getattr(module, name, None);
+        if isinstance(candidate, `type) and issubclass(candidate, Enum) {
+            return candidate;
+        }
+        for candidate in vars(module).values() {
+            if isinstance(candidate, `type)
+                and issubclass(candidate, Enum)
+                and candidate.__name__ == name {
+                return candidate;
+            }
         }
     }
     return None;
 }
 
 
-def _enum_table(cls: any) -> (dict | None) {
+def _enum_table(cls: any) -> (dict[int, object] | None) {
     import enum as _enum;
     if not (isinstance(cls, `type) and issubclass(cls, _enum.Enum)) {
         return None;
     }
-    members: list = `list(cls);
+    members: list[_enum.Enum] = `list(cls);
     if not members {
         return None;
     }
@@ -63,15 +69,14 @@ def _enum_table(cls: any) -> (dict | None) {
     return {i: members[i] for i in range(len(members))};
 }
 
-
 class NativeCompiler {
     def init(self: NativeCompiler, lib_path: str) {
         self.lib = ctypes.PyDLL(lib_path);
         with open(lib_path + ".layout.json") as f {
             self.layout = json.load(f)["classes"];
         }
-        self._keep = [];
-        self.classes = {};
+        self._keep: list[object] = [];
+        self.classes: dict[str, any] = {};
         self._value_rows: dict[str, int] = {};
         self._bind();
         self._register();
@@ -81,6 +86,8 @@ class NativeCompiler {
         L = self.lib;
         L.jac_str_new.argtypes = [c_char_p, c_int64];
         L.jac_str_new.restype = c_void_p;
+        L.jac_release.argtypes = [c_void_p];
+        L.jac_release.restype = None;
         for name in ("jc_run", "jc_annex") {
             fn = getattr(L, name);
             fn.argtypes = [c_void_p, c_void_p, c_int64, c_void_p, c_void_p, c_int64];
@@ -160,7 +167,7 @@ class NativeCompiler {
         return stable_osp_tag(name);
     }
 
-    def _field_annotations(self: NativeCompiler, cls: any) -> dict {
+    def _field_annotations(self: NativeCompiler, cls: any) -> dict[str, str] {
         import from jaclang.runtime.object_interop { fields }
         import from jaclang.runtime.object_model { MISSING }
         out = {};
@@ -198,10 +205,12 @@ class NativeCompiler {
             } elif code == "str" {
                 nat_code = CODE_STR;
             } elif code == "enum" {
-                ecls = _enum_class(aux);
+                ecls = _enum_class(aux, cls);
                 table = _enum_table(ecls) if ecls else None;
                 if table is None {
-                    continue;
+                    raise ValueError(
+                        f'Native field {cls.__module__}.{name}.{fname} has unresolved enum {aux}'
+                    );
                 }
                 nat_code = CODE_ENUM;
                 enum_h = self._hold(table);
@@ -231,7 +240,7 @@ class NativeCompiler {
                 if not m {
                     continue;
                 }
-                ecls = _enum_class(m.group(1));
+                ecls = _enum_class(m.group(1), cls);
                 table = _enum_table(ecls) if ecls else None;
                 if table is None {
                     continue;
@@ -247,7 +256,7 @@ class NativeCompiler {
         }
     }
 
-    def _register_value(self: NativeCompiler, schema: dict) -> int {
+    def _register_value(self: NativeCompiler, schema: dict[str, any]) -> int {
         key = json.dumps(schema, sort_keys=True);
         cached = self._value_rows.get(key);
         if cached is not None {
@@ -395,15 +404,21 @@ class NativeCompiler {
         ab = a.encode();
         bb = b.encode();
         pa = self.lib.jac_str_new(ab, len(ab));
-        pb = self.lib.jac_str_new(bb, len(bb));
-        return fn(
-            c_void_p(pa),
-            c_void_p(pa),
-            c_int64(len(ab)),
-            c_void_p(pb),
-            c_void_p(pb),
-            c_int64(len(bb))
-        );
+        pb = None;
+        try {
+            pb = self.lib.jac_str_new(bb, len(bb));
+            return fn(
+                c_void_p(pa),
+                c_void_p(pa),
+                c_int64(len(ab)),
+                c_void_p(pb),
+                c_void_p(pb),
+                c_int64(len(bb))
+            );
+        } finally {
+            self.lib.jac_release(pb);
+            self.lib.jac_release(pa);
+        }
     }
 
     def annex(self: NativeCompiler, annex_src: str, annex_path: str) -> int {
@@ -423,7 +438,9 @@ class NativeCompiler {
     }
 
     def take_pass_results(self: NativeCompiler) -> dict[str, PassResult] {
-        import from jaclang.compiler.passes.transform { PassResult }
+        import from jaclang.compiler.passes.context {
+            PassResult as CompletedPassResult
+        }
         import from jaclang.compiler.passes.ast_validation_pass { ASTValidationPass }
         import from jaclang.compiler.passes.sym_tab_build_pass { SymTabBuildPass }
         out: dict[str, PassResult] = {};
@@ -436,8 +453,10 @@ class NativeCompiler {
             if not (completed & pass_id) {
                 continue;
             }
-            errors = self._take(self.lib.jc_take_pass_alerts(pass_id, 0)) or [];
-            warnings = self._take(self.lib.jc_take_pass_alerts(pass_id, 1)) or [];
+            errors: list[Alert] = self._take(self.lib.jc_take_pass_alerts(pass_id, 0))
+                or [];
+            warnings: list[Alert] = self._take(self.lib.jc_take_pass_alerts(pass_id, 1))
+                or [];
             for alert in errors + warnings {
                 alert.from_pass = pass_cls;
                 if alert.code is not None {
@@ -445,7 +464,7 @@ class NativeCompiler {
                     alert.code = DIAGNOSTICS[alert.code.code];
                 }
             }
-            out[pass_cls.__name__] = PassResult(
+            out[pass_cls.__name__] = CompletedPassResult(
                 errors_had=errors,
                 warnings_had=warnings,
                 time_taken=self.lib.jc_pass_time(pass_id)
@@ -468,15 +487,15 @@ class NativeCompiler {
         return self._take(self.lib.jc_take_module());
     }
 
-    def take_diags(self: NativeCompiler) -> list {
+    def take_diags(self: NativeCompiler) -> list[SrcDiag] {
         return self._take(self.lib.jc_take_diags()) or [];
     }
 
-    def take_lexdiags(self: NativeCompiler) -> list {
+    def take_lexdiags(self: NativeCompiler) -> list[SrcDiag] {
         return self._take(self.lib.jc_take_lexdiags()) or [];
     }
 
-    def take_comments(self: NativeCompiler) -> list {
+    def take_comments(self: NativeCompiler) -> list[CommentData] {
         return self._take(self.lib.jc_take_comments()) or [];
     }
 
@@ -494,9 +513,8 @@ class NativeCompiler {
 }
 
 
-glob _KERNEL_CELL: list = [],
-     _RESOLVED: list = [];
-
+glob _KERNEL_CELL: list[NativeCompiler] = [],
+     _RESOLVED: list[None] = [];
 
 def _lib_name -> str {
     if sys.platform == "darwin" {
@@ -504,7 +522,6 @@ def _lib_name -> str {
     }
     return "libjac_compiler.so";
 }
-
 
 def _kit_site_present -> bool {
     shim = "libjacllvm.dylib" if sys.platform == "darwin" else "libjacllvm.so";
@@ -524,7 +541,6 @@ def _kit_site_present -> bool {
     }
     return False;
 }
-
 
 def _find_lib -> (str | None) {
     if os.environ.get("JAC_STUBCAT_BUILDING") {
@@ -571,7 +587,6 @@ def _find_lib -> (str | None) {
     }
     return None;
 }
-
 
 def ensure_loaded -> (NativeCompiler | None) {
     if _KERNEL_CELL {

@@ -162,8 +162,8 @@ def _with_upstream(work: any) -> any {
 }
 
 
-def _fetch_sequence(paths: list[str]) -> dict {
-    async def work(upstream: any) -> dict {
+def _fetch_sequence(paths: list[str]) -> dict[str, any] {
+    async def work(upstream: any) -> dict[str, any] {
         seen: list[tuple[int, str]] = [];
         for path in paths {
             resp = await arequest("GET", f"{upstream.base()}{path}");
@@ -175,8 +175,8 @@ def _fetch_sequence(paths: list[str]) -> dict {
 }
 
 
-def _fetch_after_drop(method: str, payload: any) -> dict {
-    async def work(upstream: any) -> dict {
+def _fetch_after_drop(method: str, payload: any) -> dict[str, any] {
+    async def work(upstream: any) -> dict[str, any] {
         await arequest("GET", f"{upstream.base()}/hello");
         upstream.drop_next = True;
         text: (str | None) = None;
@@ -224,7 +224,7 @@ test "a dead pooled connection is retried only for idempotent methods" {
 
 
 test "the retry opens a fresh connection instead of taking another dead one" {
-    async def work(upstream: any) -> dict {
+    async def work(upstream: any) -> dict[str, any] {
         await asyncio.gather(
             *[arequest("GET", f"{upstream.base()}/hello") for _ in range(2)]
         );
@@ -245,7 +245,7 @@ test "the retry opens a fresh connection instead of taking another dead one" {
 
 
 test "a drained streaming response hands its connection back to the pool" {
-    async def work(upstream: any) -> dict {
+    async def work(upstream: any) -> dict[str, any] {
         streamed = await arequest("GET", f"{upstream.base()}/chunked", stream=True);
         collected = b"";
         async for chunk in streamed.aiter_raw() {
@@ -267,7 +267,7 @@ test "a drained streaming response hands its connection back to the pool" {
 
 
 test "a pooled connection dropped by the upstream is replaced transparently" {
-    async def work(upstream: any) -> dict {
+    async def work(upstream: any) -> dict[str, any] {
         first = await arequest("GET", f"{upstream.base()}/hello");
         upstream.drop_connections();
         await asyncio.sleep(0.05);
@@ -299,7 +299,7 @@ test "the pool bounds how many idle connections it keeps per host" {
 
 
 test "a caller supplied content length does not reach the upstream" {
-    async def work(upstream: any) -> dict {
+    async def work(upstream: any) -> dict[str, any] {
         response = await arequest(
             "POST",
             f"{upstream.base()}/hello",

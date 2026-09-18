@@ -253,7 +253,7 @@ impl MicroserviceGateway.serve_admin_asset(asset_path: str) -> Response | None {
     return Response(content=target.read_bytes(), media_type=content_type);
 }
 
-glob _BUILTIN_PREFIXES: tuple = GATEWAY_BUILTIN_PREFIXES,
+glob _BUILTIN_PREFIXES: tuple[str, ...] = GATEWAY_BUILTIN_PREFIXES,
      _BUILTIN_EXACT: set[str] = GATEWAY_BARE_API_PATHS,
      _DISCOVERY_SEGMENTS: set[str] = set(GATEWAY_DISCOVERY_SEGMENTS),
      _REPLICATED_SEGMENTS: set[str] = set(GATEWAY_REPLICATED_SEGMENTS);
@@ -287,9 +287,20 @@ impl MicroserviceGateway.build_forward_headers(request: Request) -> dict[str, st
 }
 
 impl MicroserviceGateway.handle_health -> Response {
+    statuses = [e.status for e in self.registry.entries.values()];
+    degraded = `any(
+        s in (ServiceStatus.UNHEALTHY, ServiceStatus.STOPPED) for s in statuses
+    );
+    if not statuses or all(s == ServiceStatus.HEALTHY for s in statuses) {
+        overall = "healthy";
+    } elif degraded {
+        overall = "degraded";
+    } else {
+        overall = "starting";
+    }
     return JSONResponse(
-        status_code=200,
-        content={"status": "healthy", "services": self.registry.health_summary()}
+        status_code=503 if degraded else 200,
+        content={"status": overall, "services": self.registry.health_summary()}
     );
 }
 
@@ -316,9 +327,9 @@ impl MicroserviceGateway.aggregate_graph_data(request: Request) -> Response | No
     fwd_headers = self.build_forward_headers(request);
     query: str = str(request.url.query);
 
-    merged_nodes: dict[str, dict] = {};
+    merged_nodes: dict[str, dict[str, any]] = {};
     edge_keys: set = set();
-    merged_edges: list[dict] = [];
+    merged_edges: list[dict[str, any]] = [];
     fragments: int = 0;
 
     for (svc_name, svc_entry) in self.eligible_services() {
@@ -326,10 +337,14 @@ impl MicroserviceGateway.aggregate_graph_data(request: Request) -> Response | No
         if query {
             target_url = f"{target_url}?{query}";
         }
+        per_svc_headers = dict(fwd_headers);
+        if svc_entry.host_override {
+            per_svc_headers["Host"] = svc_entry.host_override;
+        }
         result = await raw_forward(
             "GET",
             target_url,
-            fwd_headers,
+            per_svc_headers,
             b"",
             timeout=int(http_forward_timeout(svc_name))
         );
@@ -406,7 +421,7 @@ impl MicroserviceGateway.handle_builtin_passthrough(
     if owner is not None {
         return await self.forward_root_path(request, owner, path);
     }
-    unknown: list = [
+    unknown: list[tuple[str, ServiceEntry]] = [
         (name, svc)
         for (name, svc) in self.eligible_services()
         if not self.route_table.is_learned(name)
@@ -554,7 +569,7 @@ impl MicroserviceGateway.probe_services(
 
     ordered: list[tuple[str, ServiceEntry]] = sorted(
         candidates,
-        key=lambda (pair: tuple) { (
+        key=lambda (pair: tuple[str, ServiceEntry]) { (
             0 if pair[1].is_root else 1,
             0 if pair[1].status == ServiceStatus.HEALTHY else 1
         ); }
@@ -569,10 +584,14 @@ impl MicroserviceGateway.probe_services(
         }
         logger.info(f"Probe: {request.method} {path} -> {target_url}");
 
+        per_svc_headers = dict(fwd_headers);
+        if svc_entry.host_override {
+            per_svc_headers["Host"] = svc_entry.host_override;
+        }
         fr = await stream_forward(
             request.method,
             target_url,
-            fwd_headers,
+            per_svc_headers,
             body,
             timeout=int(http_forward_timeout(svc_name))
         );
@@ -617,6 +636,9 @@ impl MicroserviceGateway.forward_to(
     }
 
     fwd_headers = self.build_forward_headers(request);
+    if service_entry.host_override {
+        fwd_headers["Host"] = service_entry.host_override;
+    }
     body: bytes = request.body;
 
     timeout = http_forward_timeout(service_entry.name);
@@ -841,7 +863,9 @@ impl MicroserviceGateway.setup -> ServingApp {
                 ROUTE_PROXY,
                 ROUTE_CLIENT_PAGE
             }
-            service_prefixes: list = [e.prefix for e in gw.registry.entries.values()];
+            service_prefixes: list[str] = [
+                e.prefix for e in gw.registry.entries.values()
+            ];
             decision = classify_route(
                 path, service_prefixes, client_pages=gw.has_client_bundle()
             );

@@ -1,4 +1,7 @@
-impl SymTabBuildPass.before_pass -> None {
+impl SymTabBuildPass.prepare with entry {
+    if self.ctx.nested_depth {
+        return;
+    }
     self.cur_sym_tab = [];
 }
 
@@ -60,7 +63,7 @@ impl SymTabBuildPass.exit_global_vars with GlobalVars exit {
                 j.name_spec._sym_category = SymbolType.MOD_VAR;
                 j.sym_tab.def_insert(j, access_spec=here, single_decl='global var');
             } else {
-                self.ice('Expected name type for global vars');
+                self.ctx.ice('Expected name type for global vars');
             }
         }
     }
@@ -79,7 +82,7 @@ impl SymTabBuildPass.exit_assignment with Assignment exit {
             if isinstance(i, Name) {
                 scope = find_python_scope_node_of(i);
                 if scope is not None and i.sym_name in scope.implicit_rebinds {
-                    self.emit(E0064, node_override=i, name=i.sym_name);
+                    self.ctx.emit(E0064, node_override=i, name=i.sym_name);
                 }
             }
         }
@@ -123,6 +126,24 @@ impl SymTabBuildPass.exit_test with Test exit {
     self.pop_scope();
 }
 
+impl SymTabBuildPass._import_absorbed_symbol(
+    scope: UniScopeNode, symbol: Symbol
+) -> None {
+    if symbol.access == SymbolAccess.PRIVATE or symbol.parent_tab is scope {
+        return;
+    }
+
+    declaration = Name.gen_stub_from_node(
+        symbol.decl, symbol.sym_name, set_name_of=symbol.decl.name_of
+    );
+    declaration.bind_sym(symbol.decl.name_of, symbol.sym_name, symbol.sym_type);
+    declaration.set_parent(scope);
+    binding = scope.def_insert(declaration, single_decl='import absorb', imported=True);
+    if binding is not None {
+        binding.provider = symbol.provider;
+    }
+}
+
 impl SymTabBuildPass._exit_import_absorb(nd: Import) -> None {
     sym_table_to_update = find_python_scope_node_of(nd);
     if (sym_table_to_update is None) {
@@ -138,23 +159,12 @@ impl SymTabBuildPass._exit_import_absorb(nd: Import) -> None {
         return;
     }
     self._bind_import_path_symbols(import_all_module_path_node);
-    if module {
-        for sym in module.names_in_scope.values() {
-            if (sym.access != SymbolAccess.PRIVATE) {
-                sym_table_to_update.def_insert(
-                    sym.defn[0], single_decl='import absorb', imported=True
-                );
-            }
-        }
-
-        for (name, overload_syms) in module.names_in_scope_overload.items() {
-            for sym in overload_syms {
-                if (sym.access != SymbolAccess.PRIVATE) {
-                    sym_table_to_update.def_insert(
-                        sym.defn[0], single_decl='import absorb', imported=True
-                    );
-                }
-            }
+    for symbol in module.names_in_scope.values() {
+        self._import_absorbed_symbol(sym_table_to_update, symbol);
+    }
+    for overloads in module.names_in_scope_overload.values() {
+        for symbol in overloads {
+            self._import_absorbed_symbol(sym_table_to_update, symbol);
         }
     }
 }
@@ -234,7 +244,7 @@ impl SymTabBuildPass.enter_archetype with Archetype entry {
                     and (d.name_of.in_native_context() == nd_native)
                     and (d.name_of.in_client_context() == nd_client)
                 ) {
-                    self.emit(
+                    self.ctx.emit(
                         E0077,
                         node_override=here,
                         name=here.sym_name,

@@ -7,6 +7,35 @@ import from jaclang.compiler.frontend.unitree { Module, UniScopeNode }
 import from jaclang.compiler.native_compiler { ensure_loaded }
 import from jaclang.compiler.passes.ast_validation_pass { ASTValidationPass }
 import from jaclang.compiler.passes.sym_tab_build_pass { SymTabBuildPass }
+import from jaclang.compiler.passes.graph_lowering_pass { GraphLoweringPass }
+
+test "native early symbols wait for construction lowering" {
+    kernel = ensure_loaded();
+    if kernel is not None {
+        prog = JacProgram();
+        (mod, failed) = parse_woven(
+            "node N {} def build { return graph { N() ++> N(); }; }",
+            "early_construction.jac",
+            prog,
+            [],
+            early_context="client"
+        );
+        assert not failed;
+        assert id(mod) not in prog.analysis.early_passes;
+        run_pass(GraphLoweringPass, mod, prog);
+        run_pass(ASTValidationPass, mod, prog);
+        run_pass(SymTabBuildPass, mod, prog);
+        assert not prog.errors_had;
+        imports = [
+            name
+            for scope in mod.flatten()
+            if isinstance(scope, UniScopeNode)
+            for (name, symbol) in scope.names_in_scope.items()
+            if symbol.imported
+        ];
+        assert any(name.startswith("__jac_graph_builder_type_") for name in imports);
+    }
+}
 
 test "native validation preserves client code context" {
     kernel = ensure_loaded();
@@ -57,21 +86,21 @@ def total(items: list[int]) -> int {
 @overload def choose(value: str) -> str;
 """;
 
-def scope_profile(mod: Module) -> list {
-    out: list = [];
+def scope_profile(mod: Module) -> list[any] {
+    out: list[any] = [];
     for scope in [mod]
         + [
             n
             for n in mod._in_mod_nodes
             if isinstance(n, UniScopeNode) and n is not mod
         ] {
-        names: list = [];
+        names: list[any] = [];
         for (name, symbol) in scope.names_in_scope.items() {
             names.append((name, symbol.imported, [d.sym_name for d in symbol.defn]));
             assert symbol.parent_tab is scope;
             assert symbol.provider is None;
         }
-        overloads: list = [];
+        overloads: list[any] = [];
         for (name, symbols) in scope.names_in_scope_overload.items() {
             overloads.append((name, [[d.sym_name for d in s.defn] for s in symbols]));
             for symbol in symbols {

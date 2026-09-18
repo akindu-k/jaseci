@@ -45,7 +45,7 @@ def compile_na_inline(label: str, code: str) -> JacProgram {
 layout assertions) and the JAC_NA_DEBUG stderr stream (for demotion-reason
 assertions -- granular demotion reports its cause there rather than as a
 program error)."""
-def compile_na_inline_demote(label: str, code: str) -> tuple {
+def compile_na_inline_demote(label: str, code: str) -> tuple[any, ...] {
     import contextlib;
     import io;
     path = os.path.join(FIXTURES_DIR, f"_guardrail_{label}.jac");
@@ -110,7 +110,7 @@ def server_answer(label: str, code: str, name: str) -> int {
         file_path=path, use_str=code, options=CompileOptions(default_codespace='server')
     );
     assert not prog.errors_had , f"server-lane compilation errors: {fmt_errors(prog)}";
-    ns: dict = {};
+    ns: dict[str, any] = {};
     exec(compile(ir.gen.py, path, "exec"), ns);
     return ns[name]();
 }
@@ -941,6 +941,32 @@ test "check rejects a native def with an unknown return type" {
     )}";
 }
 
+# An unresolved type in an `as` cast is the same silent-i64 hazard as an
+# unresolved annotation: native lowering reads the cast type to pick a layout.
+test "check rejects a native cast to an unknown type" {
+    prog = check_na_inline(
+        "native_unknown_cast",
+        "def widen(n: int) -> int {\n    v = n as uint32_t;\n    return v;\n}\n"
+    );
+    assert has_error_code(prog, "E2018") , f"Expected E2018 for unknown native cast type 'uint32_t', got: {fmt_errors(
+        prog
+    )}";
+}
+
+# Nesting depth is not a boundary of the language: an unresolved annotation is
+# an error however deep the generic arguments go.
+test "check rejects an unknown type nested deep in a native annotation" {
+    prog = check_na_inline(
+        "native_unknown_deep",
+        "def take(xs: dict[str, dict[str, dict[str, list[uint32_t]]]]) -> int {\n"
+        "    return 0;\n"
+        "}\n"
+    );
+    assert has_error_code(prog, "E2018") , f"Expected E2018 for a deeply nested unknown native type 'uint32_t', got: {fmt_errors(
+        prog
+    )}";
+}
+
 # Unknown object field annotations are rejected at analysis time (E2018 from
 # StaticAnalysisPass, the single detection source) naming the written type.
 test "native object field with an unknown type names the type, not '<Unknown>'" {
@@ -1239,4 +1265,15 @@ test "guardrail: nested event ability demotes its function, not an ICE" {
     assert "NA_DEBUG demote widget" in log , (
         f"no demotion recorded for widget in:\n{log}"
     );
+}
+
+test "C callbacks reject a boxed Callable parameter instead of bitcasting it" {
+    program = compile_na_inline(
+        "clib_boxed_callback",
+        "import from c { def register(callback: Callable[[i32], i32]); }\n"
+        "def sign(value: i32) -> i32 { return value; }\n"
+        "def install(callback: Callable[[i32], i32]) { register(callback); }\n"
+        "with entry { install(sign); }\n"
+    );
+    assert has_error_code(program, "E5092") , fmt_errors(program);
 }

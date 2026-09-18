@@ -291,12 +291,12 @@ Parameters are classified as: **path** (matches `{name}` in path) → **file** (
 
 ```jac
 @restspec(method=HTTPMethod.GET)
-def :pub health_check() -> dict {
+def :pub health_check() -> dict[str, any] {
     return {"status": "healthy"};
 }
 
 @restspec(method=HTTPMethod.GET, path="/custom/status")
-def :pub app_status() -> dict {
+def :pub app_status() -> dict[str, any] {
     return {"status": "running", "version": "1.0.0"};
 }
 ```
@@ -347,24 +347,35 @@ The HTTP concerns stay on the declaration, so the body remains an ordinary
 #### Limits
 
 - **Functions only.** A walker can `report` any number of times, so there is
-  no single value to project onto a raw body. `envelope=False` on a walker
-  has no effect.
-- **Text only.** A `bytes` return is stringified by `Serializer` before the
-  response layer sees it, so binary payloads are not yet expressible. Serve
-  those as static assets.
+  no single value to project onto a raw body. `envelope=False` and `produces`
+  on a walker have no effect, and the decorator logs a warning saying so at
+  import time. A route that needs a raw body has to be a `def`.
 - **Errors keep the envelope.** A failing call still returns the JSON error
   envelope with its usual status code, so a 500 is never mistaken for a valid
   payload of the declared content type. Callers should check the status, and
   `curl -f` does this for you.
 
-Omitting `produces` yields `text/plain; charset=utf-8`. A non-`str` return is
-JSON-encoded into the body, but still without the envelope around it -- useful
-when a third-party client expects a bare JSON document:
+A `bytes` return is written to the body unchanged, so a raw endpoint can hand
+the browser a file -- a spreadsheet, an image, a PDF -- without base64 in a JSON
+field:
+
+```jac
+@restspec(method=HTTPMethod.GET, path="/report.xlsx",
+          produces="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          envelope=False)
+def :pub report_xlsx() -> bytes {
+    return build_workbook();   # body is exactly these bytes
+}
+```
+
+Omitting `produces` yields `text/plain; charset=utf-8`. A non-`str`, non-`bytes`
+return is JSON-encoded into the body, but still without the envelope around it
+-- useful when a third-party client expects a bare JSON document:
 
 ```jac
 @restspec(method=HTTPMethod.GET, path="/.well-known/jac.json",
           produces="application/json", envelope=False)
-def :pub well_known() -> dict {
+def :pub well_known() -> dict[str, any] {
     return {"version": "1.0"};   # body is exactly {"version": "1.0"}
 }
 ```
@@ -1392,6 +1403,8 @@ api_key_expiry_days = 365
 | `signature_header` | string | `"X-Webhook-Signature"` | HTTP header name containing the HMAC signature. |
 | `verify_signature` | boolean | `true` | Whether to verify HMAC signatures on incoming requests. |
 | `api_key_expiry_days` | integer | `365` | Default expiry period for API keys in days. Set to `0` for permanent keys. |
+| `github_secret` | string | `""` | Secret that `scheme="github"` walkers verify `X-Hub-Signature-256` against (the GitHub App's webhook secret). Boot fails if a github-scheme walker exists and this is empty. |
+| `github_signature_header` | string | `"X-Hub-Signature-256"` | Header carrying the GitHub-style signature for `scheme="github"` walkers. |
 
 **Environment Variables:**
 
@@ -1500,6 +1513,32 @@ curl -X POST "http://localhost:8000/webhook/PaymentReceived" \
     -H "X-Webhook-Signature: $SIGNATURE" \
     -d "$PAYLOAD"
 ```
+
+#### GitHub-Signed Webhooks (`scheme="github"`)
+
+Providers such as GitHub sign the raw body with a shared secret and cannot send an API key. Declare the scheme on the walker and the endpoint switches verification:
+
+```jac
+@restspec(protocol=APIProtocol.WEBHOOK, scheme="github")
+walker GithubEvent {
+    has event: str = "",      # copied from X-GitHub-Event
+        delivery: str = "",   # copied from X-GitHub-Delivery
+        action: str = "",
+        installation: dict[str, any] = {};
+
+    can handle with Root entry {
+        report {"event": self.event, "action": self.action};
+    }
+}
+```
+
+- No `X-API-Key`. The runtime verifies `X-Hub-Signature-256` (`sha256=` plus HMAC-SHA256 of the raw body, keyed by `[scale.webhook].github_secret`; the prefix is optional).
+- No timestamp window: GitHub sends none, and only the body is signed, so `X-GitHub-Event` and `X-GitHub-Delivery` are not authenticated. Deduping on `X-GitHub-Delivery` absorbs GitHub's own redeliveries, not a captured body replayed with a new delivery id.
+- Deliveries must be `application/json`. GitHub's default content type (`application/x-www-form-urlencoded`, the JSON inside a `payload=` field) is refused with 415, so a misconfigured webhook shows up in the delivery log instead of running the walker with every field at its default.
+- The walker runs as the system identity (the user the scheduler runs jobs as, created at boot) and resolves its own tenant from the payload. Boot fails when `[scale.webhook].github_secret` is empty or that identity is missing.
+- `X-GitHub-Event` and `X-GitHub-Delivery` are copied into `event` and `delivery` when the walker declares them, and win over same-named body keys.
+- The body size cap and the per-minute rate limit apply; the rate limit is keyed by walker name.
+- The default scheme (`scheme` omitted or `"jac"`) is unchanged, and both kinds of walker can coexist in one app.
 
 ### Webhook vs Regular Walkers
 
@@ -1651,11 +1690,26 @@ Types that cross the app boundary use the same wire contract as client-to-server
 
 What works:
 
-- **`obj` types** -- fields hydrated recursively, including nested objects.
+- **`obj` types** -- fields hydrated recursively, including inherited fields, objects inside lists and dictionaries, optional fields, and recursive type declarations. Nested types are included even when the consumer imports only the function or the outer type. Import aliases on either side refer to the same consumer-side type.
 - **`enum` types** -- serialized by name.
 - **Primitives** -- `int`, `float`, `str`, `bool`, `None`, `list[T]`, `dict[K, V]`.
 - **Bidirectional** -- typed function arguments are wrapped on the way out and unwrapped on the way in.
 - **walkers** -- when imported by name. The consumer-side stub mirrors the provider's `has` fields, and the round-trip rehydrates the walker into a real instance with `reports` populated. See [Walker Imports](#walker-imports).
+
+Reconstruction uses the `_jac_type_id` identity in API responses and the boundary
+types collected by the compiler. An identity names the declaring module, and the
+app as well when that module is an app's entry file, so unrelated types with the
+same name remain distinct while aliases of one declaration share a consumer-side
+type, whichever app compiled the module. It applies to function results, walker fields,
+and reports, including when services run in separate processes. Ordinary
+dictionaries stay dictionaries. Forwarding a reconstructed value preserves its
+nested type markers and inherited fields, including when passed to a typed
+service parameter. Reconstruction only uses the declared boundary types; it
+does not import or execute the provider module.
+
+Browser stubs resolve field and function-signature types in their declaring
+modules too. Imports and re-exported aliases retain the matching boundary class,
+even when several providers declare types with the same name.
 
 What doesn't:
 
@@ -1742,7 +1796,7 @@ An un-awaited cross-app walker spawn is a message, not a call. It is written to 
 - **Dedupe window.** The key also dedupes the _sender_: within `DELIVERED_TTL_S` (24h) an identical un-awaited spawn -- same app, walker and arguments, hence the same default key -- is the same message and is dropped, whether the first copy is still pending or already delivered. To spawn twice on purpose, pass a distinct `idempotency_key=`. Delivered rows older than the TTL and expired receiver keys are pruned by every worker pass, after which the same spawn is a new message.
 - **Receiver scoping.** The receiving endpoint scopes a key by the authenticated caller, the provider app and the walker or function before it looks the key up or remembers it, so one client cannot replay another client's cached response by sending its key. The wire header is the raw key; scoping is internal.
 - **Retries and leases.** Exponential backoff per attempt, capped; after `DEFAULT_MAX_ATTEMPTS` (8) the entry is marked `dead`. A worker claims a row with a `LEASE_S` (60s) lease; if the process dies mid-delivery the lease expires and the row is retried, with `attempts` counting the lost try. `outbox.dead_letters()` lists dead rows, which are kept for inspection until `outbox.purge_dead(older_than_s=...)` removes them; `outbox.deliver_pending()` runs one delivery pass by hand (tests, cron) and `outbox.prune()` one pruning pass.
-- **Storage.** The project's Postgres store when one is configured (tables `jac_outbox`, `jac_outbox_seen`), else `.jac/data/outbox.sqlite`. Enqueue rides the caller's request transaction; the worker and the receiver's key bookkeeping use their own connection, committed on their own, so a remember that happens after the walker's scope has closed never leaves a request transaction open.
+- **Storage.** The project's Postgres store when one is configured (tables `jac_outbox` and `jac_outbox_seen`, part of the store's base schema and created with the rest of it), else `.jac/data/outbox.sqlite`. Enqueue rides the caller's request transaction; the worker and the receiver's key bookkeeping use their own connection, committed on their own, so a remember that happens after the walker's scope has closed never leaves a request transaction open.
 
 ```jac
 import from jaclang.server { outbox }
@@ -1867,6 +1921,7 @@ Always call `sv_client.clear_test_clients()` between tests to avoid bleed-over f
 | `async call(app, fn, kwargs)` / `async spawn_walker(app, walker, kwargs, cls)` | What the generated stubs call. |
 | `spawn_deferred(app, walker, kwargs, idempotency_key = "") -> str` | Enqueue a deferred spawn; returns the outbox entry id. |
 | `get_consumer_providers(consumer_app: str) -> list[str]` | The provider apps a consumer declared (the app DAG's edges out of it). |
+| `hydrate_walker_envelope(data, app, walker, cls)` / `function_result(data, app, fn)` | Decode a provider's response envelope: the executed walker rebuilt as an instance of `cls` from `data.result` with `data.reports` attached, or a function's `result`. Both raise `BridgeError` on a non-ok envelope; a custom transport ends with one of them. |
 
 ## CLI Commands
 

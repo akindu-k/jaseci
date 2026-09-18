@@ -34,7 +34,7 @@ obj ProjectConfig {
         classifiers: list[str] = [],
         requires_python: str = "",
         jac_version: str = "",
-        entry_point: str = "main.jac",
+        entry_point: str = "main",
         kind: str = "",
         default_app: str = "",
         urls: dict[str, str] = {},
@@ -49,7 +49,8 @@ obj RunConfig {
 }
 
 obj NativeConfig {
-    has target: str = "",
+    has require: list[str] = [],
+        target: str = "",
         opt: int = 2,
         debug: bool = False,
         threads: int = 4;
@@ -240,7 +241,7 @@ obj DevConfig {
         fmt_jobs: str = "";
 }
 
-def interpolate_env_vars(value: str) -> str;
+def interpolate_env_vars(value: str, environ: dict[str, str] | None = None) -> str;
 
 def find_project_root(start: Path | None = None) -> tuple[Path, Path] | None;
 
@@ -279,6 +280,7 @@ obj JacConfig {
         toml_path: Path | None = None,
         config_files: list[Path] | None = None,
         active_profile: str = "",
+        profile_override: str | None = None,
         _raw_data: dict[str, any] = {},
         entrypoints: dict[str, dict[str, str]] = {},
         optional_dependencies: dict[str, dict[str, str]] = {},
@@ -291,6 +293,10 @@ obj JacConfig {
     has default_app: str { getter; }
 
     static def discover(
+        start_path: Path | None = None, profile: str | None = None
+    ) -> JacConfig | None;
+
+    static def resolve(
         start_path: Path | None = None, profile: str | None = None
     ) -> JacConfig | None;
 
@@ -335,6 +341,7 @@ obj JacConfig {
     ) -> bool;
 
     def merge_from_toml_file(toml_path: Path) -> None;
+    def merge_apps_table(apps_table: dict[str, any]) -> None;
     def app(name: str) -> AppConfig | None;
     def resolve_app(name: str = "") -> AppConfig;
     def resolved_kind(app: AppConfig) -> str;
@@ -342,12 +349,11 @@ obj JacConfig {
     def app_for_path(abs_path: str) -> AppConfig | None;
     def app_for_target(entry_path: str = "") -> AppConfig | None;
     def serving_apps -> list[AppConfig];
-    def owner_app_for_path(abs_path: str) -> tuple[AppConfig | None, bool];
 }
 
 def _parse_toml_data(data: dict[str, any], toml_path: Path | None = None) -> JacConfig;
 
-def _parse_persons(raw: list[any]) -> list[PersonConfig];
+def _parse_persons(raw: list[object]) -> list[PersonConfig];
 
 def _parse_include(raw: dict[str, any]) -> PackageIncludeConfig;
 
@@ -358,7 +364,9 @@ glob _config: JacConfig | None = None,
      _config_by_root: dict[str, JacConfig | None] = {};
 
 def get_config(
-    start_path: Path | None = None, force_discover: bool = False
+    start_path: Path | None = None,
+    force_discover: bool = False,
+    profile: str | None = None
 ) -> JacConfig | None;
 
 def set_config(config: JacConfig | None) -> None;
@@ -369,6 +377,10 @@ def project_scope_is_pinned -> bool;
 
 def get_explicit_config -> JacConfig | None;
 
-def get_config_for_path(start_path: Path) -> JacConfig | None;
+def get_config_for_path(
+    start_path: Path, profile: str | None = None, force_discover: bool = False
+) -> JacConfig | None;
 
 def get_config_for_dir(start_dir: str) -> JacConfig | None;
+
+def active_profile_name(config: JacConfig | None) -> str;

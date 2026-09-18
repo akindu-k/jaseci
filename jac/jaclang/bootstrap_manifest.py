@@ -23,35 +23,76 @@ from __future__ import annotations
 
 import os
 
+# Data, not compiler code: the Zig bootstrap and CI read this same manifest
+# before a Jac compiler exists. Include the manifest itself in source digests.
+with open(os.path.join(os.path.dirname(__file__), "compiler_inputs.txt")) as _inputs:
+    COMPILER_DIGEST_ROOTS: tuple[str, ...] = tuple(
+        line.strip() for line in _inputs
+        if line.strip() and not line.lstrip().startswith("#")
+    )
+
+# JacPython now implements the running interpreter's compiler APIs. Its sources
+# participate in the producing compiler identity and the sealed release image.
+SOURCE_ONLY_PATHS: tuple[str, ...] = ()
+
 # Everything the jac0 tier compiles. Directory entries cover subtrees.
 # compiler/passes/ and compiler/backends/ are deliberately listed file by
-# file (or py/-subtree): their siblings (backends/es/, backends/native/,
-# backends/common/primitives.jac, the analysis passes) are full-compiler
-# modules and must never join the seed set by directory accident.
+# file (or implementation/parser subtree): their siblings (backends/es/,
+# backends/native/, backends/common/primitives.jac, the analysis passes)
+# are full-compiler modules and must not join the seed set by accident.
 SEED_PATHS: tuple[str, ...] = (
-    "compiler/frontend/",
+    "compiler/frontend/codeinfo.jac",
+    "compiler/frontend/const_fold.jac",
+    "compiler/frontend/constant.jac",
+    "compiler/frontend/diagnostic_utils.jac",
+    "compiler/frontend/diagnostics.jac",
+    "compiler/frontend/helpers.jac",
+    "compiler/frontend/impl/",
+    "compiler/frontend/module_facts.jac",
+    "compiler/frontend/parser/",
+    "compiler/frontend/relations.jac",
+    "compiler/frontend/roles.jac",
+    "compiler/frontend/srcloc.jac",
+    "compiler/frontend/unitree.impl/",
+    "compiler/frontend/unitree.jac",
     "compiler/driver/",
     "compiler/placement/",
-    "compiler/backends/py/",
+    "compiler/backends/py/codegen_ir.jac",
+    "compiler/backends/py/codegen_shim.jac",
+    "compiler/backends/py/impl/",
+    "compiler/backends/py/jcir_bc_gen_pass.jac",
+    "compiler/backends/py/jcir_facts.jac",
+    "compiler/backends/py/jcir_gen_pass.impl/",
+    "compiler/backends/py/jcir_gen_pass.jac",
     "compiler/backends/common/ast_gen_base.jac",
     "compiler/backends/common/kernel_units.jac",
     "compiler/backends/common/fmt_kernel.jac",
+    "compiler/backends/native/wasm_linker.jac",
+    "compiler/backends/native/linker_common.jac",
     "compiler/passes/annex_weave.jac",
     "compiler/passes/ast_validation_pass.jac",
+    "compiler/passes/graph_lowering_pass.jac",
     "compiler/passes/boundary_analysis_pass.jac",
     "compiler/passes/decl_impl_match_pass.jac",
     "compiler/passes/endpoint_effect_pass.jac",
     "compiler/passes/semantic_analysis_pass.jac",
     "compiler/passes/sym_tab_build_pass.jac",
-    "compiler/passes/transform.jac",
+    "compiler/passes/context.jac",
     "compiler/native_scope.jac",
     "compiler/field_semantics.jac",
     "compiler/native_compiler.jac",
     "compiler/jc_unit.jac",
     "compiler/jc_materialize.jac",
-    "compiler/passes/uni_pass.jac",
+    "compiler/passes/execution.jac",
     "compiler/tools/treeprinter.jac",
     "runtime/runtime.jac",
+    "runtime/constants.jac",
+    "runtime/build_services.jac",
+    "runtime/prepared.jac",
+    "runtime/prepared_loader.jac",
+    "runtime/source_app.jac",
+    "dist/source/build.jac",
+    "dist/source/run.jac",
     "runtime/object_model.jac",
     "runtime/object_interop.jac",
     "runtime/region.jac",
@@ -67,13 +108,20 @@ SEED_PATHS: tuple[str, ...] = (
     "runtime/osp_kernel_sv.jac",
     "runtime/osp_graph.jac",
     "runtime/osp_graph_sv.jac",
-    "runtime/osp_model.jac",
+    "compiler/passes/osp_analysis.jac",
     "runtime/osp_tag.jac",
     "lib/jaclib.jac",
-    "compiler/driver/mtp.jac",
+    "runtime/semantic.jac",
     "cli/cli_boot.jac",
     "jac0core/cli_boot.jac",
+    "project/__init__.jac",
     "project/tomlio.jac",
+    "project/source.jac",
+    "project/apps.jac",
+    "project/modresolver.jac",
+    "project/workspace.jac",
+    "project/placement.jac",
+    "project/app_kinds.jac",
 )
 
 # Modules that live under a seed directory but belong to the native

@@ -27,10 +27,9 @@ import from jaclang.scale.deploy.target.kubernetes.manifest_builder {
     with_config_revision,
     CONFIG_REVISION_ANNOTATION,
     ManifestBuilder,
-    GATEWAY_NAME,
-    k8s_safe_name,
     ScalingMode
 }
+import from jaclang.scale.runtime.context.util { GATEWAY_NAME, k8s_safe_name }
 import from jaclang.scale.deploy.target.kubernetes.database_provisioner {
     DatabaseProvisioner
 }
@@ -44,6 +43,9 @@ import from jaclang.scale.deploy.autoscale.keda_autoscaler { KEDAAutoscaler }
 import from jaclang.scale.deploy.autoscale.http_activation_config {
     apply_http_activation_for_target,
     destroy_http_activation_for_target
+}
+import from jaclang.scale.runtime.context.service_routing {
+    resolve_interceptor_service_address
 }
 import from jaclang.scale.deploy.target.kubernetes.monitoring { MonitoringDeployer }
 import from jaclang.scale.config.config_loader { get_scale_config }
@@ -277,6 +279,19 @@ obj KubernetesTarget(KubernetesTargetBase) {
             );
         }
 
+        self._emit("config", "start", "Checking the config the pods load");
+        try {
+            self._manifest_builder(app_config).check_pod_config(
+                app_config, self.k8s_config.python_image
+            );
+        } except Exception as e {
+            self._emit("config", "error", f"pod config check failed: {e}");
+            return DeploymentResult(
+                success=False, message=f"pod config check failed: {e}"
+            );
+        }
+        self._emit("config", "ok", "Pod config resolves");
+
         self._emit("provision", "start", "Provisioning backends");
         try {
             self._deploy_context = DatabaseProvisioner(
@@ -401,7 +416,7 @@ obj KubernetesTarget(KubernetesTargetBase) {
                     continue;
                 }
                 pod_name = str(p.metadata.name);
-                labels = p.metadata.labels or {};
+                labels: dict[str, any] = p.metadata.labels or {};
                 app = str(labels.get("app", ""));
                 in_fleet = (app in fleet_app_names) if fleet_app_names else True;
                 if current_hashes and app in fleet_app_names {
@@ -411,7 +426,7 @@ obj KubernetesTarget(KubernetesTargetBase) {
                     }
                 }
                 phase = str(p.status.phase or '?');
-                statuses = list(p.status.init_container_statuses or [])
+                statuses: list[any] = list(p.status.init_container_statuses or [])
                     + list(p.status.container_statuses or []);
                 pod_reason = "";
                 pod_crash = "";
@@ -762,7 +777,8 @@ obj KubernetesTarget(KubernetesTargetBase) {
             ).items
                 if pod_selector
                 else [];
-            for p in stuck {
+            stuck_pods: list[any] = stuck;
+            for p in stuck_pods {
                 timeout_detail += (
                     f" [pod {p.metadata.name}]"
                     + self._pod_failure_detail(core_v1, ns, str(p.metadata.name), p)
@@ -789,10 +805,10 @@ obj KubernetesTarget(KubernetesTargetBase) {
             if pod is None {
                 pod = core_v1.read_namespaced_pod(pod_name, namespace);
             }
-            statuses = (pod.status.init_container_statuses or [])
+            statuses: list[any] = (pod.status.init_container_statuses or [])
                 + (pod.status.container_statuses or []);
             for cs in statuses {
-                states: list = [];
+                states: list[tuple[str, any]] = [];
                 if cs.state and cs.state.terminated {
                     states.append(("terminated", cs.state.terminated));
                 }
@@ -868,7 +884,7 @@ obj KubernetesTarget(KubernetesTargetBase) {
         gate_label = "elbv2.k8s.aws/pod-readiness-gate-inject";
         try {
             ns = core_v1.read_namespace(name=namespace);
-            labels: dict = dict(getattr(ns.metadata, "labels", {}) or {});
+            labels: dict[str, any] = dict(getattr(ns.metadata, "labels", {}) or {});
             if labels.get(gate_label) == "enabled" {
                 return;
             }
@@ -898,7 +914,7 @@ obj KubernetesTarget(KubernetesTargetBase) {
     def _ensure_privileged_namespace(core_v1: any, namespace: str) -> None {
         try {
             ns = core_v1.read_namespace(name=namespace);
-            labels: dict = dict(getattr(ns.metadata, "labels", {}) or {});
+            labels: dict[str, any] = dict(getattr(ns.metadata, "labels", {}) or {});
             new_labels = privileged_pss_labels(labels);
             if new_labels is None {
                 if self.logger {
@@ -964,7 +980,13 @@ obj KubernetesTarget(KubernetesTargetBase) {
         self.k8s_config.python_image = resolve_pod_base_image(
             app_config.code_folder, self.k8s_config.python_image, probe=not self.dry_run
         );
-        builder = ManifestBuilder(
+        return self._manifest_builder(app_config).generate_manifests(
+            app_config, self.k8s_config.python_image
+        );
+    }
+
+    def _manifest_builder(app_config: AppConfig) -> ManifestBuilder {
+        return ManifestBuilder(
             k8s_config=self.k8s_config,
             secrets=self.secrets,
             deploy_context=self._context_with_env(),
@@ -975,7 +997,6 @@ obj KubernetesTarget(KubernetesTargetBase) {
             app_overrides=dict(self.app_overrides),
             dry_run=self.dry_run
         );
-        return builder.generate_manifests(app_config, self.k8s_config.python_image);
     }
 
     def _context_with_env -> DeployContext {
@@ -1247,7 +1268,12 @@ obj KubernetesTarget(KubernetesTargetBase) {
                 self.k8s_config.to_dict(),
                 self.logger
             ),
-            KEDAAutoscaler(logger=self.logger)
+            KEDAAutoscaler(
+                logger=self.logger,
+                interceptor_service_address=resolve_interceptor_service_address(
+                    self.k8s_config.to_dict()
+                )
+            )
         );
 
         for svc_name in scaling.keys() {
@@ -1272,7 +1298,14 @@ obj KubernetesTarget(KubernetesTargetBase) {
         }
 
         apply_http_activations_for_bundle(
-            bundle, namespace, KEDAAutoscaler(logger=self.logger)
+            bundle,
+            namespace,
+            KEDAAutoscaler(
+                logger=self.logger,
+                interceptor_service_address=resolve_interceptor_service_address(
+                    self.k8s_config.to_dict()
+                )
+            )
         );
 
         pdbs: dict[str, dict[str, any]] = bundle.get("pdbs", {}) or {};
@@ -1436,7 +1469,8 @@ obj KubernetesTarget(KubernetesTargetBase) {
             listed = apps_v1.list_namespaced_deployment(
                 namespace=namespace, label_selector=FLEET_SELECTOR
             );
-            for dep in list(listed?.items or []) {
+            dep_items: list[any] = list(listed?.items or []);
+            for dep in dep_items {
                 try {
                     names.append(str(dep.metadata.name));
                 } except Exception {
@@ -1794,7 +1828,12 @@ obj KubernetesTarget(KubernetesTargetBase) {
 
         if self.k8s_config.autoscaler_engine != "keda" {
             try {
-                KEDAAutoscaler(logger=self.logger).destroy_collection(
+                KEDAAutoscaler(
+                    logger=self.logger,
+                    interceptor_service_address=resolve_interceptor_service_address(
+                        self.k8s_config.to_dict()
+                    )
+                ).destroy_collection(
                     namespace, ms_selector, best_effort=True
                 );
             } except ApiException as e {

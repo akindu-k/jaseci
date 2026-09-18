@@ -1,13 +1,5 @@
 import from jaclang.compiler.symbol_utils { return_type_is_jsx }
-
-impl EsastGenPass._ability_is_generator(nd: uni.Ability) -> bool {
-    for y in nd.get_all_sub_nodes(uni.YieldExpr) {
-        if y.find_parent_of_type(uni.Ability) is nd {
-            return True;
-        }
-    }
-    return False;
-}
+import from jaclang.compiler.frontend.diagnostics { E5097 }
 
 impl EsastGenPass.exit_has_var with uni.HasVar exit {
     here.gen.es_ast = None;
@@ -39,6 +31,9 @@ impl EsastGenPass.exit_func_signature with uni.FuncSignature exit {
 }
 
 impl EsastGenPass.exit_ability with uni.Ability exit {
+    if self._loop_label_savepoints {
+        self._loop_label_stack = self._loop_label_savepoints.pop();
+    }
     if self._view_stack {
         self._view_stack.pop();
     }
@@ -63,6 +58,7 @@ impl EsastGenPass.exit_ability with uni.Ability exit {
         return;
     }
 
+    assert here.name_ref is not None;
     ref_param: (uni.ParamVar | None) = None;
     if (
         here.code_context == CodeContext.CLIENT
@@ -175,7 +171,7 @@ impl EsastGenPass.exit_ability with uni.Ability exit {
             ];
         } else {
             if component_call_abi == 'props_passthrough' {
-                self.emit(
+                self.ctx.emit(
                     W5015,
                     node_override=value_params[0],
                     component=here.name_ref.sym_name
@@ -209,8 +205,24 @@ impl EsastGenPass.exit_ability with uni.Ability exit {
     func_id = self.sync_loc(
         es.Identifier(name=here.name_ref.sym_name), jac_node=here.name_ref
     );
-    is_gen = self._ability_is_generator(here);
+    is_gen = ModuleFacts.ability_is_generator(here);
     if here.is_method {
+        method_kind = 'method';
+        if here.accessor_kind {
+            owner = here.find_parent_of_type(uni.HasVar);
+            assert owner is not None;
+            func_id = self.sync_loc(
+                es.Identifier(name=owner.name.sym_name), jac_node=owner.name
+            );
+            if here.accessor_kind == 'property' {
+                method_kind = 'get';
+            } elif here.accessor_kind == 'setter' {
+                method_kind = 'set';
+            } else {
+                self.ctx.emit(E5097, node_override=here, kind='property deleters');
+                return;
+            }
+        }
         func_expr = self.sync_loc(
             es.FunctionExpression(
                 id=None,
@@ -223,7 +235,7 @@ impl EsastGenPass.exit_ability with uni.Ability exit {
         );
         method_def = self.sync_loc(
             es.MethodDefinition(
-                key=func_id, value=func_expr, kind='method', `static=here.is_static
+                key=func_id, value=func_expr, kind=method_kind, `static=here.is_static
             ),
             jac_node=here
         );
@@ -312,9 +324,12 @@ impl EsastGenPass.exit_ability with uni.Ability exit {
 }
 
 impl EsastGenPass.enter_ability with uni.Ability entry {
-    if isinstance(here.body, uni.ImplDef) and (here.body not in here.kid) {
+    if isinstance(here.body, uni.ImplDef) and (here.body not in [here->:Kid:->]) {
         here.add_kids_right([here.body], pos_update=False, parent_update=True);
     }
+
+    self._loop_label_savepoints.append(self._loop_label_stack);
+    self._loop_label_stack = [];
 
     self._view_stack.append(None);
     self.reactive_vars_stack.append(self.reactive_vars);
@@ -383,7 +398,33 @@ impl EsastGenPass.exit_enum with uni.Enum exit {
 }
 
 impl EsastGenPass.exit_type_alias with uni.TypeAlias exit {
-    here.gen.es_ast = [];
+    base_ref = self._primitive_type_ref(here.distinct_base, here)
+        if here.is_distinct and here.distinct_base is not None
+        else None;
+    if base_ref is None {
+        here.gen.es_ast = [];
+        return;
+    }
+    if here.code_context == CodeContext.CLIENT {
+        self.client_manifest.has_client = True;
+        is_pub = here.access and (here.access.tag.name == Tok.KW_PUB);
+        if is_pub or here.codespace_dual {
+            self.client_manifest.exports.append(here.name.sym_name);
+        }
+    }
+    self.needs_jac_runtime = True;
+    var_id = self.sync_loc(es.Identifier(name=here.name.sym_name), jac_node=here.name);
+    here.gen.es_ast = self.sync_loc(
+        es.VariableDeclaration(
+            declarations=[
+                self.sync_loc(
+                    es.VariableDeclarator(id=var_id, `init=base_ref), jac_node=here
+                )
+            ],
+            kind='const'
+        ),
+        jac_node=here
+    );
 }
 
 impl EsastGenPass.exit_type_param with uni.TypeParam exit {
@@ -405,6 +446,13 @@ impl EsastGenPass.exit_archetype with uni.Archetype exit {
         for stmt in inner {
             if isinstance(stmt, uni.ArchHas) {
                 has_members.append(stmt);
+                for var in stmt.vars {
+                    for accessor in (var.accessors or []) {
+                        if isinstance(accessor.gen.es_ast, es.MethodDefinition) {
+                            body_stmts.append(accessor.gen.es_ast);
+                        }
+                    }
+                }
                 continue;
             }
             if isinstance(stmt, uni.GlobalVars) and stmt.is_frozen {
@@ -514,6 +562,9 @@ impl EsastGenPass.exit_archetype with uni.Archetype exit {
         for arch_has in has_members {
             if arch_has.is_static {
                 for var in arch_has.vars {
+                    if var.accessors {
+                        continue;
+                    }
                     default_expr: es.Expression = cast(
                         es.Expression, var.value.gen.es_ast
                     )
@@ -534,6 +585,9 @@ impl EsastGenPass.exit_archetype with uni.Archetype exit {
                 continue;
             }
             for var in arch_has.vars {
+                if var.accessors {
+                    continue;
+                }
                 props_ident = self.sync_loc(es.Identifier(name='props'), jac_node=var);
                 prop_ident = self.sync_loc(
                     es.Identifier(name=var.name.sym_name), jac_node=var.name
@@ -560,15 +614,16 @@ impl EsastGenPass.exit_archetype with uni.Archetype exit {
                     es.CallExpression(
                         callee=self.sync_loc(
                             es.MemberExpression(
-                                object=props_ident,
+                                object=es.Identifier(name='Object'),
                                 property=self.sync_loc(
-                                    es.Identifier(name='hasOwnProperty'), jac_node=var
+                                    es.Identifier(name='hasOwn'), jac_node=var
                                 ),
                                 computed=False
                             ),
                             jac_node=var
                         ),
                         arguments=[
+                            props_ident,
                             self.sync_loc(
                                 es.Literal(value=var.name.sym_name), jac_node=var.name
                             )

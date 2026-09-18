@@ -141,7 +141,7 @@ glob smart_model   = Model(model_name="gpt-4o");
 glob summarizer    = Model(model_name="claude-sonnet-4-6");
 
 def quick_label(text: str) -> str by fast_model();
-def deep_analyze(text: str) -> dict by smart_model();
+def deep_analyze(text: str) -> dict[str, any] by smart_model();
 def tldr(article: str) -> str by summarizer();
 ```
 
@@ -165,7 +165,7 @@ def tldr(article: str) -> str by summarizer();
 | `ca_bundle` | str/bool | SSL certificate path, `True` for default, `False` to skip verification |
 | `api_key` | str | API key (alternative to constructor parameter) |
 | `verbose` | bool | Enable verbose/debug logging |
-| `outputs` | list | Mock responses for `MockLLM` testing |
+| `outputs` | list | Replies for `Model(model_name="mockllm")`, see [Testing with MockLLM](#testing-with-mockllm) |
 
 **Example with config:**
 
@@ -921,7 +921,7 @@ sem analyze_code.code = "The source code to analyze";
 sem analyze_code.language = "Programming language (python, javascript, etc.)";
 sem analyze_code.return = "A structured analysis with issues and suggestions";
 
-def analyze_code(code: str, language: str) -> dict by llm;
+def analyze_code(code: str, language: str) -> dict[str, any] by llm;
 ```
 
 ### Complex Semantic Types
@@ -1308,7 +1308,7 @@ glob llm = Model(model_name="gpt-4o", ctx_window=128000);
 Replace the built-in summarisation with your own logic by passing `on_compaction`. The hook receives the full serialised message list and `keep_recent`, and must return the compacted list:
 
 ```jac
-def my_compactor(messages: list, keep_recent: int) -> list {
+def my_compactor(messages: list[any], keep_recent: int) -> list[any] {
     # messages[0] = system, messages[1] = original user task - always preserve
     # messages[2:] = tool-call history to summarise
     summary = my_domain_summariser(messages[2:]);
@@ -1773,6 +1773,73 @@ For a step-by-step walkthrough, see the [Multimodal AI Tutorial](../../tutorials
 
 ---
 
+## Generating Images
+
+An `Image` return type makes the call an image-generation call instead of a chat
+completion. The prompt is the same prompt byLLM builds for any other function -
+the docstring, the `sem` strings and the argument values - and the provider's
+image is handed back as an `Image`:
+
+```jac
+import from jaclang.byllm.lib { Image, Model }
+
+glob painter = Model(model_name="dall-e-3");
+
+"""A flat vector poster, bold shapes, no text."""
+def draw_poster(subject: str, mood: str) -> Image by painter();
+
+with entry {
+    poster = draw_poster("a hot air balloon over Kandy", "calm");
+    print(poster.url);
+}
+```
+
+The returned `Image` is an ordinary `Image`, so it can be passed straight into a
+vision call, saved, or served.
+
+Return `list[Image]` to keep every image the provider sent:
+
+```jac
+def draw_variants(subject: str) -> list[Image] by painter(n=3);
+```
+
+### Generation Parameters
+
+These `by` parameters are forwarded to the provider when set; anything left
+unset takes the provider's default:
+
+| Parameter | Description |
+|-----------|-------------|
+| `n` | How many images to generate |
+| `size` | Pixel size, e.g. `"1024x1024"` |
+| `quality` | Provider quality tier, e.g. `"hd"` |
+| `style` | Provider style, e.g. `"vivid"` |
+| `response_format` | `"b64_json"` (default) or `"url"` |
+| `user` | End-user identifier for provider-side abuse tracking |
+| `timeout` | Request timeout in seconds |
+
+byLLM asks for `b64_json` by default, so the returned `Image` carries the bytes
+as a data URL rather than a provider URL that expires. Pass
+`response_format="url"` to keep the provider's hosted URL instead.
+
+`system_prompt`, from `jac.toml` or from the call, is prepended to the prompt.
+byLLM's built-in chat persona is dropped for an image return, so it does not
+steer the image model. A custom `base_url` is honoured the same way it is on a
+completion.
+
+### Generation Limits
+
+- The model must be an image model. An image return on a chat model fails at the
+  provider, not in byLLM.
+- Image generation takes one call, so `tools=` and `stream=` are refused with a
+  `ConfigurationError`.
+- An `Image` or `Video` argument cannot be sent with an image return: the
+  generation endpoint takes text only, and byLLM has no image-editing path yet.
+- Generation goes through LiteLLM. The `proxy` and `http_client` transports do
+  not carry it.
+
+---
+
 ## Context Methods
 
 ### incl_info
@@ -2062,69 +2129,65 @@ def get_product(prompt: str) -> Product by llm(stream=True);
 
 ## Testing with MockLLM
 
-Use `MockLLM` for deterministic testing without API calls. Mock responses are returned sequentially from the `outputs` list:
+`MockLLM` stands in for the model provider, so tests run without API keys. It replaces only the network call: byLLM still builds the real request and parses the reply, so a test catches a broken prompt, schema or parser as well as a changed answer.
 
 ```jac
 import from jaclang.byllm.lib { MockLLM }
 
-glob llm = MockLLM(
-    model_name="mockllm",
-    config={
-        "outputs": ["Mocked response 1", "Mocked response 2"]
-    }
-);
+enum Priority { LOW = "low", HIGH = "high" }
+
+glob llm = MockLLM(outputs=["Bonjour", Priority.HIGH]);
 
 def translate(text: str) -> str by llm();
-def summarize(text: str) -> str by llm();
+def triage(ticket: str) -> Priority by llm();
 
-test "translate returns first mock" {
-    result = translate("Hello");
-    assert result == "Mocked response 1";
-}
-
-test "summarize returns second mock" {
-    result = summarize("Long text...");
-    assert result == "Mocked response 2";
+test "outputs come back typed, and the request is recorded" {
+    assert translate("Hello") == "Bonjour";
+    assert triage("Login is down") == Priority.HIGH;
+    assert "Hello" in str(llm.sent("messages")[0]);
+    assert llm.exhausted();
 }
 ```
 
-`MockLLM` is useful for:
+Outputs are consumed in order, one per model call, so a tool loop takes one per step. `llm.seen` holds every request, `llm.sent(key)` one field across them (`"messages"`, `"tools"`, `"response_format"`), and `llm.seen_prompts` the prompt text of each call. `model_name` defaults to `mockllm`, and `config={"outputs": [...]}` still works in place of `outputs=`.
 
-- Unit testing LLM-powered functions without API costs
-- Deterministic assertions on function behavior
-- CI/CD pipelines where API keys aren't available
+#### What each output becomes
 
-#### Injecting usage metadata (for compaction tests)
+| Entry in `outputs` | What the model sends |
+|---|---|
+| a string | that text; for a non-`str` return it is the answer when the return type allows a string (a union with `str`, an optional `str`, a string enum), otherwise it is parsed like real model text |
+| any other value: a number, an enum member, an object, a list | that value as the typed answer, encoded the way a model sends it (enums by value) |
+| `MockToolCall(tool=fn, args={...})` | a tool call; `tool` is the function or its name, resolved against the tools the call offers, as for a real model |
+| a list of `MockToolCall` | several tool calls in one turn |
+| `MockRawResponse(content=..., tool_calls=[...], usage=..., finish_reason=...)` | one full turn as the provider sends it; `content` alone is delivered verbatim |
+| `MockError(error=..., content="", after=0)` | the provider raising `error`; on a stream, `content` arrives first and the error fires after `after` chunks |
+| `(entry, usage_dict)` | the entry, with token usage attached |
 
-Each entry in `outputs` may be a `(payload, usage_dict)` tuple to inject token-usage metadata. This lets you test threshold-based auto-compaction without a real model:
+#### Token usage (for compaction tests)
+
+A `(entry, usage)` tuple attaches token usage to any entry, which is enough to drive threshold-based compaction:
 
 ```jac
 import from jaclang.byllm.lib { MockLLM, MockToolCall }
 
 def step_a -> str { return "a"; }
-def finish_tool(final_output: str) -> str { return final_output; }
 
 glob llm = MockLLM(
-    model_name="mockllm",
     ctx_window=1000,
-    config={"outputs": [
+    outputs=[
         # (tool_call, usage) - triggers compaction at 85 % of 1000 tokens
         (MockToolCall(tool=step_a, args={}), {"prompt_tokens": 850, "total_tokens": 950}),
-        # plain entry - no usage injection, loop exits via finish_tool
-        MockToolCall(tool=finish_tool, args={"final_output": "done"})
-    ]}
+        # plain entry - the loop exits through byLLM's finish tool
+        MockToolCall(tool="finish_tool", args={"final_output": "done"})
+    ]
 );
+
+def task(goal: str) -> str by llm(tools=[step_a]);
 ```
 
-Non-tuple entries behave exactly as before - usage defaults to `{}`.
+#### Malformed output and errors
 
-#### Simulating raw model text and errors
-
-A plain string or a pre-built typed instance in `outputs` is returned verbatim, which is fine for happy-path tests but skips byLLM's parsing. To exercise the real parse and retry path (for example to test [typed-output retry](#typed-output-retry)), use these wrappers:
-
-- **`MockRawResponse(content=...)`** routes the text through `parse_response` exactly like a real model: valid JSON parses to the typed object, malformed JSON raises `OutputConversionError` (triggering a retry), and an empty string is returned as-is.
-- **`MockError(error=...)`** raises the wrapped exception when dispatched, to verify that errors which are not `OutputConversionError` propagate without retry.
-- **`MockLLM.seen_prompts`** records the prompt (joined message contents) seen on each dispatch, so a test can assert how many attempts ran and inspect the corrective feedback between them.
+`MockRawResponse` sends text verbatim, so malformed JSON goes through [typed-output retry](#typed-output-retry) exactly as a real model's reply would. `MockError` raises from the provider: timeouts, connection errors and 5xx responses are retried as in production, and anything else propagates.
 
 ```jac
 import from jaclang.byllm.lib { MockLLM, MockRawResponse }
@@ -2136,11 +2199,10 @@ obj Person {
 
 # First response is malformed JSON (triggers a retry); the second parses cleanly.
 glob llm = MockLLM(
-    model_name="mockllm",
-    config={"outputs": [
+    outputs=[
         MockRawResponse(content="{\"name\": \"Ada\", \"age\":"),
         MockRawResponse(content="{\"name\": \"Ada\", \"age\": 36}")
-    ]}
+    ]
 );
 
 def get_person -> Person by llm();
@@ -2153,7 +2215,7 @@ test "malformed output is retried and recovered" {
 }
 ```
 
-To cap or disable retries in a test, pass `max_output_retries` on the by-expression, e.g. `by llm(max_output_retries=1)` (a bare `by llm()` resets call params, so set it there rather than on the constructor).
+In a test, set the retry count on the call, `by llm(max_output_retries=1)`: a bare `by llm()` resets call params, so a value set on the constructor does not survive.
 
 ---
 

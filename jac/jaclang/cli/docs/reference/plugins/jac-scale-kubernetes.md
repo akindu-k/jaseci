@@ -510,7 +510,7 @@ The KEDA engine above scales on CPU, memory, or any KEDA trigger, but none of th
 - The target's Deployment or StatefulSet, and its Service, already exist. This feature manages the `InterceptorRoute` and `ScaledObject` around an existing workload; it does not create the workload or the Service.
 - Exactly one of `target_port` or `target_port_name` is set, and at least one of `concurrency_target` or `request_rate_target` is set. Both are validated up front with an error that names the offending `jac.toml` key.
 
-**Interaction with the base autoscaler:** a target with `http_activation.enabled = true` is scaled entirely by its `ScaledObject` (min/max replicas, scale-to-zero). `jac start --scale` skips creating the base HPA/KEDA autoscaler for that same target automatically -- KEDA's admission webhook rejects a `ScaledObject` for a workload already managed by an HPA (or another `ScaledObject`), so both can't coexist on one target. This also means the deploy's usual post-deploy HTTP reachability check is skipped for that target (it may legitimately be sitting at 0 replicas with nothing to reach); a crash-loop check on the pods runs instead.
+**Interaction with the base autoscaler:** a target with `http_activation.enabled = true` is scaled entirely by its `ScaledObject` (min/max replicas, scale-to-zero). `jac scale deploy` skips creating the base HPA/KEDA autoscaler for that same target automatically -- KEDA's admission webhook rejects a `ScaledObject` for a workload already managed by an HPA (or another `ScaledObject`), so both can't coexist on one target. This also means the deploy's usual post-deploy HTTP reachability check is skipped for that target (it may legitimately be sitting at 0 replicas with nothing to reach); a crash-loop check on the pods runs instead.
 
 **HTTP activation configuration (`[scale.kubernetes.http_activation]`):**
 
@@ -530,6 +530,7 @@ The KEDA engine above scales on CPU, memory, or any KEDA trigger, but none of th
 | `cold_start_fallback_service` / `cold_start_fallback_port` | `null` | Service to forward to while cold-starting, as an alternative to a static placeholder. |
 | `timeout_readiness` / `timeout_request` / `timeout_response_header` | `null` | Duration strings (e.g. `"30s"`) the interceptor waits at each stage. |
 | `scale_target_kind` / `scale_target_api_version` / `scale_target_plural` | `"Deployment"` / `"apps/v1"` / `null` | Only needed when activating a non-Deployment/StatefulSet target. |
+| `interceptor_service_address` | `"keda-add-ons-http-interceptor-proxy.keda:8080"` | `host:port` of the HTTP Add-on interceptor proxy Service that activated apps are routed through. Cluster-wide, so it is read from this block only, never from a per-app `[apps.<name>.scale.http_activation]` override. Change it when the Add-on is installed outside the default `keda` namespace. |
 
 **To configure in `jac.toml` (monolith deploy):**
 
@@ -574,8 +575,10 @@ graph TD
 
 jac-scale always reconciles the `InterceptorRoute` before the `ScaledObject`, because the external scaler resolves the target Service and scaling metric from the route when KEDA evaluates the trigger. Reconciling in the other order would leave the `ScaledObject` unable to find its metric source.
 
-!!! warning "Route inbound traffic through the interceptor yourself"
-    jac-scale creates the `InterceptorRoute` and `ScaledObject`, but does **not** rewire the gateway or Ingress to the interceptor proxy -- they still resolve the app's own Service directly. With `min_replicas = 0`, a request that reaches the Service instead of the interceptor is refused and never wakes the pod. Only enable `http_activation` on a service whose inbound traffic you have already pointed at the KEDA HTTP interceptor proxy. The gateway is exempt and never inherits a shared `enabled = true` default.
+!!! note "Interceptor routing is automatic"
+    Once `http_activation.enabled = true` for a service, jac-scale routes traffic to it through the interceptor automatically -- both gateway-forwarded requests (the Ingress path) and sv-to-sv RPC calls (walker/function invocations from another service) resolve the interceptor's proxy address instead of the app's own Service, with a `Host` header set to the service's own Service DNS name so the interceptor's `InterceptorRoute` can tell which target a request is for. No manual Ingress or gateway rewiring is required. The Ingress itself still points at the gateway's own Service, unchanged: the gateway is exempt from `http_activation` and always stays warm, so it never needs to be woken.
+
+    A cold wake holds the request until the pod is Ready, so set `rpc_timeout` and `http_forward_timeout` (under `[apps.<name>.scale]`, or `http_forward_timeout` under `[scale.gateway]`) above the service's cold boot time, and `timeout_readiness` if you set interceptor timeouts; with the 10s / 30s defaults the first call to a service sitting at zero replicas fails. WebSocket connections proxied through the gateway are not yet routed through the interceptor.
 
 !!! note "Programmatic API for dynamic activation"
     A control-plane process that creates and tears down workloads on demand (for example, an IDE-preview orchestrator spinning up a per-session preview) has no fixed target to put in `jac.toml`. For that case, `HTTPActivationSpec` (`jaclang.scale.deploy.autoscale.http_activation`) and `KEDAAutoscaler.apply_http_activation` / `destroy_http_activation` (`jaclang.scale.deploy.autoscale.keda_autoscaler`) remain available as a direct API, unchanged by the `jac.toml` surface above. Use whichever entry point matches your workload's lifecycle: `jac.toml` for a known, standing service; the programmatic API for one created and destroyed at runtime.
@@ -940,10 +943,37 @@ Response format (standard transport envelope):
   "data": {
     "enabled": true,
     "summary": {
-      "total_requests": 156,
       "active_requests": 2,
-      "error_count": 1,
-      "avg_latency_ms": 45.2
+      "scopes": {
+        "app": {
+          "requests": 156,
+          "server_errors": 1,
+          "client_errors": 3,
+          "p50": {"value": 0.021, "over": false, "known": true},
+          "p95": {"value": 0.31, "over": false, "known": true},
+          "p99": {"value": 2.5, "over": true, "known": true},
+          "distribution": [
+            {"label": "under 25ms", "count": 90},
+            {"label": "25 - 100ms", "count": 40},
+            {"label": "100 - 500ms", "count": 20},
+            {"label": "500ms - 2.5s", "count": 4},
+            {"label": "over 2.5s", "count": 2}
+          ]
+        },
+        "other": {"...": "same shape, for admin, health and system paths"},
+        "all": {"...": "same shape, for every path"}
+      },
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/",
+          "kind": "app",
+          "count": 42,
+          "failed": 0,
+          "p50": {"value": 0.004, "over": false, "known": true},
+          "p95": {"value": 0.02, "over": false, "known": true}
+        }
+      ]
     },
     "metrics": [
       {
@@ -962,11 +992,13 @@ Response format (standard transport envelope):
 }
 ```
 
+`summary` is computed from the exposition since the process started. Paths are classified by their first segment: `admin` and the well-known `health`, `healthz`, `metrics`, `docs` and `openapi.json` segments are `admin`, `health` and `system`; everything else is `app`. The `app` scope covers app paths, `other` covers the rest, and `all` covers both. Percentiles are interpolated inside the request-duration histogram bucket that holds them; `over` is true when the percentile falls in the `+Inf` bucket (the value is then the last finite edge), and `known` is false when nothing has been observed. `distribution` cuts the histogram at the configured `histogram_buckets` edges nearest 25ms, 100ms, 500ms and 2.5s, drops duplicates, and labels each band with the edge it actually uses, so the five bands in the example are the default layout; it is empty until something has been observed. `endpoints` has one row per method and path, sorted by p95 descending; `failed` counts 4xx and 5xx together.
+
 The admin dashboard monitoring page displays:
 
-- HTTP traffic breakdown by method and status code
-- Request latency statistics
-- Active requests gauge
+- Throughput over a selectable 60s, 5m or 15m window, with errors on their own lane, scoped to app or platform traffic
+- p50, p95 and p99 latency, the latency distribution, and the 4xx/5xx error rate for the selected scope
+- One row per endpoint with request count, error rate, p50 and p95, sorted by p95
 - System metrics (GC collections, memory usage, CPU time, file descriptors)
 
 Requests to the metrics endpoint itself are excluded from tracking.

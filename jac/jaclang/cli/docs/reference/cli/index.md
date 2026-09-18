@@ -17,7 +17,7 @@ A task-first index into the commands below. The full alphabetical list follows i
 | Run the live hot-reload dev loop | `jac run --dev` |
 | Deploy to Kubernetes | `jac scale deploy` · `jac scale status` · `jac scale destroy` |
 | Create a new project | `jac create` |
-| Set up / build a client (web, desktop, mobile) | `jac setup [app]` · `jac build [app]` (`--as client` builds only the client bundle) |
+| Build a client (web, desktop, mobile) | `jac build [app]` (`--as client` builds only the client bundle; a mobile app's Expo scaffold is provisioned on first use) · `jac setup [app]` provisions ahead of time |
 | Compile a native binary or C-ABI shared library | `jac build <file> --native` (`--lib`, `--memory`, `--target-triple`, `--debug`) |
 | Build one distributable artifact (.jab, wheel, npm, source) | `jac build --as {jab,wheel,npm,source,…}` |
 | Add, remove, or update dependencies | `jac install <pkg>` · `jac remove` · `jac update` |
@@ -32,7 +32,7 @@ A task-first index into the commands below. The full alphabetical list follows i
 | Manage byLLM local models | `jac model` |
 | Use Jac from an AI assistant | `jac guide` · `jac mcp` |
 | Convert between Python, Jac, and JS | `jac tool py2jac` · `jac tool jac2py` · `jac tool jac2js` |
-| Clean caches / artifacts | `jac clean` |
+| Clean caches / artifacts | `jac clean` (project) · `jac cache` (machine-wide) |
 
 ---
 
@@ -64,8 +64,9 @@ A task-first index into the commands below. The full alphabetical list follows i
 | `jac tool` | Language tools & source transforms (`jac2py`, `py2jac`, `jac2js`, `grammar`, IR, AST) |
 | `jac guide` | Show curated Jac reference guides |
 | `jac lsp` | Language server |
-| `jac setup` | One-time setup of an app's client (`jac setup [app]`) |
+| `jac setup` | Provision an app's client ahead of time (`jac setup [app]`); run and build do it on first use |
 | `jac db` | Manage the project's Postgres store (embedded or external): status, inspect, sql, serve, stop, fetch |
+| `jac cache` | Inspect and reclaim the machine-wide jac cache: `status`, `gc` (`--dry-run`), `purge` (`--bucket <name>`) |
 
 ---
 
@@ -88,6 +89,7 @@ The CLI cleanup in #7255 folded these former top-level commands into their homes
 | `jac start` | [`jac run --serve`](#jac-run) (`--port`, `--faux`, `--takeover` ride along) |
 | `jac dev` | [`jac run --dev`](#jac-run) |
 | `jac start --scale` | [`jac scale deploy`](#jac-scale-deploy) (with `--target`, `--enable-tls`, `--dry-run`, `--show-yaml`) |
+| `jac purge` | [`jac cache purge`](#jac-cache) (`jac cache status` first to see what is there; `jac cache gc` to reclaim only what has expired) |
 
 ## Version Info
 
@@ -454,7 +456,12 @@ jac check [-h] [-e] [-i [IGNORE ...]] [-p] [--nowarn] [--lint] [--fix] [--app AP
 | `--lint` | Also run the linter and report style/lint violations | `False` |
 | `--fix` | With `--lint`, auto-fix lint violations (code corrections) | `False` |
 
-**The workspace gate.** With no paths, `jac check` compiles **one rooted program per app** -- each app's entry with that app's facts (kind, ui, platform, owning app) stamped -- and then sweeps every `.jac` file no app reached as its own root, so nothing under the project goes unchecked. When more than one app is checked, each diagnostic is prefixed `[<app>]`. Explicit paths keep the file-per-root behavior, using the owning app's facts for each file. `--app <name>` restricts both the app compile and the sweep to one app. This is the check that sees the cross-app laws (`E2039`, `E2040`, `E5107`, `E5104`, `E5106`); see [Workspaces & Apps](../apps.md#working-with-a-workspace).
+**The workspace gate.** With no paths, `jac check` traverses imports from every
+declared app entry in its compilation context, including page roots for client
+apps. Shared helpers are checked in each context that reaches them. Diagnostics
+carry an app prefix when several apps are checked. `--app <name>` selects one
+context; explicit files remain explicit roots. Unreachable source is checked by
+naming it explicitly. See [Workspaces & Apps](../apps.md#working-with-a-workspace).
 
 **Examples:**
 
@@ -592,6 +599,8 @@ jac fmt . --check
 # Skip already-formatted files (biggest win in pre-commit / CI)
 jac fmt . --cache
 ```
+
+**Exit status:** 0 on success, including when files were reformatted (`jac fmt . && next` proceeds); 1 on syntax/format failures, invalid paths, or unfixable lint errors. With `--check`, exits 1 if any file *would* be reformatted (no files are written) - this is the CI gate. With `--lintfix`, auto-fixable findings are fixed and reported as warnings; unfixable errors still exit 1.
 
 > **Note**: For auto-linting (code corrections), use `jac check --lint --fix` instead. See [`jac check`](#jac-check) above.
 >
@@ -953,7 +962,7 @@ Local model cache: /home/you/.cache/jac/models
 
 The `jac db` command group manages the project's Postgres store -- a database inside the embedded cluster the runtime provisions automatically, or the external database `JAC_DB_URL` / `[scale.database].url` points at.
 
-The embedded cluster is **shared by the whole machine**, not per project: one PostgreSQL instance lives at `$JAC_CACHE_HOME/pg/main` (default `~/.cache/jac/pg/main`) and holds one database per project, named `jac_<project>_<digest of the project's absolute path>`. Two projects therefore share a server but never a database, and moving or deleting a project directory leaves its database behind (`jac db list` shows it as `orphaned`; `jac db prune` reclaims it).
+The embedded cluster is **shared by the whole machine**, not per project: one PostgreSQL instance lives at `$JAC_CACHE_HOME/pg/main` (default `~/.cache/jac/pg/main`) and holds one database per project, named `jac_<project>_<digest of the project's absolute path>`. Two projects therefore share a server but never a database, and moving or deleting a project directory leaves its database behind (`jac db list` shows it as `orphaned`; `jac db prune -y` reclaims it on the spot, and the cluster's start-time sweep reclaims it on its own once the directory has been gone for a day, see [Retention](#retention)).
 
 For the architectural background (fingerprints, drift detection, quarantine philosophy, alias decorator), see [Persistence & Schema Migration](../persistence.md).
 
@@ -996,13 +1005,13 @@ jac db list
 data dir : /home/you/.cache/jac/pg/main
 databases: 3 (23.1 MB)
 
-NAME                              SIZE  KIND     STATE         LAST USED            OWNER
-jac_myapp_1a2b3c4d              7.9 MB  project  live          2026-08-12 21:14:03  /home/you/myapp
-jac_scratch_3142_9f1c           7.7 MB  scratch  dead scratch  2026-08-12 20:02:55  /tmp/jac-test-base-x1y2
-jac_oldapp_5e6f7a8b             7.6 MB  project  orphaned      2026-07-30 11:48:12  /home/you/deleted-app
+NAME                              SIZE  KIND     STATE                    LAST USED            OWNER
+jac_myapp_1a2b3c4d              7.9 MB  project  live                     2026-08-12 21:14:03  /home/you/myapp
+jac_scratch_3142_9f1c           7.7 MB  scratch  dead scratch             2026-08-12 20:02:55  /tmp/jac-test-base-x1y2
+jac_oldapp_5e6f7a8b             7.6 MB  project  orphaned, reclaim in 21h 2026-07-30 11:48:12  /home/you/deleted-app
 ```
 
-The states are `live` (the owning directory still exists), `orphaned` (it does not), `scratch` / `silent scratch` / `dead scratch` (a throwaway store for internal work, see below), and `unattributed` (no owner recorded, e.g. created before the runtime tracked owners). Listing never creates a database, so it is safe to run for a look around.
+The states are `live` (the owning directory still exists), `orphaned` (it does not; a suffix says where the start-time sweep is with it: nothing yet, `reclaim in 21h`, `reclaimable`, or `in use` when something is still connected, see [Retention](#retention)), `scratch` / `silent scratch` / `dead scratch` (a throwaway store for internal work, see below), and `unattributed` (no owner recorded, e.g. created before the runtime tracked owners). Listing never creates a database, so it is safe to run for a look around.
 
 ### jac db prune
 
@@ -1014,7 +1023,7 @@ jac db prune -y          # drop it
 jac db prune --empty -y  # also drop unattributed databases that hold no data
 ```
 
-Candidates are scratch databases whose owning process is gone, and project databases whose recorded owning path has been deleted. "Gone" means one of two things: the recorded pid is checkable from here and no longer exists, or an earlier prune already found the database silent and unused and it still is (see [Scratch stores](#scratch-stores)), which is why reclaiming a scratch database left by another host takes two runs of prune rather than one. Databases with no recorded owner at all (created before the runtime recorded owners, or by tooling that opened the cluster directly) cannot be attributed; they are reported and left alone. `--empty` additionally considers those, but only the ones holding nothing beyond the system root, so an old cluster full of empty test-worker databases can be reclaimed without risking anyone's data.
+Candidates are scratch databases whose owning process is gone, and project databases whose recorded owning path has been deleted. "Gone" means one of two things: the recorded pid is checkable from here and no longer exists, or an earlier prune already found the database silent and unused and it still is (see [Scratch stores](#scratch-stores)), which is why reclaiming a scratch database left by another host takes two runs of prune rather than one. An orphaned project database is reported with the same state the start-time sweep acts on (whether it has been marked, and how long until the sweep reclaims it), and `-y` drops it on the spot: the sweep's grace protects against automatic loss, not against an operator who has read the report. `-y` also records the marks the sweep uses and clears the ones whose directory is back, so a prune and a cluster start never disagree about where a database stands. Databases with no recorded owner at all (created before the runtime recorded owners, or by tooling that opened the cluster directly) cannot be attributed; they are reported and left alone. `--empty` additionally considers those, but only the ones holding nothing beyond the system root, so an old cluster full of empty test-worker databases can be reclaimed without risking anyone's data.
 
 ### jac db drop
 
@@ -1028,7 +1037,14 @@ Only `jac_*` databases can be dropped, and a database another process is connect
 
 ### Retention
 
-By default the runtime never deletes a project database: it is created on first contact and stays until you drop it. A cluster start always reaps scratch databases whose owning process is gone, and, if you opt in, sweeps stale project databases too:
+By default the runtime never deletes a project database whose directory exists: it is created on first contact and stays until you drop it. A cluster start always reaps scratch databases whose owning process is gone, and project databases whose owning directory is gone, in two phases so that a directory that is moved and moved back, or briefly unmounted, is never mistaken for a deleted project:
+
+1. The first start to find a database's directory missing **marks** it (`jac db list` shows `orphaned, reclaim in 24h`).
+2. A later start **drops** it once the mark is older than the grace period and nothing is connected to it. The grace is 24 hours by default; `JAC_DB_ORPHAN_GRACE_HOURS` overrides it, and `0` means the first start after the one that marked it.
+
+A directory that comes back before then clears the mark, so the clock starts over if it goes missing again. The sweep runs when the embedded cluster starts, not on every `jac run` (the cluster stays up between runs), and it spends at most 20 seconds dropping per start, leaving the rest for the next one, so a large backlog never stalls a start; `jac db prune -y` reclaims a backlog in one go. Each start logs one line per thing it did: databases marked, unmarked, reclaimed, or left for later.
+
+If you opt in, a start also sweeps stale project databases whose directory still exists:
 
 ```toml
 [database]
@@ -1039,7 +1055,9 @@ With `retention_days` set (or `JAC_DB_RETENTION_DAYS` in the environment), start
 
 ### Scratch stores
 
-Work that keeps nothing across invocations should not leave a database behind. A process launched with `JAC_DB_SCRATCH=1` opens a single scratch database (`jac_scratch_<pid>_<nonce>`) instead of one per project path, and drops it when the process exits. The test runner and the deploy seal / vendor steps use this, which is why running tests or deploying no longer grows the cluster.
+Work that keeps nothing across invocations should not leave a database behind. A process launched with `JAC_DB_SCRATCH=1` opens a single scratch database (`jac_scratch_<pid>_<nonce>`) instead of one per project path, and drops it when the process exits. The test runner uses this for the fresh base it hands every test file, and the deploy seal / vendor steps use it for their staging runs.
+
+A process can instead own everything its descendants create. With `JAC_DB_SCRATCH_OWNER=<pid>` in the environment, every project database a process opens is recorded as a scratch-kind database owned by that pid, under its normal project name: the data still survives from one child process to the next, two directories still get two databases, and the whole set is dropped when the owner exits or reaped by the next scratch reap once the owner's pid is gone. The test runner exports its own pid this way before it forks its workers, so a `jac run`, `jac serve` or `jac test` a test spawns, and a base a test opens in-process without marking it scratch, no longer leaves a permanent database keyed to a temp directory behind. A test that needs to observe a real project database removes `JAC_DB_SCRATCH_OWNER` from its child's environment, the way the database lifecycle tests do.
 
 A process that dies without running its exit handler (a `SIGKILL`, an OOM, a container that is replaced) cannot drop its own scratch database, so the next scratch store to open reclaims it. Deciding that its owner is really gone takes more than the recorded pid, which is only meaningful on the host that recorded it. While a scratch database is open its registry record is heartbeated once a minute, and a record is reclaimed only when one of these holds:
 
@@ -1532,7 +1550,65 @@ jac clean --data --cache
 jac clean --all --force
 ```
 
-> **💡 Troubleshooting Tip:** If you encounter unexpected syntax errors, "NodeAnchor is not a valid reference" errors, or other strange behavior after modifying your code, try clearing the project cache with `jac clean --cache` (removes `.jac/cache/`). If that doesn't help -- for example after upgrading Jaseci packages -- also remove the global per-user cache with `rm -rf ~/.cache/jac`. Stale bytecode can cause issues when source files change.
+> **💡 Troubleshooting Tip:** If you encounter unexpected syntax errors, "NodeAnchor is not a valid reference" errors, or other strange behavior after modifying your code, try clearing the project cache with `jac clean --cache` (removes `.jac/cache/`). If that doesn't help -- for example after upgrading Jaseci packages -- also clear the machine-wide cache with [`jac cache purge`](#jac-cache). Stale bytecode can cause issues when source files change.
+
+---
+
+### jac cache
+
+Inspect and reclaim the **machine-wide** jac cache: the compiled modules and bootstrap bytecode every project shares, the extracted runtimes of fused `jac` binaries, materialized app images, downloaded toolchains, byLLM model weights, and the embedded Postgres cluster. (`jac clean` is the project-local `.jac/` directory; this is everything else.)
+
+```bash
+jac cache [-h] [action] [-b BUCKET] [-n]
+```
+
+| Argument / Option | Description | Default |
+|--------|-------------|---------|
+| `action` | `status`, `gc` or `purge` | `status` |
+| `-b, --bucket` | With `purge`: only this bucket (`status` lists the names) | all managed buckets |
+| `-n, --dry-run` | With `gc` or `purge`: report what would be removed without removing it | `False` |
+
+The cache root is `~/.cache/jac` on Linux, `~/Library/Caches/jac` on macOS and `%LOCALAPPDATA%\jac\cache` on Windows; `JAC_CACHE_HOME` relocates it, and a set `XDG_CACHE_HOME` is honored on every platform. Disposable managed buckets carry a standard `CACHEDIR.TAG`, so backup tools that respect the marker can skip those buckets. The shared root and external buckets are not tagged: `pg/main` contains persistent database data. Jac removes its own former root-level tag when preparing the cache; it preserves user-authored tags.
+
+Every bucket has a **retention policy**:
+
+| Bucket | Holds | Policy |
+|---|---|---|
+| `rt` | fused-binary runtimes, one per payload hash | unused 30 days |
+| `jir-modules` | compiled modules, one generation per compiler digest | unused 14 days (`JAC_CACHE_GENERATION_TTL_DAYS`) |
+| `jir-bootstrap` | bootstrap-tier bytecode | unused 14 days, at most 4000 entries |
+| `jir-stubcat`, `jir-kernel-units`, `jir-digests` | stub catalogs, native kernel units, per-checkout compiler digests | unused 14 days |
+| `apps` | materialized `.jab` images | unused 30 days |
+| `scale-binaries` | pinned release binaries for deploys | unused 30 days |
+| `toolchains-downloads` | verified toolchain archives | unused 14 days |
+| `toolchains-installed`, `toolchains-build` | installed toolchains and builds | unused 90 days |
+| `models` | byLLM model weights | pinned: never collected, `purge` removes it |
+| `pg`, `toolchains-gradle`, `toolchains-android-sdk` | the Postgres cluster, Gradle's home, the Android SDK | external: reported only (`jac db prune` manages the cluster) |
+
+"Unused" is measured from the last time jac touched the entry, not from when it was written. `JAC_CACHE_TTL_DAYS` overrides every age above at once (`0` turns the age sweep off). Abandoned temporary files and staging directories, including nested toolchain staging, are eligible after one hour. PID-bearing staging entries are retained while their writer is alive. Legacy toolchain staging is reclaimed only while its existing installation locks can be held; temporary entries with unknown ownership are preserved. Lock files remain in place so concurrent writers keep sharing the same lock. Status includes temporary entries and lists unrecognized content separately; unrecognized content is never deleted automatically. Each bucket also sweeps itself opportunistically when jac writes to it, at most once per process and once per day, so the cache stays bounded without anyone running `gc`.
+
+**Examples:**
+
+```bash
+# Every bucket with its path, entry count, size and policy
+jac cache status
+
+# Run every retention policy now and report the bytes reclaimed
+jac cache gc
+
+# Show what gc would remove
+jac cache gc --dry-run
+
+# Remove every managed bucket (keeps the runtime this jac is running on; never touches pg/)
+jac cache purge
+
+# Remove one bucket
+jac cache purge --bucket jir-modules
+```
+
+`purge` also clears inactive temporary entries regardless of age. It preserves live runtime/compiler entries, staging owned by a running writer, and temporary entries whose ownership cannot be established. Retired toolchain directories are reclaimed under both the default root and `JAC_TOOLCHAIN_DIR`, unless a current bucket uses that location.
+
+`purge` refuses external buckets: the Postgres cluster is `jac db`'s (`jac db prune`), and Gradle and the Android SDK are their own tools'.
 
 ---
 
@@ -1564,7 +1640,7 @@ jac build [-h] [--all] [--as {jab,sealed,binary,wheel,npm,source,native,client}]
 | `binary` | A self-contained app executable: a copy of the `jac` launcher with your sealed `.jab` appended as an overlay | -- |
 | `wheel` | A `pip install`-ready Python wheel in `dist/` | `jac bundle` |
 | `npm` | An npm tarball | `jac bundle --target npm` |
-| `source` | An editable FastAPI + JavaScript source tree (zero `.jac` files) | `jac eject` |
+| `source` | Editable Python, JavaScript, and C with the required Jac runtime source | `jac eject` |
 | `client` | Only the app's client bundle (the browser bundle of a `web-app` / `web-static`, the desktop binary of a `desktop` app, the platform build of a `mobile` app) | -- |
 
 **The type-check gate.** `jac build` refuses to emit an artifact if the program fails type checking, and there is no flag that skips it. Because every compilation type-checks, the artifact compile *is* the gate rather than a separate pass over the project. Use `--check_only` to run the whole-project check and emit nothing (useful in CI).
@@ -1622,9 +1698,28 @@ jac build --as npm
 # Standalone native binary from one module
 jac build main.jac --native
 
-# Editable FastAPI + JavaScript source tree (formerly `jac eject`)
+# Editable Python, JavaScript, and C source tree
 jac build --as source -o /tmp/myapp-out
 ```
+
+Source export follows the selected app and its colocated services. The output
+contains application code, serving and import metadata, declared resources, and
+the shared runtime modules those applications require. Rebuild and run it without
+Jac:
+
+```bash
+cd /tmp/myapp-out
+python -m pip install -r requirements.txt
+python build.py
+python main.py
+```
+
+JavaScript builds use Node/npm or Bun. Native code is emitted as C from the
+existing native lowering and built with Clang; browser native modules also need
+a WASI sysroot. Exporting native source requires LLVM 22 development files and
+CMake, or a configured `JAC_LLVM_CBE`. Generated C retains the selected target's
+ABI. Original `.jac` files can remain as application resources, such as the site's
+source browser; executable modules use the exported Python, JavaScript, and C.
 
 **Building apps of a workspace:**
 
@@ -1880,7 +1975,7 @@ jac build --as client web
 
 ### jac setup
 
-One-time initialization of an app's client.
+Provision an app's client ahead of time. It is optional: `jac run`, `jac run --dev` and `jac build` check the client target's readiness first and provision whatever is missing on first use, narrating each step. `jac setup` runs the same sequence explicitly, for CI images, offline preparation, or anyone who wants the tools in place before the first run.
 
 ```bash
 jac setup [app]
@@ -1889,8 +1984,10 @@ jac setup [app]
 | Option | Description |
 |--------|-------------|
 | `app` | An app name from `[apps]`. Omit to set up the default app |
+| `--toolchain <name>` | Provision build tools without a project: `android`, `ios`, `desktop`, `cef` |
+| `--platform <name>` | Also provision the app's build platform toolchain: `android` or `ios` |
 
-What it does depends on the app's kind: a `mobile` app gets its Expo/Metro scaffold at `.jac/mobile-rn/` (with `[dependencies.npm.native]` merged in); a `web-app` with a `[client.pwa]` table gets a `pwa_icons/` directory with placeholder icons; `desktop` apps need no setup (the native host is generated at build time).
+What it does depends on the app's kind: a `mobile` app gets its Expo/Metro scaffold at `.jac/mobile-rn/` (with `[dependencies.npm.native]` merged in) and its packages installed; a `web-app` with a `[client.pwa]` table gets a `pwa_icons/` directory with placeholder icons; `desktop` apps need no setup (the native host is generated at build time). Under `JAC_OFFLINE=1` a run cannot provision, so a missing mobile scaffold or stale packages stop with `jac setup <app>` as the hint.
 
 **Examples:**
 

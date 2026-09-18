@@ -226,6 +226,7 @@ Emitted by the type checker and type evaluator.
 | `E1033` | Member "{member}" not found on type "{type}" |
 | `E1034` | Cannot perform assignment comprehension on type "{type}" |
 | `E1035` | Type "{src}" is not assignable to type "{dest}" |
+| `E1036` | Generic type "{type}" requires explicit type arguments |
 
 ### Subscript / Await
 
@@ -379,7 +380,7 @@ Emitted by `OwnershipCheckPass` only in **nogc-enforced** native modules (`jac b
 
 | Code | Message |
 |------|---------|
-| `W1036` | Generic type "{type}" used without type arguments, defaulting to "{type}[Any]"; consider adding explicit type arguments |
+| `W1036` | Generic type "{type}" used without type arguments, defaulting to "{type}[any]"; consider adding explicit type arguments |
 | `W1037` | Explicit 'any' type annotation disables type checking here; consider a more specific type |
 | `W1050` | Unknown intrinsic JSX element '<{tag}>' |
 | `W1051` | Expression type could not be resolved (Unknown) |
@@ -466,18 +467,15 @@ obj Account {
 Python-compat `class` is exempt. A cross-object `@Base.x.setter` extends a parent's
 property and has no direct native form, so it is not reported.
 
-### App Isolation and Shared Layering
+### App entry boundaries
 
-Emitted by `AccessCheckPass` from the app facts the driver stamps on every module (see [Workspaces & Apps](apps.md)). Like `E2038`/`W2038`, these follow `[check] enforce_access`: errors when access is enforced, warnings otherwise.
+`AccessCheckPass` checks imports across declared app entries. As with `E2038`/`W2038`, `[check] enforce_access` selects errors or warnings.
 
 | Code | Message |
 |------|---------|
-| `E2039` / `W2039` | '{name}' belongs to app '{app}'; app '{user_app}' may only use it through shared code or its bridge surface |
-| `E2040` / `W2040` | Shared module '{module}' imports '{name}' from app '{app}'; shared code may not depend on app modules |
+| `E2039` / `W2039` | A consumer accesses a private declaration through another app's entry |
 
-`E2039` fires when a module of one app reaches into another app's declarations. An app's **bridge surface** -- its walkers and `def:pub` functions -- is reachable from any consumer app, and imports of it compile to a call across the boundary rather than an in-process reference, so those do not fire. Anything else is private to the app: move the code both apps need into shared code (a module under no app root), or expose it as `pub`.
-
-`E2040` is the other direction of the same layering: shared code sits below every app and may not import from one. Move the shared module into the app that needs it, or move the imported declaration down into shared code.
+An app's walkers and `def:pub` functions form its public boundary. Other declarations reached through that entry are private. Ordinary helper imports inherit the selected app's context; they do not belong to a global shared layer or acquire ownership from their directory. See [Workspaces & Apps](apps.md).
 
 ### Declaration-Implementation Matching
 
@@ -626,7 +624,7 @@ Emitted while lowering the unitree into the compact codegen IR container (`JcirG
 
 `E5082` fires when a plain client import references a server symbol that does not bridge: server `def:pub` endpoints bridge automatically over RPC, so the fix is to make the symbol a `def:pub` endpoint, pin it (or its module) `"client"` via `[placement.pins]`, or move it into client code.
 
-`E5084` is the bare-import sibling. A bare name resolves across the module universe -- local Jac module first, then Python, then the client npm world (jac.toml `[dependencies.npm]`, the active framework's own packages, and whatever is installed under `.jac/client/node_modules`), so `import from react { useRef }` works unquoted. When the name resolves to none of those client-reachable worlds, placement pins the import server-side, the bundle never binds the symbol, and the page would fail at runtime with a ReferenceError -- so client use fails the build instead. Install or declare the package in `[dependencies.npm]` (or quote the module to pin the npm form), or keep the use server-side behind a `def:pub` endpoint. Annotation-only uses do not fire it, since ES output erases type annotations; imports whose uses are all server-side prune silently as before.
+`E5084` is the bare-import sibling. A bare name resolves across the module universe in a fixed order -- a local Jac module first, then a name declared in jac.toml `[dependencies.npm]` or owned by the active framework (`react`, `react-dom`, ...), then a Python module the importing file can import, and only then whatever is merely installed under `.jac/client/node_modules` -- so `import from react { useRef }` works unquoted, while a transitive npm package that shares a name with a Python module (`dotenv`, `argparse`) never captures that import. When the name resolves to none of the client-reachable worlds, placement pins the import server-side, the bundle never binds the symbol, and the page would fail at runtime with a ReferenceError -- so client use fails the build instead. Install or declare the package in `[dependencies.npm]` (or quote the module to pin the npm form), or keep the use server-side behind a `def:pub` endpoint. Annotation-only uses do not fire it, since ES output erases type annotations; imports whose uses are all server-side prune silently as before.
 
 `E5086` covers the same failure for a *module's own* declarations rather than its imports. The bundle carries what is placed in the client codespace, plus `def:pub` endpoints, which are bound to a generated client-side forwarder that calls them over RPC. Anything else named by client code -- a function pinned `"server"` via `[placement.pins]`, a glob kept server-side -- would emit as a bare identifier that resolves to nothing. That is a guaranteed `ReferenceError` at module load, so it fails the build at the seam that produces the artifact. Give the element client presence (drop the pin, or make it `def:pub`), or keep the use out of client code.
 
@@ -640,13 +638,10 @@ Emitted by the driver and the boundary passes from the app facts of a workspace 
 
 | Code | Message |
 |------|---------|
-| `E5107` | Server-placed shared module '{module}' has no single owner: reached by serving apps {apps}; declare it as a service app or pin an owner |
 | `E5104` | App dependency cycle: {cycle} |
 | `E5105` | Variant '{variant}' disagrees with '{base}' on '{name}': {detail} |
 | `E5106` | App '{consumer}' bridges to '{name}', which is not a pub element of app '{provider}' |
 | `E5108` | App '{consumer}' imports '{name}', a {kind} owned by app '{provider}'; nodes and edges never cross an app boundary |
-
-`E5107`: a shared module with server-placed elements runs on exactly one app's server so that every other app bridges to the same owner. With more than one serving app in the workspace the compiler cannot pick one. Give the module its own `[apps.<name>]` table (`kind = "service"`, `entry-point = "<path>"`), or pin it to an owner with `[apps.<owner>.placement.pins] "<module>" = "server"`. It is reported once per module.
 
 `E5104`: apps bridge to their providers over the wire and providers boot first, so the app graph has to be a DAG. It is reported on the import that closes the cycle. Break it by moving the code both apps need into a shared module, or by folding one of the apps into the other.
 

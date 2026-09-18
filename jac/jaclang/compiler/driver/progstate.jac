@@ -1,10 +1,16 @@
+import from jaclang.compiler.frontend.roles { Kid }
 import os;
 import sys;
 import jaclang.compiler.frontend.unitree as uni;
 import from jaclang.compiler.frontend.relations { ScopeChild }
-import from jaclang.compiler.passes.transform { Alert, PassResult }
-import type from jaclang.compiler.driver.mtp { Info }
+import from jaclang.compiler.passes.context { Alert, PassResult }
+import type from jaclang.runtime.semantic { Info }
 import type from jaclang.compiler.frontend.codeinfo { ClientArtifact }
+import from jaclang.compiler.driver.pipeline_types {
+    AnalysisFact,
+    CompilationProduct,
+    ProductTask
+}
 
 obj ModuleHub {
     has mod: uni.ProgramModule,
@@ -72,12 +78,12 @@ obj ModuleHub {
         }
     }
 
-    def reset {
+    def reset(retain_stubs: bool = True) {
         retained_mods: dict[str, uni.Module] = {};
         retained_stamps: dict[str, float] = {};
         dropped: list[uni.Module] = [];
         for (path, mod) in self.mod.hub.items() {
-            if path.endswith(".pyi") {
+            if retain_stubs and path.endswith(".pyi") {
                 retained_mods[path] = mod;
                 if path in self.stamps {
                     retained_stamps[path] = self.stamps[path];
@@ -95,7 +101,7 @@ obj ModuleHub {
         prog_root.set_kids(
             [
                 k
-                for k in prog_root.kid
+                for k in [prog_root->:Kid:->]
                 if id(k) not in dropped_ids
             ],
             pos_update=False
@@ -236,9 +242,8 @@ obj BuildScratch {
     has na_dep_units: dict[str, (uni.Module | str)] = {},
         na_dep_inflight: set[str] postinit,
         na_verdict_resolving: set[str] postinit,
-        na_unverified_live: dict[str, dict] = {},
+        na_unverified_live: dict[str, dict[str, set[str]]] = {},
         na_verdict_misses: int = 0,
-        boundary_parse_memo: dict[str, any] = {},
         compile_depth: int = 0;
 
     def postinit {
@@ -252,17 +257,16 @@ obj BuildScratch {
         self.na_verdict_resolving.clear();
         self.na_unverified_live.clear();
         self.na_verdict_misses = 0;
-        self.boundary_parse_memo.clear();
         self.compile_depth = 0;
     }
 }
 
 class AnalysisLedger {
-    has _tags: dict[int, set[str]],
+    has _tags: dict[int, set[AnalysisFact]],
         _owners: dict[int, any];
 
     def init(self: AnalysisLedger) {
-        self._tags: dict[int, set[str]] = {};
+        self._tags: dict[int, set[AnalysisFact]] = {};
         self._owners: dict[int, any] = {};
     }
 
@@ -273,25 +277,25 @@ class AnalysisLedger {
         } except Exception {}
     }
 
-    def provided(self: AnalysisLedger, mod: any) -> set[str] {
+    def provided(self: AnalysisLedger, mod: any) -> set[AnalysisFact] {
         import weakref;
         key = id(mod);
         owner = self._owners.get(key);
         if owner is not None and owner() is mod {
             return self._tags[key];
         }
-        tags: set[str] = set();
+        tags: set[AnalysisFact] = set();
         self._tags[key] = tags;
         self._owners[key] = weakref.ref(mod, lambda (_ref: any) { self._drop(key); });
         return tags;
     }
 
-    def provides(self: AnalysisLedger, mod: any, tag: str) -> bool {
+    def provides(self: AnalysisLedger, mod: any, tag: AnalysisFact) -> bool {
         owner = self._owners.get(id(mod));
         return owner is not None and owner() is mod and tag in self._tags[id(mod)];
     }
 
-    def mark(self: AnalysisLedger, mod: any, tags: set[str]) {
+    def mark(self: AnalysisLedger, mod: any, tags: set[AnalysisFact]) {
         live = self.provided(mod);
         live.clear();
         live.update(tags);
@@ -319,6 +323,10 @@ class AnalysisCaches {
         mtir_map: dict[(str, Info)],
         pass_runs: dict[str, int],
         pass_time: dict[str, float],
+        phase_time: dict[str, float],
+        completed_passes: dict[int, set[str]],
+        product_tasks: dict[int, dict[CompilationProduct, ProductTask]],
+        task_owners: dict[int, any],
         early_passes: dict[int, PendingPassResults],
         cache_events: dict[str, int];
 
@@ -329,8 +337,31 @@ class AnalysisCaches {
         self.mtir_map: dict[(str, Info)] = {};
         self.pass_runs: dict[str, int] = {};
         self.pass_time: dict[str, float] = {};
+        self.phase_time: dict[str, float] = {};
+        self.completed_passes = {};
+        self.product_tasks = {};
+        self.task_owners = {};
         self.early_passes: dict[int, PendingPassResults] = {};
         self.cache_events: dict[str, int] = {};
+    }
+
+    def retain_tasks(self: AnalysisCaches, module: uni.Module) {
+        import weakref;
+        key = id(module);
+        owner = self.task_owners.get(key);
+        if owner is not None and owner() is module {
+            return;
+        }
+        self.drop_tasks(key);
+        self.task_owners[key] = weakref.ref(
+            module, lambda (_ref: any) { self.drop_tasks(key); }
+        );
+    }
+
+    def drop_tasks(self: AnalysisCaches, key: int) {
+        self.completed_passes.pop(key, None);
+        self.product_tasks.pop(key, None);
+        self.task_owners.pop(key, None);
     }
 
     def record_early(

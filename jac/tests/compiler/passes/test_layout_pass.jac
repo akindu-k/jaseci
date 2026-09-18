@@ -33,6 +33,28 @@ def get_registry(fixture: str) -> LayoutRegistry {
 }
 
 # ── LAYOUT_COMPATIBLE_PRIMITIVES ──────────────────────────────
+test "dispatch headers are independent of backend placement" {
+    import from jaclang.compiler.driver.compile_options { CompileOptions }
+    layouts: list[ArchetypeLayout] = [];
+    for context in ["client", "native", "server"] {
+        program = JacProgram();
+        module = program.compile(
+            "layout_placement.jac",
+            use_str="obj Box { has value: int; } def accepts(value: object) -> bool { return isinstance(value, Box); }",
+            options=CompileOptions(force_codespace=context, no_cgen=True)
+        );
+        assert not program.errors_had;
+        layout = get_layout_registry(module, program).get_layout("Box");
+        assert layout is not None;
+        layouts.append(layout);
+    }
+    for layout in layouts {
+        assert layout.has_vtable;
+        assert layout.field_index == layouts[0].field_index;
+        assert layout.vtable_ptr_slot == layouts[0].vtable_ptr_slot;
+    }
+}
+
 test "LAYOUT_COMPATIBLE_PRIMITIVES contains all expected types" {
     expected = {
         "int",
@@ -169,4 +191,30 @@ test "layout warnings report correct line numbers for fields" {
     warning_lines = sorted([w.loc.first_line for w in layout_warnings]);
     # bad_field1 is on line 5, bad_field2 is on line 6
     assert warning_lines == [5, 6] , f"Expected warnings on lines [5, 6], got {warning_lines}";
+}
+
+
+test "imported Jac field layouts use resolved declarations including aliases" {
+    import tempfile;
+    import from pathlib { Path }
+    import from jaclang.compiler.driver.compile_options { CompileOptions }
+    with tempfile.TemporaryDirectory() as directory {
+        provider = Path(directory) / "provider.jac";
+        provider.write_text("obj Counter { has value: int = 0; }\n");
+        consumer = Path(directory) / "consumer.jac";
+        consumer.write_text(
+            "import from .provider { Counter as ImportedCounter }\n"
+                + "import from typing { Optional as Maybe, Union as Either }\n"
+                + "obj Holder { has direct: ImportedCounter, optional: ImportedCounter | None, items: list[ImportedCounter], alias: Maybe[ImportedCounter], nested: list[Maybe[ImportedCounter]], choice: Either[int, str]; }\n"
+        );
+        program = JacProgram();
+        module = program.compile(str(consumer), options=CompileOptions(no_cgen=True));
+        assert not program.errors_had , str(program.errors_had);
+        layout = get_layout_registry(module, program).get_layout("Holder");
+        assert layout is not None and len(layout.fields) == 6;
+        assert not any(
+            warning.code is not None and warning.code.code == "W5032"
+            for warning in program.warnings_had
+        ) , str(program.warnings_had);
+    }
 }

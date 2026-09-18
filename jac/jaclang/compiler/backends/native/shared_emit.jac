@@ -1,3 +1,87 @@
+import type from jaclang.compiler.frontend.codeinfo { InteropBinding }
+import type from jaclang.compiler.backends.native.llvm.binding {
+    ModuleRef,
+    TargetMachine
+}
+import type from jaclang.compiler.backends.native.llvm.binding.value { ValueRef }
+
+
+def internalize_native_implementation(module: ModuleRef, exports: list[str]) {
+    import from jaclang.compiler.backends.native.llvm.binding.value { Visibility }
+    public = set(exports);
+    values: list[ValueRef] = list(module.functions);
+    values.extend(module.global_variables);
+    for value in values {
+        if value.is_declaration
+            or value.name in public
+            or value.name.startswith("llvm.") {
+            continue;
+        }
+        if value.visibility == Visibility.hidden {
+            continue;
+        }
+        value.linkage = "internal";
+    }
+}
+
+
+def inject_heap_accounting(llvm_ir_str: str) -> tuple[str, list[str]] {
+    import re;
+    import from jaclang.compiler.frontend.codeinfo { HDR_TOTAL }
+    requested = [
+        name
+        for name in ("jac_heap_size", "jac_list_heap_size")
+        if re.search(r'declare[^\n]*@"?' + name + r'"?\(', llvm_ir_str)
+    ];
+    if not requested {
+        return (llvm_ir_str, []);
+    }
+    if not re.search(r'define[^\n]*@"?__rc_alloc"?\(', llvm_ir_str) {
+        raise RuntimeError("Native heap accounting requires managed allocations");
+    }
+    apple = re.search(r'target triple = "[^"\n]*(?:apple|darwin)', llvm_ir_str)
+        is not None;
+    allocator_size = "malloc_size" if apple else "malloc_usable_size";
+    definitions: list[str] = [];
+    if not re.search(
+        r'(?:declare|define)[^\n]*@"?' + allocator_size + r'"?\(', llvm_ir_str
+    ) {
+        definitions.append("declare i64 @" + allocator_size + "(ptr)");
+    }
+    for name in requested {
+        llvm_ir_str = re.sub(
+            r'(?m)^declare[^\n]*@"?' + name + r'"?\([^\n]*\)[^\n]*$', "", llvm_ir_str
+        );
+        body = (
+            "define i64 @"
+            + name
+            + "(i64 %address) {\nentry:\n"
+            "  %empty = icmp eq i64 %address, 0\n"
+            "  br i1 %empty, label %zero, label %measure\nzero:\n  ret i64 0\nmeasure:\n"
+            "  %object = inttoptr i64 %address to ptr\n"
+            "  %base = getelementptr i8, ptr %object, i64 -"
+            + str(HDR_TOTAL)
+            + "\n" "  %owned = call i64 @"
+            + allocator_size
+            + "(ptr %base)\n"
+        );
+        if name == "jac_list_heap_size" {
+            body += (
+                "  %slot = getelementptr { i64, i64, ptr }, ptr %object, i32 0, i32 2\n"
+                "  %data = load ptr, ptr %slot\n"
+                "  %buffer = call i64 @"
+                + allocator_size
+                + "(ptr %data)\n"
+                "  %total = add i64 %owned, %buffer\n  ret i64 %total\n}"
+            );
+        } else {
+            body += "  ret i64 %owned\n}";
+        }
+        definitions.append(body);
+    }
+    return (llvm_ir_str + "\n" + "\n".join(definitions) + "\n", requested);
+}
+
 def inject_shared_init(llvm_ir_str: str, manifest: any) -> tuple[str, list[str]] {
     init_calls: list[str] = [];
     transitive_sources: list[str] = [];
@@ -49,7 +133,7 @@ def inject_shared_init(llvm_ir_str: str, manifest: any) -> tuple[str, list[str]]
     parts.append(
         "define void @__jac_shared_init() {\nentry:\n" + _body + "  ret void\n}"
     );
-    extra_exports: list[str] = [];
+    (llvm_ir_str, extra_exports) = inject_heap_accounting(llvm_ir_str);
 
     if ("@__rc_retain(" in llvm_ir_str) or ('@"__rc_retain"(' in llvm_ir_str) {
         parts.append(
@@ -228,6 +312,58 @@ def aarch64_floor_atomics_ir(triple: str, clib_paths: list[str]) -> str {
     return aarch64_outline_atomics_ir();
 }
 
+def optimize_native_module(
+    module: ModuleRef,
+    target_machine: TargetMachine,
+    opt_level: int,
+    internalize: bool = False
+) {
+    import jaclang.compiler.backends.native.llvm.binding as llvm;
+    if opt_level <= 0 {
+        return;
+    }
+    tuning = llvm.create_pipeline_tuning_options(speed_level=opt_level);
+    builder = llvm.create_pass_builder(target_machine, tuning);
+    pipeline = builder.getModulePassManager();
+    if internalize {
+        pipeline.add_internalize_pass();
+    }
+    pipeline.run(module, builder);
+}
+
+obj SharedObject {
+    has code: bytes,
+        exports: list[str];
+}
+
+def emit_shared_object(
+    llvm_ir_str: str,
+    manifest: any,
+    export_symbols: list[str],
+    triple: str,
+    opt_level: int = 2,
+    clib_paths: (list[str] | None) = None
+) -> SharedObject {
+    import jaclang.compiler.backends.native.llvm.binding as llvm;
+    (ir_str, extra_exports) = inject_shared_init(llvm_ir_str, manifest);
+    exports: list[str] = [];
+    for symbol in list(export_symbols) + extra_exports + ["__jac_shared_init"] {
+        if symbol and symbol not in exports {
+            exports.append(symbol);
+        }
+    }
+    init_object_codegen();
+    ir_str += aarch64_floor_atomics_ir(triple, list(clib_paths or []));
+    module = llvm.parse_assembly(ir_str);
+    internalize_native_implementation(module, exports);
+    module.verify();
+    target_machine = llvm.Target.from_triple(triple).create_target_machine(
+        opt=2, reloc="pic", codemodel="small"
+    );
+    optimize_native_module(module, target_machine, opt_level);
+    return SharedObject(code=target_machine.emit_object(module), exports=exports);
+}
+
 def emit_shared_library(
     llvm_ir_str: str,
     manifest: any,
@@ -235,66 +371,24 @@ def emit_shared_library(
     output_path: str,
     opt_level: int = 2,
     auto_init: bool = False,
-    clib_paths: (list | None) = None,
-    clib_symbol_lib: (dict | None) = None
+    clib_paths: (list[str] | None) = None,
+    clib_symbol_lib: (dict[str, str] | None) = None
 ) -> tuple[bool, str] {
     import os;
     import sys;
-
-    (ir_str, extra_exports) = inject_shared_init(llvm_ir_str, manifest);
-    is_elf = not sys.platform.startswith("win") and sys.platform != "darwin";
-    if is_elf and clib_paths and "@atexit(" not in ir_str {
-        ir_str += (
-            "\n; --- atexit shim: glibc exports __cxa_atexit dynamically but "
-            "keeps atexit\n; in libc_nonshared.a, so a floor-archive member "
-            "that calls it would leave\n; the artifact with an unresolvable "
-            "reference at dlopen ---\n"
-            "declare i32 @__cxa_atexit(ptr, ptr, ptr)\n"
-            "define hidden i32 @atexit(ptr %f) {\nentry:\n"
-            "  %r = call i32 @__cxa_atexit(ptr %f, ptr null, ptr null)\n"
-            "  ret i32 %r\n}\n"
-        );
-    }
-    exports: list[str] = [];
-    for _s in list(export_symbols) + extra_exports + ["__jac_shared_init"] {
-        if _s and _s not in exports {
-            exports.append(_s);
-        }
-    }
-    init_funcs: list[str] = ["__jac_shared_init"] if auto_init else [];
-
     import jaclang.compiler.backends.native.llvm.binding as llvm;
-    init_object_codegen();
 
     triple = llvm.get_default_triple();
-    assert isinstance(triple, str);
-    ir_str += aarch64_floor_atomics_ir(triple, list(clib_paths or []));
-
     try {
-        mod = llvm.parse_assembly(ir_str);
-        mod.verify();
+        shared = emit_shared_object(
+            llvm_ir_str, manifest, export_symbols, triple, opt_level, clib_paths
+        );
     } except Exception as e {
         return (False, f"LLVM IR verification failed: {e}");
     }
-
-    target = llvm.Target.from_default_triple();
-    assert isinstance(target, llvm.Target);
-    target_machine = target.create_target_machine(
-        opt=2, reloc="pic", codemodel="small"
-    );
-    assert isinstance(target_machine, llvm.TargetMachine);
-
-    if opt_level > 0 {
-        pto = llvm.create_pipeline_tuning_options(speed_level=opt_level);
-        pb = llvm.create_pass_builder(target_machine, pto);
-        assert isinstance(pb, llvm.PassBuilder);
-        opt_mpm = pb.getModulePassManager();
-        assert isinstance(opt_mpm, llvm.ModulePassManager);
-        opt_mpm.run(mod, pb);
-    }
-
-    obj_bytes = target_machine.emit_object(mod);
-    assert isinstance(obj_bytes, bytes);
+    obj_bytes = shared.code;
+    exports = shared.exports;
+    init_funcs: list[str] = ["__jac_shared_init"] if auto_init else [];
 
     is_windows = sys.platform.startswith("win");
     is_macos = sys.platform == "darwin";
@@ -314,7 +408,7 @@ def emit_shared_library(
             );
         } elif is_macos {
             import from jaclang.compiler.backends.native.macho_linker { MachOLinker }
-            import from jaclang.compiler.backends.native.linker_common {
+            import from jaclang.compiler.backends.native.floor {
                 collect_floor_archives
             }
             (_floor_members, _floor_handled) = collect_floor_archives(
@@ -336,7 +430,7 @@ def emit_shared_library(
             );
         } else {
             import from jaclang.compiler.backends.native.elf_linker { ElfLinker }
-            import from jaclang.compiler.backends.native.linker_common {
+            import from jaclang.compiler.backends.native.floor {
                 collect_floor_archives as _cfa_elf
             }
             (_floor_members_elf, _fh_elf) = _cfa_elf(
@@ -362,4 +456,53 @@ def emit_shared_library(
         return (False, "shared-library link failed: could not parse object file");
     }
     return (True, "");
+}
+
+
+def bind_shared_callbacks(
+    llvm_ir: str, bindings: list[InteropBinding]
+) -> tuple[str, list[InteropBinding]] {
+    import jaclang.compiler.backends.native.llvm.binding as llvm;
+    import from jaclang.compiler.backends.native.llvm.ir.types { _wrapname }
+    module = llvm.parse_assembly(llvm_ir);
+    assert isinstance(module, llvm.ModuleRef);
+    definitions: list[str] = [];
+    callbacks: list[InteropBinding] = [];
+    for binding in bindings {
+        function = module.get_function(binding.name);
+        assert isinstance(function, llvm.ValueRef);
+        if not function.is_declaration {
+            continue;
+        }
+        (result, parameters, variadic) = function.function_signature();
+        if variadic {
+            raise ValueError(
+                f'Python callbacks cannot use a variadic ABI: {binding.name}'
+            );
+        }
+        callbacks.append(binding);
+        name = _wrapname(binding.name);
+        slot = _wrapname('__jac_callback_' + binding.name);
+        bind_function = _wrapname('__jac_bind_' + binding.name);
+        arguments = ', '.join(
+            f'{kind} %arg{index}' for (index, kind) in enumerate(parameters)
+        );
+        call = f'call {result} %function({arguments})';
+        body = f'  {call}\n  ret void'
+            if result == 'void'
+            else f'  %result = {call}\n  ret {result} %result';
+        definitions.extend(
+            [
+                f'@{slot} = internal global ptr null',
+                f'define void @{bind_function}(ptr %callback) {{\n  store ptr %callback, ptr @{slot}\n  ret void\n}}',
+                f'define {result} @{name}({arguments}) {{\n  %function = load ptr, ptr @{slot}\n{body}\n}}'
+            ]
+        );
+    }
+    if definitions {
+        callback_module = llvm.parse_assembly('\n'.join(definitions));
+        module.link_in(callback_module);
+    }
+    module.verify();
+    return (str(module), callbacks);
 }

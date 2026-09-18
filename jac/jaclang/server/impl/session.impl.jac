@@ -1,4 +1,4 @@
-def _toml_section(base_path: (str | None), section: str) -> dict {
+def _toml_section(base_path: (str | None), section: str) -> dict[str, any] {
     if not base_path {
         return {};
     }
@@ -20,7 +20,7 @@ def _toml_section(base_path: (str | None), section: str) -> dict {
 
 
 impl promotions_for(base_path: (str | None)) -> dict[str, list[str]] {
-    raw = _toml_section(base_path, 'database').get('indexes') or {};
+    raw: any = _toml_section(base_path, 'database').get('indexes') or {};
     out: dict[str, list[str]] = {};
     for (arch, fields_l) in raw.items() {
         if isinstance(fields_l, list) {
@@ -74,7 +74,10 @@ impl scratch_requested(base_path: (str | None)) -> bool {
         not in ('', '0', 'false', 'no') {
         return True;
     }
-    return bool(base_path) and os.path.abspath(base_path) in _scratch_bases;
+    if not base_path {
+        return False;
+    }
+    return os.path.abspath(base_path) in _scratch_bases;
 }
 
 
@@ -121,6 +124,71 @@ impl drop_scratch_database -> None {
 }
 
 
+impl scratch_owner_pid -> int {
+    raw = os.environ.get(SCRATCH_OWNER_ENV, '').strip();
+    if not raw {
+        return 0;
+    }
+    try {
+        return max(0, int(raw));
+    } except ValueError {
+        logger.warning(f"ignoring {SCRATCH_OWNER_ENV}={raw!r}: not a pid");
+        return 0;
+    }
+}
+
+
+def _drop_owned_at_exit -> None {
+    if scratch_owner_pid() != os.getpid() {
+        return;
+    }
+    try {
+        drop_owned_databases();
+    } except Exception as e {
+        logger.debug(f"could not drop the databases this process owns: {e}");
+    }
+}
+
+
+impl own_child_databases -> None {
+    import from jaclang.data.dbcatalog { process_alive, this_host }
+    outer = scratch_owner_pid();
+    if outer == os.getpid() {
+        return;
+    }
+    if outer > 0 and process_alive(this_host(), outer) {
+        return;
+    }
+    import atexit;
+    os.environ[SCRATCH_OWNER_ENV] = str(os.getpid());
+    atexit.register(_drop_owned_at_exit);
+}
+
+
+impl drop_owned_databases(data_dir: str = '') -> int {
+    import from jaclang.data.dbcatalog { connect_admin, drop_database, owned_databases }
+    rt = PgRuntime(data_dir=data_dir or shared_pg_data_dir(), database=MAINTENANCE_DB);
+    if not rt.is_running() {
+        return 0;
+    }
+    dropped = 0;
+    conn: any = connect_admin(rt.conninfo());
+    try {
+        for name in owned_databases(conn, os.getpid()) {
+            if drop_database(conn, name, force=True) {
+                dropped += 1;
+            }
+        }
+    } finally {
+        conn.close();
+    }
+    if dropped {
+        logger.info(f"dropped {dropped} database(s) created under this process");
+    }
+    return dropped;
+}
+
+
 impl retention_days_for(base_path: (str | None)) -> int {
     raw: str = os.environ.get(RETENTION_ENV, '').strip();
     if not raw {
@@ -146,6 +214,8 @@ impl runtime_for_base(
     if scratch_requested(base_path) {
         lease = scratch_lease(base_path);
     }
+    owner = 0 if lease is not None else scratch_owner_pid();
+    scratch = lease is not None or owner > 0;
     return RuntimeLease(
         runtime=PgRuntime(
             data_dir=shared_pg_data_dir(),
@@ -155,8 +225,9 @@ impl runtime_for_base(
                     else project_db_name(base_path, target_path)
             ),
             owner_path=os.path.abspath(base_path),
-            kind=DbKind.SCRATCH if lease is not None else DbKind.PROJECT,
-            retention_days=(0 if lease is not None else retention_days_for(base_path))
+            kind=DbKind.SCRATCH if scratch else DbKind.PROJECT,
+            owner_pid=owner,
+            retention_days=(0 if scratch else retention_days_for(base_path))
         ),
         reset=lease is not None and lease.reset
     );
@@ -359,7 +430,7 @@ impl Session.get_roots -> Generator[Root, None, None] {
         ];
         root_rows = self.store.load_full(remote);
         for (rid, row) in root_rows.items() {
-            anchor = self._materialize(row, edge_ids=row.adjacency);
+            anchor = self._materialize(row);
             if anchor is not None and isinstance(anchor.archetype, Root) {
                 yield anchor.archetype;
             }
@@ -387,7 +458,7 @@ impl Session.batch_get(ids: list[UUID]) -> dict[UUID, Anchor] {
                 self.read_barrier();
                 loaded = self.store.load_full(missing);
                 for (rid, row) in loaded.items() {
-                    anchor = self._materialize(row, edge_ids=row.adjacency);
+                    anchor = self._materialize(row);
                     if anchor is not None {
                         self._fetch_count += 1;
                         out[rid] = anchor;
@@ -749,11 +820,7 @@ impl Session._flush_locked(full: bool) -> None {
             pending.append((anchor, h));
         }
         if rows or self._deleted {
-            if self.store.txn_isolation() is TxnIsolation.SNAPSHOT_READ_ONLY {
-                self.ensure_writable_txn();
-            } else {
-                self._ensure_txn();
-            }
+            self.ensure_writable_txn();
         }
         if rows {
             self.store.upsert(rows);
@@ -820,9 +887,8 @@ impl Session._serialize(anchor: Anchor) -> AnchorRow {
 }
 
 
-impl Session._materialize(
-    row: AnchorRow, edge_ids: (list[UUID] | None) = None
-) -> (Anchor | None) {
+impl Session._materialize(row: AnchorRow) -> (Anchor | None) {
+    import from functools { partial }
     import from jaclang.data.serializer { Serializer }
     existing = self.__mem__.get(row.id);
     if existing is not None and existing.is_populated() {
@@ -843,23 +909,11 @@ impl Session._materialize(
         return None;
     }
     anchor: Anchor = got;
-    if isinstance(anchor, NodeAnchor) and self.store is not None {
-        adj = edge_ids if edge_ids is not None else [];
-        live = [
-            i
-            for i in adj
-            if i not in self._deleted
-        ];
-        edges = [];
-        for eid in live {
-            if (stub := Serializer._id_to_stub(EdgeAnchor, str(eid))) is not None
-                and isinstance(stub, EdgeAnchor) {
-                edges.append(stub);
-            }
-        }
-        anchor.edges = edges;
-    }
     if isinstance(anchor, NodeAnchor) {
+        if self.store is not None {
+            anchor.__dict__.pop('edges', None);
+            anchor.__dict__['_edge_loader'] = partial(self._load_edges, anchor);
+        }
         anchor.version = row.version;
     }
     self._version_seen[row.id] = row.version;
@@ -871,6 +925,43 @@ impl Session._materialize(
         self._snapshot_reads.add(row.id);
     }
     return anchor;
+}
+
+
+impl Session._load_edges(nd: NodeAnchor) -> list[EdgeAnchor] {
+    import from jaclang.data.serializer { Serializer }
+    loaded = nd.__dict__.get('edges');
+    if loaded is not None {
+        return loaded;
+    }
+    ids: list[UUID] = [];
+    if self.store is not None and nd.id is not None {
+        self.read_barrier();
+        after: (tuple[int, UUID] | None) = None;
+        while True {
+            page = self.store.adjacency(nd.id, after, EDGE_PAGE);
+            for (seq, eid) in page {
+                if eid not in self._deleted {
+                    ids.append(eid);
+                }
+            }
+            if len(page) < EDGE_PAGE {
+                break;
+            }
+            after = page[-1];
+        }
+    }
+    edges: list[EdgeAnchor] = [];
+    for eid in ids {
+        stub = Serializer._id_to_stub(EdgeAnchor, str(eid));
+        if isinstance(stub, EdgeAnchor) {
+            edges.append(stub);
+        }
+    }
+    nd.__dict__['edges'] = edges;
+    nd.__dict__['_initial_edge_ids'] = frozenset(ids);
+    nd.__dict__.pop('_edge_loader', None);
+    return edges;
 }
 
 

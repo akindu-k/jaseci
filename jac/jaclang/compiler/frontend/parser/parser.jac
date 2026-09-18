@@ -1,3 +1,4 @@
+import from jaclang.compiler.frontend.roles { Kid }
 import from .tokens {
     LexToken,
     TokenKind,
@@ -60,6 +61,7 @@ import from jaclang.compiler.frontend.unitree {
     FuncSignature,
     GenCompr,
     GlobalVars,
+    GraphExpr,
     HasVar,
     IfElseExpr,
     IfStmt,
@@ -140,9 +142,9 @@ import from jaclang.compiler.frontend.unitree {
 }
 import from jaclang.compiler.frontend.unitree { Ellipsis as EllipsisLit }
 
+import from jaclang.runtime.constants { EdgeDir }
 import from jaclang.compiler.frontend.constant {
     Tokens as Tok,
-    EdgeDir,
     CodeContext,
     OwnershipKind,
     ParamKind
@@ -407,7 +409,7 @@ obj Parser {
     def match_any(*kinds: TokenKind) -> LexToken | None;
     def expect(kind: TokenKind) -> LexToken;
     def expect_any(*kinds: TokenKind) -> LexToken;
-    def consume_uni(kind: TokenKind) -> Token;
+    def consume_uni(kind: TokenKind, value: str | None = None) -> Token;
     def expect_name(context: str = "identifier") -> LexToken;
     def error(message: str);
     def emit_diag(
@@ -482,6 +484,7 @@ obj Parser {
     def parse_builtin_type -> Expr | None;
     def parse_special_ref -> Expr | None;
     def parse_atom -> Expr;
+    def parse_graph_expr -> GraphExpr;
     def parse_tuple_item -> Expr | KWPair;
     def parse_paren_expr -> Expr;
     def parse_bracket_expr -> Expr;
@@ -560,7 +563,7 @@ obj Parser {
     def parse_from_path -> tuple[(ModulePath | None, bool)];
     def parse_import_items(
         kid: list[UniNode], is_clib_import: bool
-    ) -> tuple[(list, list)];
+    ) -> tuple[(list[ModuleItem | ModulePath], list[UniNode])];
 
     def parse_archetype -> Archetype;
     def parse_archetype_member -> UniNode | None;
@@ -595,7 +598,7 @@ obj Parser {
     def parse_impl_enum_body -> tuple[(list[Assignment], list[Token])];
     def parse_sem_def -> SemDef;
     def parse_type_alias -> TypeAlias;
-    def parse_type_params -> tuple[(list, list)];
+    def parse_type_params -> tuple[(list[TypeParam], list[Token])];
 }
 
 def parse_program(

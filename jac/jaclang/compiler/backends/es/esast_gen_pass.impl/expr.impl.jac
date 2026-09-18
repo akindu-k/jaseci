@@ -25,9 +25,8 @@ impl EsastGenPass._exit_name_impl(nd: uni.Name) -> None {
         }
     }
     if (nd.sym_name in self.reactive_vars) and not self._in_identifier_slot(nd) {
-        self._ensure_backend();
         nd.gen.es_ast = self.sync_loc(
-            self.backend.lower_state_read(nd.sym_name), jac_node=nd
+            self.resolved_backend.lower_state_read(nd.sym_name), jac_node=nd
         );
         return;
     }
@@ -110,29 +109,38 @@ impl EsastGenPass._is_call_target(nd: uni.UniNode) -> bool {
     return isinstance(nd.parent, uni.FuncCall) and nd.parent.target is nd;
 }
 
-impl EsastGenPass.exit_builtin_type with uni.BuiltinType exit {
+impl EsastGenPass._primitive_type_ref(
+    name: str, jac_node: uni.UniNode
+) -> (es.Expression | None) {
     import from jaclang.compiler.type_registry { JAC_TYPE_REGISTRY }
-    type_name = here.sym_name;
     self._ensure_emitters();
     if (
-        not self._in_type_slot(here)
-        and (
-            getattr(self._builtin_emitter, "emit_" + type_name, None) is not None
-            or JAC_TYPE_REGISTRY.is_sized(type_name)
-        )
+        getattr(self._builtin_emitter, "emit_" + name, None) is None
+        and not JAC_TYPE_REGISTRY.is_sized(name)
     ) {
-        here.gen.es_ast = self.sync_loc(
-            es.MemberExpression(
-                object=es.MemberExpression(
-                    object=es.Identifier(name='_jac'),
-                    property=es.Identifier(name='types'),
-                    computed=False
-                ),
-                property=es.Identifier(name=type_name),
+        return None;
+    }
+    return self.sync_loc(
+        es.MemberExpression(
+            object=es.MemberExpression(
+                object=es.Identifier(name='_jac'),
+                property=es.Identifier(name='types'),
                 computed=False
             ),
-            jac_node=here
-        );
+            property=es.Identifier(name=name),
+            computed=False
+        ),
+        jac_node=jac_node
+    );
+}
+
+impl EsastGenPass.exit_builtin_type with uni.BuiltinType exit {
+    type_name = here.sym_name;
+    prim_ref = None
+        if self._in_type_slot(here)
+        else self._primitive_type_ref(type_name, here);
+    if prim_ref is not None {
+        here.gen.es_ast = prim_ref;
         if not self._is_call_target(here) {
             self.needs_jac_runtime = True;
         }
@@ -551,12 +559,12 @@ impl EsastGenPass._build_compr_expr(
 
 impl EsastGenPass._compr_param(
     target: es.Expression, jac_node: uni.UniNode
-) -> es.Node {
+) -> es.Pattern {
     if isinstance(target, es.Identifier) {
         return self.sync_loc(es.Identifier(name=target.name), jac_node=jac_node);
     }
     if isinstance(target, es.ArrayExpression) {
-        elements: list[(es.Node | None)] = [];
+        elements: list[es.Pattern | None] = [];
         for elem in target.elements {
             if isinstance(elem, es.Identifier) {
                 elements.append(
@@ -610,7 +618,7 @@ impl EsastGenPass.exit_dict_val with uni.DictVal exit {
     here.gen.es_ast = obj_expr;
 }
 
-impl EsastGenPass._gen_seq_array(nd: uni.UniNode) -> None {
+impl EsastGenPass._gen_seq_array(nd: uni.ListVal | uni.TupleVal | uni.SetVal) -> None {
     elements: list[es.Expression | es.SpreadElement | None] = [];
     for item in nd.values {
         if (
@@ -686,7 +694,15 @@ impl EsastGenPass.exit_atom_unit with uni.AtomUnit exit {
     }
 }
 
+impl EsastGenPass.enter_lambda_expr with uni.LambdaExpr entry {
+    self._loop_label_savepoints.append(self._loop_label_stack);
+    self._loop_label_stack = [];
+}
+
 impl EsastGenPass.exit_lambda_expr with uni.LambdaExpr exit {
+    if self._loop_label_savepoints {
+        self._loop_label_stack = self._loop_label_savepoints.pop();
+    }
     params: list[es.Pattern] = [];
     if isinstance(here.signature, uni.FuncSignature) {
         for param in here.signature.get_parameters() {
@@ -708,16 +724,7 @@ impl EsastGenPass.exit_lambda_expr with uni.LambdaExpr exit {
             jac_node=here
         );
     } elif isinstance(here.body, list) {
-        body_stmts: list[es.Statement] = [];
-        for stmt in here.body {
-            if stmt.gen.es_ast {
-                if isinstance(stmt.gen.es_ast, list) {
-                    body_stmts.extend(stmt.gen.es_ast);
-                } else {
-                    body_stmts.append(stmt.gen.es_ast);
-                }
-            }
-        }
+        body_stmts = self._collect_stmt_body(here.body);
         body_stmts = self._prepend_hoisted(here, body_stmts);
         block_stmt = self.sync_loc(es.BlockStatement(body=body_stmts), jac_node=here);
         arrow_func = self.sync_loc(
@@ -758,6 +765,10 @@ impl EsastGenPass.exit_atom_trailer with uni.AtomTrailer exit {
         here.target.gen.es_ast
             or self.sync_loc(es.Identifier(name='obj'), jac_node=here.target)
     );
+    if isinstance(here.right, uni.FilterCompr) {
+        here.gen.es_ast = self._build_osp_filter(here, `obj, here.right);
+        return;
+    }
     if (here.right and here.right.gen.es_ast) {
         if isinstance(here.right, uni.Name) {
             prop = self.sync_loc(

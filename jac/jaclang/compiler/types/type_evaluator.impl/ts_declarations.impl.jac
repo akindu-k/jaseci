@@ -15,7 +15,7 @@ impl TypeEvaluator._ts_decl_path(from_loc: ModulePath) -> (str | None) {
     if cache_key in self._ts_decl_path_cache {
         return self._ts_decl_path_cache[cache_key];
     }
-    import from jaclang.compiler.driver.modresolver {
+    import from jaclang.project.modresolver {
         resolve_client_npm_declarations,
         sibling_declaration_file
     }
@@ -386,7 +386,12 @@ impl TypeEvaluator._ts_synth_class_types(
                     );
                 }
             }
-            self._install_synth_member(scope, synth_src, mname, member_type);
+            immutability = ImmutabilityKind.READONLY
+                if all(m.readonly and not m.is_method for m in group)
+                else ImmutabilityKind.NONE;
+            self._install_synth_member(
+                scope, synth_src, mname, member_type, immutability
+            );
         }
         if decl.call_sig is not None {
             self._install_synth_member(
@@ -421,7 +426,11 @@ impl TypeEvaluator._ts_synth_class_types(
 }
 
 impl TypeEvaluator._install_synth_member(
-    scope: UniScopeNode, synth_src: Source, mname: str, member_type: TypeBase
+    scope: UniScopeNode,
+    synth_src: Source,
+    mname: str,
+    member_type: TypeBase,
+    immutability: ImmutabilityKind = ImmutabilityKind.NONE
 ) -> None {
     field_node = Name(
         orig_src=synth_src,
@@ -436,6 +445,7 @@ impl TypeEvaluator._install_synth_member(
     );
     field_node.type = member_type;
     _field_sym = Symbol(defn=field_node, access=SymbolAccess.PUBLIC, parent_tab=scope);
+    _field_sym.immutability = immutability;
     scope.adopt_primary(_field_sym, mname);
 }
 
@@ -464,7 +474,7 @@ impl TypeEvaluator._untyped_external_is_error(node_: UniNode) -> bool {
     if not mod_path {
         return False;
     }
-    import from jaclang.compiler.driver.modresolver { find_jac_project_root }
+    import from jaclang.project.modresolver { find_jac_project_root }
     proj_root = find_jac_project_root(mod_path);
     if not proj_root {
         return False;
@@ -494,6 +504,6 @@ impl TypeEvaluator._jac_virtual_sibling_dts(
     if not import_node.is_virtual_jac or from_mod_type.file_uri is None {
         return None;
     }
-    import from jaclang.compiler.driver.modresolver { sibling_declaration_file }
+    import from jaclang.project.modresolver { sibling_declaration_file }
     return sibling_declaration_file(str(from_mod_type.file_uri));
 }

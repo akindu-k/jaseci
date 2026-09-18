@@ -1,3 +1,5 @@
+import from jaclang.compiler.frontend.roles { Kid }
+import from jaclang.compiler.passes.context { CompileContext }
 import from jaclang.compiler.frontend.unitree {
     Ability,
     ArchSpec,
@@ -28,15 +30,14 @@ import from jaclang.compiler.frontend.unitree {
     ParamVar,
     PyInlineCode,
     String,
-    SubTag,
     Token,
     UnaryExpr,
     TupleVal,
     ListVal,
     UniNode,
-    YieldExpr
+    YieldExpr,
+    in_type_position
 }
-import from jaclang.compiler.passes.transform { Transform }
 import from jaclang.compiler.frontend.module_facts {
     ModuleFacts,
     client_capability_violations
@@ -64,7 +65,7 @@ def node_within(name_nd: UniNode, top: (UniNode | None)) -> bool;
 
 def base_expr_is_erased(base: UniNode) -> bool;
 
-def name_in_type_position(name_nd: UniNode) -> bool;
+def name_erased_natively(name_nd: UniNode) -> bool;
 
 def static_fstring_spec_text(spec: UniNode) -> (str | None);
 
@@ -85,14 +86,10 @@ def partition_native_capability_violations(
     )
 ];
 
-walker PortabilityWarnPass(Transform) {
-    has ir_in: Module,
-        cancel_token: any = None;
+walker PortabilityWarnPass {
+    has ctx: CompileContext,
+        module: Module;
 
-    static has PROVIDES: tuple = ('portability', );
-
-    def postinit -> None;
-    def transform(ir_in: Module) -> Module;
     def _run_impl(ir_in: Module) -> Module;
     can run_walk with Module entry;
     def _check_js_globals(mod: Module) -> None;
@@ -102,24 +99,18 @@ walker PortabilityWarnPass(Transform) {
     def _check_js_properties(mod: Module) -> None;
 }
 
-walker NativeCapabilityCheckPass(Transform) {
-    static has PROVIDES: tuple = ('capability', );
-    has ir_in: Module,
-        cancel_token: any = None;
+walker NativeCapabilityCheckPass {
+    has ctx: CompileContext,
+        module: Module;
 
-    def postinit -> None;
-    def transform(ir_in: Module) -> Module;
     def _run_impl(ir_in: Module) -> Module;
     can run_walk with Module entry;
 }
 
-walker ClientCapabilityCheckPass(Transform) {
-    static has PROVIDES: tuple = ('client_capability', );
-    has ir_in: Module,
-        cancel_token: any = None;
+walker ClientCapabilityCheckPass {
+    has ctx: CompileContext,
+        module: Module;
 
-    def postinit -> None;
-    def transform(ir_in: Module) -> Module;
     def _run_impl(ir_in: Module) -> Module;
     can run_walk with Module entry;
 }

@@ -51,7 +51,7 @@ def _app(jacignore: (str | None) = None) -> str {
     d = tempfile.mkdtemp(prefix="client-stage-");
     files = {
         "jac.toml": (
-            '[project]\nname = "shop"\nentry-point = "main.jac"\n\n'
+            '[project]\nname = "shop"\nentry-point = "main"\n\n'
             '[scale.secrets]\nAPI_KEY = "sk-live-8104"\n'
         ),
         "main.jac": (
@@ -658,5 +658,69 @@ test "a diagnosis that fits says nothing about a remainder" {
         );
     } finally {
         shutil.rmtree(project_dir, ignore_errors=True);
+    }
+}
+
+
+test "workspace served web app declares its client even without root client hints" {
+    import from jaclang.scale.runtime.fleet { FleetMember, FleetSpec }
+    project_dir = _app();
+    try {
+        Path(project_dir, "jac.toml").write_text(
+            '[project]\nname = "shop"\ndefault-app = "svc"\n'
+            '[apps.web]\nkind = "web-app"\nentry-point = "main"\n'
+            '[apps.svc]\nkind = "service"\nentry-point = "svc"\n'
+        );
+        mb = _builder(project_dir, client_entry=None);
+        mb.fleet = FleetSpec();
+        mb.fleet.add(
+            FleetMember(app="web", file="main.jac", is_root=True, client=True)
+        );
+        assert mb._declared_client_entry() == "main.jac";
+        assert mb._client_entry() == "main.jac";
+        mb.dry_run = True;
+        out = io.StringIO();
+        with redirect_stdout(out) {
+            mb._build_client_bundle(project_dir);
+        }
+        assert "dry-run: skipped the host client bundle build (main.jac)"
+            in out.getvalue();
+        with tempfile.TemporaryDirectory() as record_dir {
+            import from unittest.mock { patch }
+            script = _recording_jac(record_dir, record_dir);
+            script_path = Path(script);
+            script_path.write_text(
+                script_path.read_text().replace(
+                    ".jac/client/dist", ".jac/client/web/dist"
+                )
+            );
+            mb.dry_run = False;
+            with patch.dict(os.environ, {"JAC_EXECUTABLE": script}) {
+                raised = _run_build(mb, project_dir, record_dir);
+            }
+            assert raised is None , str(raised);
+            assert Path(project_dir, ".jac", "client", "dist", "index.html").is_file();
+            assert Path(record_dir, "cwd").is_file();
+        }
+        mb.fleet = FleetSpec();
+        mb.fleet.add(FleetMember(app="svc", file="svc.jac", is_root=True));
+        assert mb._client_entry() == "";
+        mb.client_entry = "";
+        assert mb._client_entry() == "";
+    } finally {
+        shutil.rmtree(project_dir, ignore_errors=True);
+    }
+}
+
+test "implicit deployment resolves a dotted client entry to a source path" {
+    with tempfile.TemporaryDirectory() as directory {
+        base = Path(directory);
+        (base / 'web').mkdir();
+        (base / 'web' / 'main.jac').write_text('with entry {}\n');
+        (base / 'jac.toml').write_text(
+            '[project]\nname="nested"\nkind="web-app"\nentry-point="web.main"\n'
+        );
+        builder = _builder(directory, client_entry=None);
+        assert builder._client_entry() == os.path.join('web', 'main.jac');
     }
 }

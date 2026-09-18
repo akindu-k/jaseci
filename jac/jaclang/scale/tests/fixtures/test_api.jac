@@ -15,7 +15,7 @@ def multiply(x: int, y: int) -> int {
     return x * y;
 }
 
-def:pub public_status -> dict {
+def:pub public_status -> dict[str, any] {
     return {"status": "ok", "public": True};
 }
 
@@ -125,7 +125,7 @@ walker:pub WalkerStream {
 
 import from typing { Generator }
 # Streaming function test
-def:pub FunctionStream(count: int = 3) -> Generator {
+def:pub FunctionStream(count: int = 3) -> None {
     import time;
     def stream -> Generator {
         for i in range(count) {
@@ -355,7 +355,7 @@ async walker PrivateBroadcastChat {
 """Public WebSocket function using @restspec(protocol=APIProtocol.WEBSOCKET).
 Accessible ONLY via ws://host/ws/function/ws_echo."""
 @restspec(protocol=APIProtocol.WEBSOCKET)
-def:pub ws_echo(message: str, client_id: str = "anonymous") -> dict {
+def:pub ws_echo(message: str, client_id: str = "anonymous") -> dict[str, any] {
     return {
         "status": "success",
         "echo": message,
@@ -366,7 +366,7 @@ def:pub ws_echo(message: str, client_id: str = "anonymous") -> dict {
 
 """Public streaming WebSocket function; yields chunk frames over the socket."""
 @restspec(protocol=APIProtocol.WEBSOCKET)
-def:pub ws_stream(count: int = 3) -> Generator {
+def:pub ws_stream(count: int = 3) -> None {
     def stream -> Generator {
         for i in range(count) {
             yield {"index": i, "label": f"chunk-{i}"};
@@ -377,7 +377,7 @@ def:pub ws_stream(count: int = 3) -> Generator {
 
 """Private WebSocket function (requires JWT auth); no `: pub` modifier."""
 @restspec(protocol=APIProtocol.WEBSOCKET)
-def ws_private_echo(message: str = "") -> dict {
+def ws_private_echo(message: str = "") -> dict[str, any] {
     return {"status": "success", "message": message, "authenticated": True};
 }
 
@@ -386,7 +386,7 @@ def ws_private_echo(message: str = "") -> dict {
 # ============================================================================
 import datetime;
 
-glob execution_log: list = [],
+glob execution_log: list[any] = [],
      # Scheduler default TZ is UTC — compute the static date trigger in UTC
      # so the same fixture value lands at the same moment on dev and CI.
      _future_date: str = (
@@ -449,12 +449,12 @@ walker:pub NormalWalker {
     }
 }
 
-def normal_func -> dict {
+def normal_func -> dict[str, any] {
     return {"message": "normal function endpoint"};
 }
 
 # Exposes the in-memory execution_log so tests can verify scheduled tasks
 # actually fired (not just that they were registered).
-def get_execution_log -> dict {
+def get_execution_log -> dict[str, any] {
     return {"log": list(execution_log)};
 }

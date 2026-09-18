@@ -1,4 +1,8 @@
+import from jaclang.compiler.frontend.roles { Kid }
 import from jaclang.compiler.frontend.unitree {
+    Module,
+    TreeWalker,
+    UniNode,
     Ability,
     ArchHas,
     Archetype,
@@ -14,6 +18,7 @@ import from jaclang.compiler.frontend.unitree {
     EdgeRefTrailer,
     Enum,
     EventSignature,
+    Except,
     Expr,
     ExprAsItem,
     FilterCompr,
@@ -21,6 +26,7 @@ import from jaclang.compiler.frontend.unitree {
     FString,
     FuncCall,
     FuncSignature,
+    GenCompr,
     HasVar,
     ImplDef,
     Import,
@@ -32,7 +38,7 @@ import from jaclang.compiler.frontend.unitree {
     LambdaExpr,
     ListVal,
     Literal,
-    Module,
+    MatchAs,
     ModuleCode,
     ModuleItem,
     ModulePath,
@@ -51,7 +57,6 @@ import from jaclang.compiler.frontend.unitree {
     UnaryExpr,
     TupleVal,
     TypeAlias,
-    UniNode,
     VisitStmt,
     in_type_position,
     type_only_import_of,
@@ -59,11 +64,13 @@ import from jaclang.compiler.frontend.unitree {
     ElseIf,
     WhileStmt,
     WithStmt,
-    YieldExpr
+    YieldExpr,
+    find_python_scope_node_of
 }
-import from jaclang.compiler.passes.uni_pass { UniPass }
+import from jaclang.compiler.passes.context { CompileContext }
+
 import from jaclang.compiler.symbol_utils { return_type_is_jsx }
-import from jaclang.compiler.frontend.constant { Tokens as Tok }
+import from jaclang.compiler.frontend.constant { ImmutabilityKind, Tokens as Tok }
 import from jaclang.compiler.frontend.diagnostics { E0033, E0108, E0109 }
 import from jaclang.compiler.types.ct_value { CT_DEFERRED, CtValue }
 import from jaclang.compiler.types.types {
@@ -77,6 +84,7 @@ import from jaclang.compiler.types.types {
     UnknownType
 }
 import from jaclang.compiler.types.type_utils {
+    BARE_GENERIC_REQUIRED,
     PropertyWriteKind,
     get_declared_generator_return_type,
     get_generator_yield_type,
@@ -128,6 +136,8 @@ import from jaclang.compiler.frontend.diagnostics {
     E1132,
     E5095,
     E1133,
+    E1135,
+    E1036,
     W1036,
     W1037,
     W1052,
@@ -136,26 +146,35 @@ import from jaclang.compiler.frontend.diagnostics {
     E2015
 }
 
-
 glob FW_INTERVAL_OPS: dict[str, str] = {
          "PLUS": "+",
          "MINUS": "-",
          "STAR_MUL": "*"
      };
 
-walker TypeCheckPass(UniPass) {
-    has prog: JacProgram,
+walker TypeCheckPass(TreeWalker) {
+    can enter_walk with UniNode entry {
+        self.ctx.enter_node(here);
+    }
+
+    can exit_walk with UniNode exit {
+        self.ctx.exit_node(here);
+    }
+
+    has ctx: CompileContext,
+        module: Module,
+        prog: JacProgram,
         evaluator: TypeEvaluator postinit,
+        _deferred_writes: list[tuple[Expr, (UniNode | None)]] postinit,
         _lambda_depth: int = 0;
 
     def postinit -> None;
+    can initialize with entry;
 
-    static has PROVIDES: tuple = ('TypeOf', ),
-        HOST_PASS: bool = True;
+    static has HOST_PASS: bool = True;
 
-    def transform(ir_in: Module) -> Module;
-    def before_pass -> None;
-    def after_pass -> None;
+    can prepare with entry;
+    can finish with exit;
     def _stamp_fixed_width -> None;
     def _provably_in_range(nd: Expr, name: str) -> bool;
     def _insert_builtin_symbols -> None;
@@ -175,6 +194,7 @@ walker TypeCheckPass(UniPass) {
     can exit_compare_expr with CompareExpr exit;
     def _diag_erased_membership(nd: CompareExpr, hay: Expr, op_text: str) -> None;
     can exit_func_call with FuncCall exit;
+    can exit_gen_compr with GenCompr exit;
     def _check_intrinsic_call(nd: FuncCall) -> None;
     def _check_intrinsic_collision(nd: Ability) -> None;
     can exit_jsx_element with JsxElement exit;
@@ -188,6 +208,8 @@ walker TypeCheckPass(UniPass) {
     can exit_has_var with HasVar exit;
     can exit_in_for_stmt with InForStmt exit;
     can exit_raise_stmt with RaiseStmt exit;
+    can exit_except with Except exit;
+    can exit_match_as with MatchAs exit;
     can enter_with_stmt with WithStmt entry;
     can exit_with_stmt with WithStmt exit;
     can enter_if_stmt with IfStmt entry;
@@ -207,8 +229,34 @@ walker TypeCheckPass(UniPass) {
     can exit_impl_def with ImplDef exit;
     can exit_sub_tag with SubTag exit;
     def _eval_unpacking_names(container: Expr) -> None;
+    def _write_leaves(target: (Expr | None)) -> list[Expr];
+    def _check_immutable_write(
+        target: (Expr | None), rebind_scope: (UniNode | None) = None
+    ) -> None;
+
+    def _flush_immutable_writes -> None;
+    def _judge_immutable_write(
+        target: (Expr | None), rebind_scope: (UniNode | None) = None
+    ) -> None;
+
+    def _rebound_enclosing_symbol(scope: UniNode, leaf: Name) -> (Symbol | None);
+    def _is_initializer_write(target: Expr, decl_sym: Symbol) -> bool;
+    def _is_self_ref(base: Name, method: Ability) -> bool;
     def _body_always_returns(body: list[CodeBlockStmt]) -> bool;
-    def _check_bare_generic(ann_node: UniNode, ty: object) -> None;
+    def _check_bare_generic(
+        ann_node: UniNode,
+        ty: object,
+        shape: (UniNode | None) = None,
+        nested: bool = False
+    ) -> None;
+
+    def _written_type_args(
+        shape: (UniNode | None), ty: ClassType
+    ) -> (list[Expr] | None);
+
+    def _index_args(index: IndexSlice) -> list[Expr];
+    def _union_leaves(shape: (UniNode | None)) -> list[UniNode];
+    def _names_union_form(target: Expr) -> bool;
     def _check_explicit_any(ann_node: UniNode) -> None;
     def _check_walker_reports_shape(nd: HasVar, declared_type: object) -> None;
     def _enclosing_walker_report_elem_type(nd: UniNode) -> (TypeBase | None);

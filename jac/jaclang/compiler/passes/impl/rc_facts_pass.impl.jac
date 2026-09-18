@@ -1,7 +1,3 @@
-impl RcFactsPass.postinit -> None {
-    super.postinit();
-}
-
 impl RcFactsPass._run_impl(ir_in: Module) -> Module {
     self._stamp_param_rebound(ir_in);
     self._stamp_move_lowerable(ir_in);
@@ -333,28 +329,37 @@ impl RcFactsPass._stamp_move_in(ir_in: Module) -> None {
 }
 
 impl RcFactsPass._stamp_param_rebound(ir_in: Module) -> None {
+    bound: set[tuple[int, str]] = set();
+    for nm in ir_in.get_all_sub_nodes(Name) {
+        if self._binds_local_name(nm) {
+            bound.add((id(self._enclosing_fn_scope(nm)), nm.sym_name));
+        }
+    }
     for pv in ir_in.get_all_sub_nodes(ParamVar) {
         sym = pv.name.sym if pv.name else None;
-        if sym is not None {
-            sym.param_rebound = self._param_plainly_rebound(sym);
+        if sym is None {
+            continue;
         }
+        owner = self._enclosing_fn_scope(pv);
+        body = owner.body if isinstance(owner, Ability) else None;
+        sym.param_rebound = (id(owner), sym.sym_name) in bound
+            or (isinstance(body, ImplDef) and (id(body), sym.sym_name) in bound);
     }
 }
 
-impl RcFactsPass._param_plainly_rebound(sym: Symbol) -> bool {
-    for d in (list(sym.defn) + list(sym.uses)) {
-        asg = d.find_parent_of_type(Assignment);
-        if asg is None or asg.aug_op is not None {
-            continue;
-        }
-        targets = asg.target
-            if isinstance(asg.target, (list, tuple))
-            else [(asg.target)];
-        if d in targets {
-            return True;
-        }
+impl RcFactsPass._binds_local_name(nm: Name) -> bool {
+    parent = nm.parent;
+    if isinstance(parent, ParamVar)
+        or (isinstance(parent, AtomTrailer) and parent.right is nm) {
+        return False;
     }
-    return False;
+    if isinstance(parent, BinaryExpr)
+        and parent.left is nm
+        and isinstance(parent.op, Token)
+        and parent.op.name == Tok.WALRUS_EQ {
+        return True;
+    }
+    return nm.expr_ctx == ExprCtx.STORE;
 }
 
 impl RcFactsPass._stamp_move_lowerable(ir_in: Module) -> None {
@@ -526,16 +531,8 @@ impl RcFactsPass._solve_liveness(
     return solve_backward_gen_kill(cfg_nodes, self._node_use, self._node_def);
 }
 
-impl RcFactsPass.transform(ir_in: Module) -> Module {
-    self.ir_out = ir_in;
-    ir_in spawn self;
-    out = self.ir_out;
-    assert isinstance(out, Module);
-    return out;
-}
-
 impl RcFactsPass.run_walk with Module entry {
-    self.ir_out = self._run_impl(here);
+    self.module = self._run_impl(here);
 }
 
 impl RcFactsPass._stamp_scope_cleanup(ir_in: Module) -> None {

@@ -1,3 +1,5 @@
+import from jaclang.compiler.frontend.roles { Kid }
+import from jaclang.compiler.passes.context { CompileContext }
 import from enum { Enum }
 import from typing { TypeAlias }
 import from jaclang.compiler.frontend.unitree {
@@ -61,7 +63,7 @@ import from jaclang.compiler.frontend.constant {
     is_borrow_kind,
     is_mut_kind
 }
-import from jaclang.compiler.passes.transform { Transform }
+
 import from jaclang.compiler.passes.dataflow {
     solve_backward,
     solve_forward,
@@ -99,10 +101,10 @@ obj BorrowMeta {
     }
 }
 
-walker OwnershipCheckPass(Transform) {
-    has prog: JacProgram,
-        ir_in: Module,
-        cancel_token: any = None,
+walker OwnershipCheckPass {
+    has ctx: CompileContext,
+        prog: JacProgram,
+        module: Module,
         owned_decl: dict[SymId, Name] = {},
         linear_decl: dict[SymId, Name] = {},
         consumed_syms: set[SymId] = set(),
@@ -127,12 +129,8 @@ walker OwnershipCheckPass(Transform) {
         receiver_probe: set[int] = set(),
         arch_view_syms: set[SymId] = set();
 
-    static has PROVIDES: tuple = ('ownership', ),
-        REQUIRES: tuple = ('CfgSucc', 'TypeOf'),
-        HOST_PASS: bool = True;
+    static has HOST_PASS: bool = True;
 
-    def postinit -> None;
-    def transform(ir_in: Module) -> Module;
     def _run_impl(ir_in: Module) -> Module;
     can run_walk with Module entry;
     def _nogc_setup -> None;
@@ -247,7 +245,7 @@ walker OwnershipCheckPass(Transform) {
     def _seal_connect_handle(bx: BinaryExpr) -> (Name | None);
     def _flow_for_stmts -> list[InForStmt];
     def _emit_flow_for_diagnostics -> None;
-    def _chunks_shape_of(expr: Expr | None) -> (tuple | None);
+    def _chunks_shape_of(expr: Expr | None) -> (tuple[Expr, Expr] | None);
     def _emit_chunk_view_diagnostics -> None;
     def _flow_reduce_shape(asgn: Assignment, sid: SymId) -> str;
     def _collect_flow_reductions(lp: InForStmt) -> dict[SymId, str];

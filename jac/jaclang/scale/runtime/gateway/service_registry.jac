@@ -18,6 +18,7 @@ obj ServiceEntry {
         env: dict[str, str] = {},
         url: str = "",
         page_url: str = "",
+        host_override: str = "",
         pid: int | None = None,
         status: ServiceStatus = ServiceStatus.REGISTERED,
         last_health_check: datetime | None = None,
@@ -37,6 +38,6 @@ obj ServiceRegistry {
     def deregister(name: str) -> bool;
     def root_entry -> ServiceEntry | None;
     def match_route(path: str) -> ServiceEntry | None;
-    def health_summary -> dict[str, dict];
+    def health_summary -> dict[str, dict[str, any]];
     def _rebuild_prefix_index -> None;
 }

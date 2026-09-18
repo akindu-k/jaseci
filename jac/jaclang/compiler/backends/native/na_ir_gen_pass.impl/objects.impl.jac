@@ -7,7 +7,6 @@ impl NaIRGenPass._devirt_closed_world(arch_name: str) -> bool {
     return arch.access_type == SymbolAccess.PRIVATE;
 }
 
-
 impl NaIRGenPass._native_archetypes(module: uni.Module) -> list[uni.Archetype] {
     result: dict[(str, uni.Archetype)] = {};
 
@@ -28,7 +27,7 @@ impl NaIRGenPass._native_archetypes(module: uni.Module) -> list[uni.Archetype] {
     }
 
     import from jaclang.compiler.passes.layout_pass { get_layout_registry }
-    layout_reg = get_layout_registry(self.ir_in, self.prog);
+    layout_reg = get_layout_registry(self.module, self.prog);
     out: list[uni.Archetype] = [];
     for a in result.values() {
         if a.type_params {
@@ -69,7 +68,7 @@ impl NaIRGenPass._register_archetypes(module: uni.Module) -> None {
     self._compute_osp_model(archetypes);
 
     import from jaclang.compiler.passes.layout_pass { get_layout_registry }
-    layout_reg = get_layout_registry(self.ir_in, self.prog);
+    layout_reg = get_layout_registry(self.module, self.prog);
     for arch in archetypes {
         arch_name = arch.name.value if arch.name else "unknown";
         self.arch_ast_map[arch_name] = arch;
@@ -114,7 +113,7 @@ impl NaIRGenPass._register_archetypes(module: uni.Module) -> None {
                                 else "no-signature"
                         );
                         _m_name = stmt.name_ref.sym_name if stmt.name_ref else "?";
-                        self.emit(
+                        self.ctx.emit(
                             E5092,
                             node_override=stmt,
                             kind="archetype method",
@@ -146,7 +145,7 @@ impl NaIRGenPass._register_archetypes(module: uni.Module) -> None {
     }
 
     import from jaclang.compiler.passes.layout_pass { get_layout_registry as _no_glr }
-    _no_reg = _no_glr(self.ir_in, self.prog);
+    _no_reg = _no_glr(self.module, self.prog);
     for (base_name, layout) in self.vtable_layouts.items() {
         if not self._devirt_closed_world(base_name) {
             continue;
@@ -231,7 +230,7 @@ impl NaIRGenPass._register_archetypes(module: uni.Module) -> None {
     self._emit_osp_setup();
     import from jaclang.compiler.native_scope { scope_lowering_active }
     if scope_lowering_active() {
-        self.ir_in.gen.jc_layout = self._build_jc_layout();
+        self.module.gen.jc_layout = self._build_jc_layout();
     }
 
     self._predemote_capability_constructors();
@@ -263,9 +262,10 @@ impl NaIRGenPass._register_archetypes(module: uni.Module) -> None {
     }
 
     self._generate_inherited_method_wrappers();
+    self._emit_osp_edge_factories();
 }
 
-impl NaIRGenPass._constructor_slots -> tuple {
+impl NaIRGenPass._constructor_slots -> tuple[str, ...] {
     return ("init", "__init__", "postinit", "__post_init__", );
 }
 
@@ -329,7 +329,7 @@ impl NaIRGenPass._predemote_capability_constructors -> None {
     }
 }
 
-impl NaIRGenPass._codegen_constructors_first(archetypes: list) -> None {
+impl NaIRGenPass._codegen_constructors_first(archetypes: list[uni.Archetype]) -> None {
     """Lower every constructor body before any other body is lowered.
 
     The companion to `_predemote_capability_constructors`, for the demotions
@@ -390,7 +390,7 @@ impl NaIRGenPass._visit_nonprimary_ancestor_methods(
 ) -> None {
     import from jaclang.compiler.passes.layout_pass { get_layout_registry }
     import from jaclang.compiler.symbol_utils { collect_method_names }
-    layout_reg = get_layout_registry(self.ir_in, self.prog);
+    layout_reg = get_layout_registry(self.module, self.prog);
     arch_name = arch.name.value if arch.name else "unknown";
     mro = self._mro_of(arch_name);
     if len(mro) < 2 {
@@ -455,7 +455,7 @@ impl NaIRGenPass._codegen_archetype(nd: uni.Archetype) -> None {
         return;
     }
     import from jaclang.compiler.passes.layout_pass { get_layout_registry }
-    _owner_mod = nd.find_parent_of_type(uni.Module) or self.ir_in;
+    _owner_mod = nd.find_parent_of_type(uni.Module) or self.module;
     layout = get_layout_registry(_owner_mod, self.prog).get_layout(arch_name);
     if layout is None {
         return;
@@ -466,7 +466,7 @@ impl NaIRGenPass._codegen_archetype(nd: uni.Archetype) -> None {
     field_type_map: dict[(str, ir.Type)] = {};
     field_default_map: dict[str, uni.Expr] = {};
     foreign_fields: set = set();
-    erased_tv_fields: dict[(str, list)] = {};
+    erased_tv_fields: dict[str, list[str]] = {};
 
     if layout.vtable_ptr_slot is not None {
         field_types.append(ir.IntType(8).as_pointer().as_pointer());
@@ -515,7 +515,7 @@ impl NaIRGenPass._codegen_archetype(nd: uni.Archetype) -> None {
                     ftype = self._resolve_jac_type(var.type_tag);
                 }
             } else {
-                _fld_mark = len(self.errors_had);
+                _fld_mark = len(self.ctx.errors_had);
                 ftype = self._resolve_field_type(var);
                 _opaque = self._opaque_field_if_unlowerable(
                     arch_name, fname, _fld_mark
@@ -629,7 +629,7 @@ impl NaIRGenPass._codegen_archetype(nd: uni.Archetype) -> None {
     ];
 }
 
-impl NaIRGenPass._erased_sig_typevars(nd: uni.Archetype) -> dict {
+impl NaIRGenPass._erased_sig_typevars(nd: uni.Archetype) -> dict[str, list[str]] {
     """The type params a method signature erases, keyed by the slot naming it.
 
     A sequence of `T` in a signature lays out as the pointer-flavoured list,
@@ -638,7 +638,7 @@ impl NaIRGenPass._erased_sig_typevars(nd: uni.Archetype) -> dict {
     slots alongside the erased fields lets the construction site refuse both
     with one rule.
     """;
-    out: dict = {};
+    out: dict[str, list[str]] = {};
     if nd.body is None {
         return out;
     }
@@ -666,11 +666,11 @@ impl NaIRGenPass._erased_sig_typevars(nd: uni.Archetype) -> dict {
 }
 
 impl NaIRGenPass._reject_scalar_type_args(nd: uni.UniNode, type_name: str) -> bool {
-    _erased = self.struct_field_erased_tv.get(type_name) or {};
+    _erased: any = self.struct_field_erased_tv.get(type_name) or {};
     if not _erased {
         return False;
     }
-    _params = self.arch_type_params.get(type_name) or [];
+    _params: any = self.arch_type_params.get(type_name) or [];
     if not _params {
         return False;
     }
@@ -702,7 +702,7 @@ impl NaIRGenPass._reject_scalar_type_args(nd: uni.UniNode, type_name: str) -> bo
 impl NaIRGenPass._emit_scalar_type_arg_refusal(
     nd: uni.UniNode, type_name: str, fname: str, tv_name: str, arg: any
 ) -> bool {
-    self.emit(
+    self.ctx.emit(
         E5092,
         node_override=nd,
         kind="type argument",
@@ -759,9 +759,6 @@ impl NaIRGenPass._register_static_fields(arch_name: str, archhas: uni.ArchHas) -
         self.has_native_code = True;
 
         if var.value is not None and const_init is None {
-            if not self?._global_init_nodes {
-                self._global_init_nodes: list = [];
-            }
             self._global_init_nodes.append((full_name, var.value, ftype));
         }
     }
@@ -774,7 +771,7 @@ impl NaIRGenPass._register_class_consts(
     if nd.name is None or class_form_enum_scalar(nd.name.type) is not None {
         return;
     }
-    _owns = nd.find_parent_of_type(uni.Module) is self.ir_in;
+    _owns = nd.find_parent_of_type(uni.Module) is self.module;
     for stmt in (block.body or []) {
         if not isinstance(stmt, uni.Assignment) or stmt.value is None {
             continue;
@@ -829,10 +826,7 @@ impl NaIRGenPass._register_one_class_const(
     gv.initializer = const_init if const_init is not None else ir.Constant(ftype, None);
 
     if const_init is None {
-        if not self?._global_init_nodes {
-            self._global_init_nodes: list = [];
-        }
-        self._global_init_nodes.append((full_name, assign.value, ftype));
+        self._global_init_nodes.append((full_name, value, ftype));
     }
 }
 
@@ -860,7 +854,6 @@ impl NaIRGenPass._class_const_enum_init(
     }
     return ir.Constant(ftype, _val.constant);
 }
-
 
 impl NaIRGenPass._method_slot_name(
     method: uni.Ability, field: (uni.HasVar | None)
@@ -940,7 +933,7 @@ impl NaIRGenPass._forward_declare_method(
         _m_params = _m_params[1:];
     }
 
-    _sig_mark = len(self.errors_had);
+    _sig_mark = len(self.ctx.errors_had);
     _saved_sig_kind = self._sig_decl_kind;
     self._sig_decl_kind = "signature type";
 
@@ -984,7 +977,7 @@ impl NaIRGenPass._forward_declare_method(
         self.static_methods[full_name] = True;
     }
 
-    if len(self.errors_had) > _sig_mark {
+    if len(self.ctx.errors_had) > _sig_mark {
         self._demote_method_if_unlowerable(
             full_name,
             func,
@@ -1091,7 +1084,7 @@ impl NaIRGenPass._codegen_method(
         }
 
         _is_virtual = method_name in self.vtable_method_indices.get(arch_name, {});
-        _local_mark = len(self.errors_had);
+        _local_mark = len(self.ctx.errors_had);
 
         try {
             body = ModuleFacts.unwrap_body(method);
@@ -1100,7 +1093,7 @@ impl NaIRGenPass._codegen_method(
             }
 
             if not self.builder.block.is_terminated {
-                _mth_loc = f"{os.path.basename(self.ir_in.loc.mod_path)}:{method.loc.last_line
+                _mth_loc = f"{os.path.basename(self.module.loc.mod_path)}:{method.loc.last_line
                     if method.loc
                     else 0}";
 
@@ -1123,7 +1116,7 @@ impl NaIRGenPass._codegen_method(
                 sys.stderr.write(f"NA_DEBUG raise {full_name}\n");
                 traceback.print_exc(file=sys.stderr);
             }
-            self.emit(
+            self.ctx.emit(
                 E5092,
                 node_override=method,
                 kind="method (native emitter error in)",
@@ -1149,13 +1142,14 @@ impl NaIRGenPass._demote_method_if_unlowerable(
     keep_func: bool = False,
     stub_body: bool = True
 ) -> bool {
-    if len(self.errors_had) <= local_mark {
+    if len(self.ctx.errors_had) <= local_mark {
         return False;
     }
-    _own = list(self.errors_had[local_mark:]);
+    _own = list(self.ctx.errors_had[local_mark:]);
 
     _na_debug = self._na_debug_on();
-    if self._seam_warnings_on() {
+    if self._seam_warnings_on()
+        and not self.prog.options.native_required_for(self.module.loc.mod_path) {
         import from jaclang.cli.console { console }
         _why = "; ".join(str(e) for e in _own);
         console.warning(
@@ -1176,18 +1170,20 @@ impl NaIRGenPass._demote_method_if_unlowerable(
             _first_code = _own[0].code.code if _own[0].code is not None else "";
             _code_tag = f"[{_first_code}] " if _first_code else "";
             na_coverage_seam(
-                self.ir_in.loc.mod_path,
+                self.module.loc.mod_path,
                 f"{full_name}: {_code_tag}" + str(_own[0]).split('\n')[0]
             );
         } except Exception {}
     }
-    del self.errors_had[local_mark:];
+    if not self.prog.options.native_required_for(self.module.loc.mod_path) {
+        del self.ctx.errors_had[local_mark:];
+    }
 
     if stub_body {
         NativeLoweringIssue(
             symbol=full_name,
             kind=NativeLoweringKind.CALLABLE,
-            source=self.ir_in.loc.mod_path,
+            source=self.module.loc.mod_path,
             code=_own[0].code.code if _own[0].code is not None else "",
             detail=_own[0].pretty_print()
         ).record(
@@ -1241,15 +1237,16 @@ impl NaIRGenPass._opaque_field_if_unlowerable(
     joins `struct_field_foreign` -- the constructor, the tracer, the arena and
     the reference counter all already skip that set.
     """;
-    if len(self.errors_had) <= local_mark {
+    if len(self.ctx.errors_had) <= local_mark {
         return None;
     }
-    _own = list(self.errors_had[local_mark:]);
+    _own = list(self.ctx.errors_had[local_mark:]);
     _first = _own[0];
     _code = _first.code.code if _first.code is not None else "";
     _why = str(_first).split('\n')[0];
 
-    if self._seam_warnings_on() {
+    if self._seam_warnings_on()
+        and not self.prog.options.native_required_for(self.module.loc.mod_path) {
         import from jaclang.cli.console { console }
         console.warning(
             f"native seam -- erasing field {arch_name}.{fname} to an "
@@ -1260,20 +1257,22 @@ impl NaIRGenPass._opaque_field_if_unlowerable(
     try {
         import from jaclang.compiler.driver.na_coverage { na_coverage_seam }
         na_coverage_seam(
-            self.ir_in.loc.mod_path,
+            self.module.loc.mod_path,
             f"{arch_name}.{fname}: " + (f"[{_code}] " if _code else "") + _why
         );
     } except Exception {}
     NativeLoweringIssue(
         symbol=f"{arch_name}.{fname}",
         kind=NativeLoweringKind.FIELD,
-        source=self.ir_in.loc.mod_path,
+        source=self.module.loc.mod_path,
         code=_code,
         detail=_own[0].pretty_print()
     ).record(
         self.llvm_module
     );
-    del self.errors_had[local_mark:];
+    if not self.prog.options.native_required_for(self.module.loc.mod_path) {
+        del self.ctx.errors_had[local_mark:];
+    }
     if arch_name not in self.struct_field_opaque {
         self.struct_field_opaque[arch_name] = {};
     }
@@ -1298,7 +1297,7 @@ impl NaIRGenPass._refuse_opaque_field(
     for _cn in self._mro_of(type_name) {
         _why = self.struct_field_opaque.get(_cn, {}).get(fname);
         if _why is not None {
-            self.emit(
+            self.ctx.emit(
                 E5092, node_override=nd, kind="erased field", name=f"{_cn}.{fname}"
             );
             return True;
@@ -1338,7 +1337,7 @@ impl NaIRGenPass._codegen_no_sig_method(arch_name: str, method: uni.Ability) -> 
         }
 
         if not self.builder.block.is_terminated {
-            _nosig_loc = f"{os.path.basename(self.ir_in.loc.mod_path)}:{method.loc.last_line
+            _nosig_loc = f"{os.path.basename(self.module.loc.mod_path)}:{method.loc.last_line
                 if method.loc
                 else 0}";
 
@@ -1410,9 +1409,9 @@ impl NaIRGenPass._read_field_or_refuse(
     them from this depth would rename diagnostics this change has no business
     touching.
     """;
-    _mark = len(self.errors_had);
+    _mark = len(self.ctx.errors_had);
     _val = self._codegen_field_access(obj_val, field_name, arch_name, nd);
-    if _val is None and len(self.errors_had) == _mark {
+    if _val is None and len(self.ctx.errors_had) == _mark {
         _val = self._codegen_class_const_read(obj_val, arch_name, field_name);
         if _val is None {
             self._emit_field_access_refusal(nd, arch_name, field_name);
@@ -1459,7 +1458,7 @@ impl NaIRGenPass._emit_field_access_refusal(
     if _owner is None {
         _decl = self._class_const_declarer(arch_name, field_name);
         if _decl is not None {
-            self.emit(
+            self.ctx.emit(
                 E5092,
                 node_override=nd,
                 kind="class-level attribute read",
@@ -1476,7 +1475,7 @@ impl NaIRGenPass._emit_field_access_refusal(
         }
         return;
     }
-    self.emit(
+    self.ctx.emit(
         E5092,
         node_override=nd,
         kind="inherited field access",
@@ -1497,7 +1496,7 @@ impl NaIRGenPass._class_const_declarer(
 ) -> (str | None) {
     import from jaclang.compiler.passes.layout_pass { get_layout_registry }
     _seen: list[str] = list(self._mro_of(arch_name));
-    for _cls in get_layout_registry(self.ir_in, self.prog).mro_order {
+    for _cls in get_layout_registry(self.module, self.prog).mro_order {
         if arch_name in self._mro_of(_cls) and _cls not in _seen {
             _seen.append(_cls);
         }
@@ -1531,7 +1530,7 @@ impl NaIRGenPass._class_const_declarer(
 
 impl NaIRGenPass._mro_of(arch_name: str) -> list[str] {
     import from jaclang.compiler.passes.layout_pass { get_layout_registry }
-    mro = get_layout_registry(self.ir_in, self.prog).get_mro(arch_name);
+    mro = get_layout_registry(self.module, self.prog).get_mro(arch_name);
     return mro or [arch_name];
 }
 
@@ -1543,7 +1542,7 @@ impl NaIRGenPass._arch_layout(arch_name: str) -> (ArchetypeLayout | None) {
     if _arch_nd is not None {
         _owner = _arch_nd.find_parent_of_type(uni.Module);
     }
-    for _cand in [_owner, self.ir_in] {
+    for _cand in [_owner, self.module] {
         if _cand is None {
             continue;
         }
@@ -1658,7 +1657,7 @@ impl NaIRGenPass._codegen_event_method(arch_name: str, method: uni.Ability) -> N
             _members = self._trigger_struct_names(method);
             _conflict = self._union_layout_conflict(_members);
             if _conflict is not None {
-                self.emit(
+                self.ctx.emit(
                     E5091,
                     node_override=sig.arch_tag_info,
                     members=", ".join(_members),
@@ -1673,7 +1672,7 @@ impl NaIRGenPass._codegen_event_method(arch_name: str, method: uni.Ability) -> N
         self.region_open_stack.pop();
         if not self.builder.block.is_terminated {
             self._region_leave();
-            _ev_loc = f"{os.path.basename(self.ir_in.loc.mod_path)}:{method.loc.last_line
+            _ev_loc = f"{os.path.basename(self.module.loc.mod_path)}:{method.loc.last_line
                 if method.loc
                 else 0}";
             self._emit_scope_cleanup(skip_var=None, loc=_ev_loc);
@@ -1696,7 +1695,7 @@ impl NaIRGenPass._emit_heap_object_alloc(
         self._emit_struct_drop_fn(type_name);
         return raw_ptr;
     }
-    _inst_loc = f"{os.path.basename(self.ir_in.loc.mod_path)}:{nd.loc.first_line
+    _inst_loc = f"{os.path.basename(self.module.loc.mod_path)}:{nd.loc.first_line
         if nd.loc
         else 0}";
     if self.rc_alloc_fn is None {
@@ -1790,9 +1789,8 @@ impl NaIRGenPass._empty_container_for_field(
 impl NaIRGenPass._codegen_instantiation(
     nd: (uni.FuncCall | uni.Name),
     type_name_override: (str | None) = None,
-    ctor_params: (list | None) = None
+    ctor_params: (list[uni.Expr | uni.KWPair] | None) = None
 ) -> (ir.Value | None) {
-    _is_call = isinstance(nd, uni.FuncCall);
     type_name = type_name_override
         if type_name_override is not None
         else self._get_name(nd.target if isinstance(nd, uni.FuncCall) else nd);
@@ -1804,7 +1802,7 @@ impl NaIRGenPass._codegen_instantiation(
     }
     _demoted_init = self._demoted_init_of(type_name);
     if _demoted_init is not None {
-        self.emit(
+        self.ctx.emit(
             E5092,
             node_override=nd,
             kind="constructor",
@@ -1836,7 +1834,7 @@ impl NaIRGenPass._codegen_instantiation(
             if not isinstance(p, uni.KWPair)
         ];
         if _pos_args and self._pyb_base_of(type_name) is not None {
-            self.emit(
+            self.ctx.emit(
                 E5092,
                 node_override=nd,
                 kind="constructor call",
@@ -1852,7 +1850,7 @@ impl NaIRGenPass._codegen_instantiation(
         if _pos_args {
             _order = self.struct_constructor_order.get(type_name);
             if _order is None or len(_pos_args) > len(_order) {
-                self.emit(
+                self.ctx.emit(
                     E5092,
                     node_override=nd,
                     kind="constructor call",
@@ -1925,8 +1923,6 @@ impl NaIRGenPass._codegen_instantiation(
         if self.rc_set_type_fn is not None {
             self._emit_set_type_tag(self.builder, _stk_i8, type_name);
         }
-    } elif _vt_struct {
-        obj_ptr = self._clib_alloc_vtable(type_name);
     } else {
         null_ptr = ir.Constant(struct_ptr_type, None);
         size_gep = self.builder.gep(
@@ -1934,7 +1930,8 @@ impl NaIRGenPass._codegen_instantiation(
         );
         size = self.builder.ptrtoint(size_gep, ir.IntType(64), name="sizeof");
         _region_eligible = (
-            id(nd) != self._managed_ctor_node
+            not _vt_struct
+            and id(nd) != self._managed_ctor_node
             and not self._arch_is_walker_name(type_name)
             and not bool(getattr(self.prog.options, "kernel_unit", False))
         );
@@ -2091,15 +2088,13 @@ impl NaIRGenPass._codegen_instantiation(
             val = self._coerce_type(val, ftype);
         }
 
-        if not _vt_struct {
-            self._emit_take_ref(
-                val,
-                op="ctor_field",
-                loc=f"{os.path.basename(self.ir_in.loc.mod_path)}:{nd.loc.first_line
-                    if nd.loc
-                    else 0}"
-            );
-        }
+        self._emit_take_ref(
+            val,
+            op="ctor_field",
+            loc=f"{os.path.basename(self.module.loc.mod_path)}:{nd.loc.first_line
+                if nd.loc
+                else 0}"
+        );
         field_ptr = self.builder.gep(
             obj_ptr,
             [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), idx)],
@@ -2148,15 +2143,13 @@ impl NaIRGenPass._codegen_instantiation(
                     val = self._coerce_type(val, ftype);
                 }
 
-                if not _vt_struct {
-                    self._emit_take_ref(
-                        val,
-                        op="ctor_field",
-                        loc=f"{os.path.basename(self.ir_in.loc.mod_path)}:{nd.loc.first_line
-                            if nd.loc
-                            else 0}"
-                    );
-                }
+                self._emit_take_ref(
+                    val,
+                    op="ctor_field",
+                    loc=f"{os.path.basename(self.module.loc.mod_path)}:{nd.loc.first_line
+                        if nd.loc
+                        else 0}"
+                );
                 field_ptr = self.builder.gep(
                     obj_ptr,
                     [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), idx)],
@@ -2205,10 +2198,10 @@ impl NaIRGenPass._codegen_instantiation(
         import from jaclang.compiler.passes.layout_pass {
             get_layout_registry as _ci_glr
         }
-        if not _ci_glr(self.ir_in, self.prog).is_primary_ancestor(
+        if not _ci_glr(self.module, self.prog).is_primary_ancestor(
             type_name, _init_owner
         ) {
-            self.emit(
+            self.ctx.emit(
                 E5092,
                 node_override=nd,
                 kind="constructor",
@@ -2224,10 +2217,10 @@ impl NaIRGenPass._codegen_instantiation(
     }
     if init_fn is not None {
         init_args: list[ir.Value] = [obj_ptr];
-        init_sig = self._arch_init_sig_of(_init_owner) if _is_call else None;
+        init_sig = self._arch_init_sig_of(_init_owner);
         if init_sig is not None {
-            _init_pos: list = [];
-            _init_kw: dict = {};
+            _init_pos: list[uni.Expr] = [];
+            _init_kw: dict[str, uni.Expr] = {};
             for param in params {
                 if isinstance(param, uni.KWPair) {
                     _k = param.key.sym_name if param.key is not None else None;
@@ -2290,6 +2283,9 @@ impl NaIRGenPass._codegen_instantiation(
             }
         }
         self.builder.call(init_fn, coerced_args, name="call.init");
+        if not self._nogc_headerless() {
+            self._release_owned_args(coerced_args[1:], op="call_arg");
+        }
         self._emit_err_check(self._linked_callee_decl(init_fn));
     }
 
@@ -2331,7 +2327,7 @@ impl NaIRGenPass._codegen_instantiation(
         for _pi_cls in self._mro_of(type_name) {
             for pname in [f"{_pi_cls}.__post_init__", f"{_pi_cls}.postinit"] {
                 if pname in self._native_skipped_methods {
-                    self.emit(
+                    self.ctx.emit(
                         E5092,
                         node_override=nd,
                         kind="constructor",
@@ -2410,7 +2406,7 @@ impl NaIRGenPass._unregistered_class_target(target: uni.UniNode) -> (str | None)
     if not path or not path.endswith(".jac") {
         return None;
     }
-    own_path = os.path.realpath(self.ir_in.loc.mod_path) if self.ir_in?.loc else "";
+    own_path = os.path.realpath(self.module.loc.mod_path) if self.module?.loc else "";
     if os.path.realpath(path) == own_path {
         return None;
     }
@@ -2426,6 +2422,39 @@ impl NaIRGenPass._codegen_method_call(nd: uni.FuncCall) -> (ir.Value | None) {
         and not self.builder.block.is_terminated {
         self._nogc_consume_local(nd.target.target);
     }
+    return result;
+}
+
+impl NaIRGenPass._dispatch_receiver_method(
+    type_name: str,
+    method_name: str,
+    receiver: ir.Value,
+    original: ir.Value,
+    nd: uni.FuncCall
+) -> (ir.Value | None) {
+    originals = self._codegen_call_args(nd);
+    arguments = [self._str_view(argument) for argument in originals];
+    result = self._dispatch_primitive_method(
+        type_name, method_name, receiver, arguments, ""
+    );
+    if result is None {
+        return None;
+    }
+    if result is receiver and receiver is not original {
+        if self._str_desc_ty is not None and original.type == self._str_desc_ty {
+            result = self._str_materialize(original);
+        }
+        self._release_owned_args(originals, op=f"{type_name}_method_operand");
+        return result;
+    }
+    self._release_owned_args(
+        [
+            value
+            for value in [original] + originals
+            if value is not result
+        ],
+        op=f"{type_name}_method_operand"
+    );
     return result;
 }
 
@@ -2476,7 +2505,7 @@ impl NaIRGenPass._codegen_method_call_inner(nd: uni.FuncCall) -> (ir.Value | Non
             }
             return None;
         }
-        self.emit(
+        self.ctx.emit(
             E5092,
             node_override=nd,
             kind="call",
@@ -2502,7 +2531,7 @@ impl NaIRGenPass._codegen_method_call_inner(nd: uni.FuncCall) -> (ir.Value | Non
         method_name in ("get", "keys", "values", "items", "setdefault", "update", "pop")
         and self._type_key_of(trailer.target) in ("any", "Any")
     ) {
-        self.emit(
+        self.ctx.emit(
             E5092,
             node_override=nd,
             kind="method",
@@ -2540,7 +2569,7 @@ impl NaIRGenPass._codegen_method_call_inner(nd: uni.FuncCall) -> (ir.Value | Non
                 _sfull in self._native_skipped_methods
                 or _sfull not in self.method_funcs
             ) {
-            self.emit(
+            self.ctx.emit(
                 E5092,
                 node_override=nd,
                 kind="method",
@@ -2575,7 +2604,7 @@ impl NaIRGenPass._codegen_method_call_inner(nd: uni.FuncCall) -> (ir.Value | Non
 
     _xmod_cls = self._unregistered_class_target(trailer.target);
     if _xmod_cls is not None {
-        self.emit(
+        self.ctx.emit(
             E5092,
             node_override=nd,
             kind="method",
@@ -2598,6 +2627,13 @@ impl NaIRGenPass._codegen_method_call_inner(nd: uni.FuncCall) -> (ir.Value | Non
         and method_name in self.struct_field_types[_fld_struct]
     ) {
         _fld_ty = self.struct_field_types[_fld_struct][method_name];
+        if self._closure_struct_of(_fld_ty) is not None {
+            callable_value = self._codegen_expr(trailer);
+            if callable_value is not None {
+                return self._codegen_callable_value(nd, callable_value, []);
+            }
+            return None;
+        }
         if (
             isinstance(_fld_ty, ir.PointerType)
             and isinstance(_fld_ty.pointee, ir.FunctionType)
@@ -2680,7 +2716,9 @@ impl NaIRGenPass._codegen_method_call_inner(nd: uni.FuncCall) -> (ir.Value | Non
             and "os" in self._native_stdlib_modules
         ) {
         if method_name not in NATIVE_OSPATH_FUNCS {
-            self.emit(E5090, node_override=nd, kind="os.path member", name=method_name);
+            self.ctx.emit(
+                E5090, node_override=nd, kind="os.path member", name=method_name
+            );
             return None;
         }
         return self._emit_ospath_call(method_name, nd);
@@ -2787,9 +2825,10 @@ impl NaIRGenPass._codegen_method_call_inner(nd: uni.FuncCall) -> (ir.Value | Non
                     _prep_e = (
                         _prep_e.value if isinstance(_prep_e, uni.KWPair) else _prep_e
                     );
-                    arg_vals[_prep_idx] = self._nogc_elem_prep(
-                        _prep_e, arg_vals[_prep_idx]
-                    );
+                    _prepared = self._nogc_elem_prep(_prep_e, arg_vals[_prep_idx]);
+                    if _prepared is not None {
+                        arg_vals[_prep_idx] = _prepared;
+                    }
                 }
             }
 
@@ -2814,7 +2853,7 @@ impl NaIRGenPass._codegen_method_call_inner(nd: uni.FuncCall) -> (ir.Value | Non
             if method_name == "append" {
                 self._set_rc_ctx(
                     "append",
-                    f"{os.path.basename(self.ir_in.loc.mod_path)}:{nd.loc.first_line
+                    f"{os.path.basename(self.module.loc.mod_path)}:{nd.loc.first_line
                         if nd.loc
                         else 0}"
                 );
@@ -2839,6 +2878,7 @@ impl NaIRGenPass._codegen_method_call_inner(nd: uni.FuncCall) -> (ir.Value | Non
                 if method_name == "insert" and not self._nogc_headerless() {
                     self._release_owned_args(_orig_args, op="list_method_arg");
                 }
+                self._release_owned_args([list_val], op="list_method_receiver");
                 return result;
             }
         }
@@ -2857,7 +2897,10 @@ impl NaIRGenPass._codegen_method_call_inner(nd: uni.FuncCall) -> (ir.Value | Non
                     _sprep_e = (
                         _sprep_e.value if isinstance(_sprep_e, uni.KWPair) else _sprep_e
                     );
-                    arg_vals[0] = self._nogc_elem_prep(_sprep_e, arg_vals[0]);
+                    _sprepared = self._nogc_elem_prep(_sprep_e, arg_vals[0]);
+                    if _sprepared is not None {
+                        arg_vals[0] = _sprepared;
+                    }
                 }
             }
             result = self._dispatch_primitive_method(
@@ -2960,41 +3003,44 @@ impl NaIRGenPass._codegen_method_call_inner(nd: uni.FuncCall) -> (ir.Value | Non
         }
     }
 
-    if method_name in self._primitive_method_names("bytes") {
-        bytes_val = self._codegen_receiver(trailer.target);
-        if bytes_val is not None and self._is_bytes_value(bytes_val) {
-            arg_vals = self._codegen_call_args(nd);
-            result = self._dispatch_primitive_method(
-                "bytes", method_name, bytes_val, arg_vals, ""
-            );
-            if result is not None {
-                return result;
-            }
+    obj_val: (ir.Value | None) = None;
+    _bytes_method = method_name in self._primitive_method_names("bytes");
+    _str_method = method_name in self._primitive_method_names("str");
+    if _bytes_method or _str_method {
+        obj_val = self._codegen_receiver(trailer.target);
+        if obj_val is None {
+            return None;
         }
-    }
-
-    if method_name in self._primitive_method_names("str") {
-        str_val = self._str_norm_optional(self._codegen_receiver(trailer.target));
-        if str_val is not None
-            and self._opt_payload_of(str_val.type) == ir.IntType(8).as_pointer() {
-            str_val = self._coerce_type(str_val, ir.IntType(8).as_pointer());
-        }
-        if str_val is not None and str_val.type == ir.IntType(8).as_pointer() {
-            arg_vals = self._codegen_call_args(nd);
-            result = self._dispatch_primitive_method(
-                "str", method_name, str_val, arg_vals, ""
-            );
-            if result is not None {
-                return result;
+        if self._is_bytes_value(obj_val) {
+            if not _bytes_method {
+                return None;
             }
+            return self._dispatch_receiver_method(
+                "bytes", method_name, obj_val, obj_val, nd
+            );
+        }
+        _str_receiver = self._str_view(obj_val);
+        if self._opt_payload_of(_str_receiver.type) == ir.IntType(8).as_pointer() {
+            _str_receiver = self._coerce_type(
+                _str_receiver, ir.IntType(8).as_pointer()
+            );
+        }
+        if _str_receiver.type == ir.IntType(8).as_pointer() {
+            if not _str_method {
+                return None;
+            }
+            return self._dispatch_receiver_method(
+                "str", method_name, _str_receiver, obj_val, nd
+            );
         }
     }
 
     type_name: (str | None) = self._enum_name_of(trailer.target)
         or self._struct_name_of(trailer.target);
-    obj_val: (ir.Value | None) = None;
     if type_name is None {
-        obj_val = self._codegen_receiver(trailer.target);
+        if obj_val is None {
+            obj_val = self._codegen_receiver(trailer.target);
+        }
         if obj_val is not None {
             type_name = self._infer_type_name(obj_val);
 
@@ -3005,7 +3051,7 @@ impl NaIRGenPass._codegen_method_call_inner(nd: uni.FuncCall) -> (ir.Value | Non
                     if method_name == "append" {
                         self._set_rc_ctx(
                             "append",
-                            f"{os.path.basename(self.ir_in.loc.mod_path)}:{nd.loc.first_line
+                            f"{os.path.basename(self.module.loc.mod_path)}:{nd.loc.first_line
                                 if nd.loc
                                 else 0}"
                         );
@@ -3036,11 +3082,11 @@ impl NaIRGenPass._codegen_method_call_inner(nd: uni.FuncCall) -> (ir.Value | Non
             }
         }
         if _gm_owner is not None {
-            _gm_errs = len(self.errors_had);
+            _gm_errs = len(self.ctx.errors_had);
             func = self._instantiate_generic_method(nd, _gm_owner, method_name);
             if func is None {
-                if len(self.errors_had) == _gm_errs {
-                    self.emit(
+                if len(self.ctx.errors_had) == _gm_errs {
+                    self.ctx.emit(
                         E5092,
                         node_override=nd,
                         kind="method",
@@ -3066,7 +3112,7 @@ impl NaIRGenPass._codegen_method_call_inner(nd: uni.FuncCall) -> (ir.Value | Non
     }
     if func is None {
         if _demoted {
-            self.emit(
+            self.ctx.emit(
                 E5092,
                 node_override=nd,
                 kind="method",
@@ -3322,7 +3368,6 @@ impl NaIRGenPass._codegen_accessor_call(
     );
 }
 
-
 impl NaIRGenPass._receiver_union_parts(nd: (uni.UniNode | None)) -> (list[str] | None) {
     if not isinstance(nd, uni.AtomTrailer) or not isinstance(nd.target, uni.Expr) {
         return None;
@@ -3421,7 +3466,7 @@ impl NaIRGenPass._emit_dispatched_field_ptr(
     parts: (list[str] | None) = None
 ) -> (ir.Value | None) {
     import from jaclang.compiler.passes.layout_pass { get_layout_registry as _df_glr }
-    reg = _df_glr(self.ir_in, self.prog);
+    reg = _df_glr(self.module, self.prog);
     _base_lay = reg.get_layout(type_name);
     if _base_lay is None or not _base_lay.has_vtable {
         return None;
@@ -3430,7 +3475,7 @@ impl NaIRGenPass._emit_dispatched_field_ptr(
     if _base_idx is None and ftype is not None {
         return None;
     }
-    _variants: list[tuple] = [];
+    _variants: list[tuple[str, ir.GlobalVariable | None, int, ir.Type]] = [];
     _uniform = True;
     for _cls in reg.mro_order {
         _cls_mro = self._mro_of(_cls);
@@ -3505,7 +3550,7 @@ impl NaIRGenPass._emit_dispatched_field_ptr(
     _df_vtp = b.load(_df_vpp, name="df.vt");
     _df_fnc = b.block.function;
     _df_done = _df_fnc.append_basic_block(name=f"df.{field_name}.done");
-    _df_incoming: list[tuple] = [];
+    _df_incoming: list[tuple[ir.Value, ir.Block]] = [];
     for (_vc, _vt, _ci, _vft) in _variants {
         _df_hit = _df_fnc.append_basic_block(name=f"df.{field_name}.{_vc}");
         _df_nxt = _df_fnc.append_basic_block(name=f"df.{field_name}.n.{_vc}");
@@ -3618,7 +3663,7 @@ impl NaIRGenPass._class_const_variants(
     arch_name: str, field_name: str
 ) -> tuple[list[tuple[str, ir.GlobalVariable, ir.GlobalVariable]], bool] {
     import from jaclang.compiler.passes.layout_pass { get_layout_registry }
-    reg = get_layout_registry(self.ir_in, self.prog);
+    reg = get_layout_registry(self.module, self.prog);
     out: list[tuple[str, ir.GlobalVariable, ir.GlobalVariable]] = [];
     _whole = True;
     for _cls in reg.mro_order {
@@ -3674,7 +3719,7 @@ impl NaIRGenPass._codegen_class_const_read(
     _cc_vtp = b.load(_cc_vpp, name="cc.vt");
     _cc_fn = b.block.function;
     _cc_done = _cc_fn.append_basic_block(name=f"cc.{field_name}.done");
-    _cc_incoming: list[tuple] = [];
+    _cc_incoming: list[tuple[ir.Value, ir.Block]] = [];
     for (_vc, _vt, _gv) in _variants {
         _cc_hit = _cc_fn.append_basic_block(name=f"cc.{field_name}.{_vc}");
         _cc_nxt = _cc_fn.append_basic_block(name=f"cc.{field_name}.n.{_vc}");
@@ -3920,7 +3965,7 @@ impl NaIRGenPass._codegen_field_assign(
     skip_narrow_coerce: bool = False,
     value_node: (uni.Expr | None) = None
 ) -> None {
-    _fa_errs = len(self.errors_had);
+    _fa_errs = len(self.ctx.errors_had);
     field_name = self._get_name(target.right);
     _sa_target = self._get_name(target.target);
     if _sa_target is None {
@@ -3950,6 +3995,26 @@ impl NaIRGenPass._codegen_field_assign(
         obj_val = self._opt_unwrap_attr(obj_val);
     }
     type_name: (str | None) = self._struct_name_of(target.target);
+    union_parts = self._receiver_union_parts(target);
+    if union_parts is not None and field_name is not None {
+        first = union_parts[0];
+        shared_type = self.struct_field_types.get(first, {}).get(field_name);
+        shared_borrow = field_name in self.struct_field_borrow.get(first, set());
+
+        if shared_type is not None
+            and all(
+                self.struct_field_types.get(part, {}).get(field_name) == shared_type
+                    and (field_name in self.struct_field_borrow.get(part, set()))
+                        == shared_borrow
+                    and field_name not in self.struct_field_inline.get(part, set())
+                    and self._accessor_slot_of(part, field_name, "setter") is None
+                for part in union_parts
+            ) {
+            type_name = first;
+        } else {
+            union_parts = None;
+        }
+    }
     if (
         obj_val is not None
         and self?.jacval_type
@@ -3989,8 +4054,8 @@ impl NaIRGenPass._codegen_field_assign(
             self._codegen_pyb_field_assign(target, value, obj_val);
             return;
         }
-        if len(self.errors_had) == _fa_errs {
-            self.emit(
+        if len(self.ctx.errors_had) == _fa_errs {
+            self.ctx.emit(
                 E5092,
                 node_override=target,
                 kind="field assignment",
@@ -4014,7 +4079,7 @@ impl NaIRGenPass._codegen_field_assign(
             );
         }
         if self._codegen_accessor_call(obj_val, type_name, _setter, [value]) is None {
-            self.emit(
+            self.ctx.emit(
                 E5092,
                 node_override=target,
                 kind="field assignment",
@@ -4073,7 +4138,7 @@ impl NaIRGenPass._codegen_field_assign(
     field_ptr: (ir.Value | None) = None;
     if not _vt_struct {
         field_ptr = self._emit_dispatched_field_ptr(
-            obj_val, type_name, field_name, ftype
+            obj_val, type_name, field_name, ftype, union_parts
         );
     }
     if field_ptr is None {
@@ -4085,18 +4150,18 @@ impl NaIRGenPass._codegen_field_assign(
     }
 
     _borrow_field = field_name in self.struct_field_borrow.get(type_name, set());
-    if self._elem_kind(ftype) != "raw" and not _vt_struct and not _borrow_field {
+    if self._elem_kind(ftype) != "raw" and not _borrow_field {
         self._emit_take_ref(
             value,
             op="field_set",
-            loc=f"{os.path.basename(self.ir_in.loc.mod_path)}:{target.loc.first_line
+            loc=f"{os.path.basename(self.module.loc.mod_path)}:{target.loc.first_line
                 if target.loc
                 else 0}"
         );
         old_field_val = self.builder.load(field_ptr, name=f"field.{field_name}.old");
         self._set_rc_ctx(
             "field_set",
-            f"{os.path.basename(self.ir_in.loc.mod_path)}:{target.loc.first_line
+            f"{os.path.basename(self.module.loc.mod_path)}:{target.loc.first_line
                 if target.loc
                 else 0}"
         );
@@ -4106,15 +4171,18 @@ impl NaIRGenPass._codegen_field_assign(
     _fs_opt = self._opt_payload_of(ftype);
     if _fs_opt is not None
         and isinstance(_fs_opt, ir.PointerType)
-        and not _vt_struct
         and not _borrow_field {
-        _fs_loc = f"{os.path.basename(self.ir_in.loc.mod_path)}:{target.loc.first_line
+        _fs_loc = f"{os.path.basename(self.module.loc.mod_path)}:{target.loc.first_line
             if target.loc
             else 0}";
-        _fs_new_pv = self.builder.extract_value(
-            value, 1, name=f"field.{field_name}.newpv"
-        );
-        self._emit_take_ref(_fs_new_pv, op="field_set", loc=_fs_loc);
+        if self._opt_result_owned(value, value_node) {
+            self.rc_ops_elided += 1;
+        } else {
+            _fs_new_pv = self.builder.extract_value(
+                value, 1, name=f"field.{field_name}.newpv"
+            );
+            self._emit_take_ref(_fs_new_pv, op="field_set", loc=_fs_loc);
+        }
         _fs_old = self.builder.load(field_ptr, name=f"field.{field_name}.old");
         _fs_old_pv = self.builder.extract_value(
             _fs_old, 1, name=f"field.{field_name}.oldpv"
@@ -4140,7 +4208,7 @@ impl NaIRGenPass._receiver_routed_method_fn(
         import from jaclang.compiler.passes.layout_pass {
             get_layout_registry as _sc_glr
         }
-        _sc_reg = _sc_glr(self.ir_in, self.prog);
+        _sc_reg = _sc_glr(self.module, self.prog);
         if not _sc_reg.is_primary_ancestor(_recv_cls, _owner_cls) {
             _mn_part = _sfull.partition(".")[2];
             _spec_key = f"{_recv_cls}.{_mn_part}${_owner_cls}";
@@ -4160,7 +4228,7 @@ impl NaIRGenPass._receiver_routed_method_fn(
                     }
                 }
                 if _anc_meth is None {
-                    self.emit(
+                    self.ctx.emit(
                         E5092,
                         node_override=nd,
                         kind="call",
@@ -4195,7 +4263,7 @@ impl NaIRGenPass._receiver_routed_method_fn(
             }
             _spec_ready = self.method_funcs.get(_spec_key);
             if _spec_ready is None {
-                self.emit(E5092, node_override=nd, kind="call", name=_spec_key);
+                self.ctx.emit(E5092, node_override=nd, kind="call", name=_spec_key);
                 return None;
             }
             _sfunc = _spec_ready;
@@ -4292,7 +4360,7 @@ impl NaIRGenPass._emit_class_routed_call(
         }
     }
     if _bad_arg or (len(_used_kw) < len(_skw)) {
-        self.emit(
+        self.ctx.emit(
             E5092,
             node_override=nd,
             kind="call",
@@ -4310,7 +4378,11 @@ impl NaIRGenPass._emit_class_routed_call(
             _sargs[_i] = self._coerce_type(_sv, _sfunc.args[_i].type);
         }
     }
+    _release = self._transfer_own_args(
+        nd, _sfunc, _sargs, list(_sargs), offset=1 if _given_recv is not None else 0
+    );
     _sr = self.builder.call(_sfunc, _sargs, name=f"scall.{method_name}");
+    self._release_owned_args(_release, op="call_arg");
     self._emit_err_check(
         self._callee_ability_of(nd) or self._linked_callee_decl(_sfunc)
     );
@@ -4320,10 +4392,11 @@ impl NaIRGenPass._emit_class_routed_call(
     return _sr;
 }
 
-
 impl NaIRGenPass._jc_reference_schema(
-    ft: ir.Type, layouts: dict, semantic: TypeBase | None = None
-) -> (dict | None) {
+    ft: ir.Type,
+    layouts: dict[str, tuple[list[int], int]],
+    semantic: TypeBase | None = None
+) -> (dict[str, any] | None) {
     """Combine semantic reference types with the backend's container ABI.""";
     args = semantic.private.type_args or [] if isinstance(semantic, ClassType) else [];
     semantic_name = semantic.shared.class_name
@@ -4383,8 +4456,8 @@ impl NaIRGenPass._build_jc_layout -> str {
     import json;
     import from jaclang.compiler.backends.native.abi { struct_layouts }
     layouts = struct_layouts(self.llvm_module);
-    out: dict = {"classes": {}};
-    _model = self.ir_in.gen.osp_model;
+    out: dict[str, any] = {"classes": {}};
+    _model = self.module.gen.osp_model;
     _tags = _model.tags if _model is not None else {};
     for arch_name in self.struct_field_indices {
         st = self.struct_types.get(arch_name);
@@ -4399,7 +4472,7 @@ impl NaIRGenPass._build_jc_layout -> str {
         semantic_fields = {f.name: f.semantic_type for f in arch_layout.fields}
             if arch_layout is not None
             else {};
-        fields: dict = {};
+        fields: dict[str, dict[str, any]] = {};
         for (fname, fidx) in idx_map.items() {
             if fidx >= len(offsets) {
                 continue;

@@ -1,10 +1,9 @@
 import os;
-import from jaclang.runtime.object_model { MISSING }
 import from typing { cast }
 import from uuid { UUID }
 
 import from jaclang.runtime.archetype { NodeAnchor, Root }
-import from jaclang.compiler.frontend.constant { Constants as Con }
+import from jaclang.runtime.constants { Constants as Con }
 import from jaclang.runtime.exceptions { MissingAnchorError }
 import from jaclang.runtime.memory { Memory }
 

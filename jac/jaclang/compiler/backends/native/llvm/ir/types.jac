@@ -371,7 +371,7 @@ class _Repeat(object) {
         return self.size;
     }
 
-    def __iter__(self: _Repeat) -> object {
+    def __iter__(self: _Repeat) -> Iterator[any] {
         return repeat(self.value, self.size);
     }
 
@@ -453,7 +453,7 @@ class VectorType(Type) {
 
 class Aggregate(Type) {
     with entry {
-        elements: (_Repeat | tuple | None);
+        elements: (_Repeat | tuple[Type, ...] | None);
     }
 
     def __len__(self: Aggregate) -> object {
@@ -543,7 +543,7 @@ class BaseStructType(Aggregate) {
         return len(self.elements);
     }
 
-    def __iter__(self: BaseStructType) -> object {
+    def __iter__(self: BaseStructType) -> Iterator[any] {
         assert (self.elements is not None);
         return iter(self.elements);
     }
@@ -622,7 +622,7 @@ class LiteralStructType(BaseStructType) {
 class IdentifiedStructType(BaseStructType) {
     with entry {
         null = 'zeroinitializer';
-        elements: (tuple | None);
+        elements: (tuple[Type, ...] | None);
     }
 
     def init(

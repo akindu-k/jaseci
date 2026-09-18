@@ -127,7 +127,7 @@ graph TD
     NA --> NAOUT[".o / ELF / Mach-O"]
 ```
 
-The orchestration lives in [`compiler/driver/schedules.jac`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/compiler/driver/schedules.jac).
+The orchestration lives in [`compiler/driver/pipeline.jac`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/compiler/driver/pipeline.jac).
 Each named "schedule" function returns a list of `Transform[uni.Module, uni.Module]`
 classes to run, and the `JacCompiler.compile` method walks them in order.
 
@@ -157,14 +157,14 @@ positions, flags); each child slot the parser fills (`condition`, `body`,
 `target`, ...) is a role-typed edge from
 [`compiler/frontend/roles.jac`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/compiler/frontend/roles.jac)
 (`ConditionRole`, `BodyRole`, ... all subclasses of `Role`), and the ordered
-token stream is a separate `Kid` edge per child. The spelling passes use is
-unchanged: `nd.condition`, `nd.body`, `nd.kid` and `nd.parent` are accessors
-over those edges (`unitree.impl/roles.impl.jac`: each `{ getter; }` slot
-declared in `unitree.jac` reads its edge type there, and the `init` for each
-class links its children through `_link`). `kid` is the Kid edges in
-connection order, so the formatter and `unparse` see the same token stream as
-before; `parent` is the source of the newest incoming Kid edge (or Role edge,
-for a node reachable only through a slot).
+token stream is a separate `Kid` edge per child. Passes read that stream
+directly with `[nd->:Kid:->]`, which returns children in connection order,
+so the formatter and `unparse` see the same token stream as before.
+`nd.condition`, `nd.body` and `nd.parent` are accessors over edges
+(`unitree.impl/roles.impl.jac` implements the role getters declared in
+`unitree.jac`, and the `init` for each class links its children through
+`_link`). `parent` is the source of the newest incoming Kid edge (or Role
+edge, for a node reachable only through a slot).
 
 Construction connects: a class's generated `init` assigns its scalars and calls
 `_link(kid, roles)`, which records each child in the node's adjacency. After
@@ -216,7 +216,7 @@ verdict. Every other plain `.jac` module goes through placement inference
 instead.
 
 The coercion helpers live in
-[`compiler.jac:_coerce_module`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/compiler/driver/schedules.jac#L250)
+[`compiler.jac:_coerce_module`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/compiler/driver/pipeline.jac#L250)
 and two wrappers around it:
 
 | Helper | Triggered by | What it does |
@@ -292,7 +292,7 @@ through the interop stubs.
 
 These passes run regardless of codespace and are collected by
 `get_ir_gen_sched` and `get_analysis_sched` in
-[`compiler.jac`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/compiler/driver/schedules.jac#L42).
+[`compiler.jac`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/compiler/driver/pipeline.jac#L42).
 
 The ir-gen schedule (`get_ir_gen_sched`):
 
@@ -445,12 +445,12 @@ runs once *before* code generation. It walks every call site and records:
 3. Imports that cross from a Python module into a native-placed module (for
    native↔native linking).
 4. Server-to-server calls that cross an **app boundary** (the imported
-   element's `owner_app` differs from the importing module's).
+   element's `app` differs from the importing module's).
 
 Every cross-module import is classified once, by
 `classify_cross_app_import` in `compiler/driver/boundary_classify.jac`, into
 one of four kinds from the *app facts* the driver stamps before any pass runs
-(`app`, `app_root`, `app_kind`, `owner_app` on `uni.Module`): `LOCAL` (a plain
+(`app`, `app_root`, `app_kind` on `uni.Module`): `LOCAL` (a plain
 import), `CLIENT_BRIDGE` (client context importing server-placed elements),
 `SERVICE_BRIDGE` (server or native context importing server-placed elements
 owned by another app), or `NATIVE_BIND` (the wasm/ctypes edge). The pass also
@@ -497,10 +497,34 @@ The Python AST is reconstructed from the container inside
 `JcirBytecodeGenPass` and dies there, so nothing downstream holds a handle
 back to the originating nodes.
 
-Archetype `has` fields become dataclass fields wrapped with
-`_.field(default=…)` or `_.field(factory=lambda: …)`. Walkers, nodes, and
+Archetype `has` fields use Jac object descriptors. Nonconstant defaults
+lower to internal `ObjectField(default_factory=lambda: …)` calls; constant
+defaults remain direct values. Walkers, nodes, and
 edges descend from the corresponding `Archetype` subclasses in
 [`runtime/archetype.jac`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/runtime/archetype.jac).
+Jac-owned records use `obj` and ordinary `has` defaults such as
+`has items: list[int] = [];`. Deferred fields use `has ready: bool postinit;`
+and are assigned in `postinit`. Plain `class` retains Python class semantics.
+
+`make_object` is Python runtime implementation machinery, also used by the
+bootstrap compiler; it is not the declaration API for ordinary Jac records.
+`ObjectField` is internal construction and reflection metadata. Runtime code
+still uses explicit descriptors where it needs constructor exclusion,
+representation control, or keyword-only fields. These internal options do not
+establish a public Jac field-configuration API. Direct decorator tests cover
+this implementation boundary; language-facing tests use `obj`.
+`WalkerArchetype` is a runtime base marked `__jac_base__`, so the normal
+subclass-registration hook deliberately skips it. Its explicit `make_object`
+call installs inherited `reports` metadata without registering it as a user
+archetype. Its constructor exclusion and representation settings remain
+internal runtime contracts.
+
+`runtime/object_interop.jac` is the single direct Python-dataclasses adapter.
+Code accepting records from Python libraries uses its `is_record` and `fields`
+functions. Jac code should not create Python dataclasses or import their helpers;
+intentional compatibility records belong in Python fixtures. The native import
+rejection test retains a dataclasses import as test input, not an executed import.
+
 Builtins and language keywords ultimately resolve to methods on
 `JacRuntimeInterface` in [`runtime/runtime.jac`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/runtime/runtime.jac).
 
@@ -633,7 +657,7 @@ user-facing reference, [Primitives & Codespace Semantics](../reference/language/
 | `sv → na` | In-process `ctypes.CFUNCTYPE` over the JIT'd function address (MCJIT); an AOT `--lib` build is loaded across the process boundary instead | `JcirGenPass` emits the ctypes stub; `NaIRGenPass` exposes the function with C ABI |
 | `na → sv` | Python callback wrapped in a `ctypes.CFUNCTYPE` and registered as a JIT symbol (`llvm.add_symbol`), so MCJIT resolves the native call back into CPython | `interop_bridge.register_py_callbacks`, alongside the `sv → na` stub |
 | `na → na` | Direct symbol reference resolved by the in-tree linker | `BoundaryAnalysisPass` records the import; `NativeCompilePass` emits the relocation |
-| `sv → sv` (cross-app) | A typed-async stub keyed by the provider **app name** when an import's target is owned by a different app; in-process when the provider app is colocated, HTTP `POST` when it runs as its own process | `JcirGenPass` emits a generated `async` `__jac_sv_client` stub (`call` / `spawn_walker`; un-awaited statement spawns become `_deferred`, the outbox); the manifest's app edges drive the built-in `scale` subsystem's boot order |
+| `sv → sv` (cross-app) | A typed-async stub keyed by the provider **app name** when an import's target is compiled in a different app context; in-process when the provider app is colocated, HTTP `POST` when it runs as its own process | `JcirGenPass` emits a generated `async` `__jac_sv_client` stub (`call` / `spawn_walker`; un-awaited statement spawns become `_deferred`, the outbox); the manifest's app edges drive the built-in `scale` subsystem's boot order |
 
 Boundary types are serialised through the schemas in
 [`codeinfo.jac`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/compiler/frontend/codeinfo.jac).
@@ -658,12 +682,26 @@ recompile. It is a developer knob that trusts codegen did not change; leave it
 unset for anything that must be correct.
 
 The compiler keeps two on-disk caches so the front end and back end can be
-skipped when nothing has changed.
+skipped when nothing has changed. Both are buckets of the machine-wide jac
+cache (`~/.cache/jac` on Linux; `jac cache status` prints the root and every
+bucket), whose root, per-bucket `CACHEDIR.TAG` markers and retention policies are owned
+by `jaclang.cache`. The pre-bootstrap Python module
+`jaclang/jac0core/cache_paths.py` holds the root rule itself, because the
+bootstrap tier imports it before any `.jac` module can be compiled.
 
-| Cache | Location | Invalidated when |
-|-------|----------|------------------|
-| **Bootstrap** | `~/.cache/jac/jir/bootstrap/` | A `compiler/driver/` file or `jac0.py` changes |
-| **Module** | `~/.cache/jac/jir/modules/` | The full compiler's output format changes, or the source / its imports change |
+| Cache | Bucket | Invalidated when | Reclaimed when |
+|-------|--------|------------------|----------------|
+| **Bootstrap** | `jir-bootstrap` (`<cache>/jir/bootstrap/`) | A `compiler/driver/` file or `jac0.py` changes | An entry goes unused for 14 days |
+| **Module** | `jir-modules` (`<cache>/jir/modules/<generation>/`) | The full compiler's output format changes, or the source / its imports change | A generation goes unused for 14 days (`JAC_CACHE_GENERATION_TTL_DAYS`) |
+
+Every compiler digest (one per checkout) names a **generation** directory, so
+several checkouts sharing one binary keep disjoint slots; the live generation
+is held by identity, never by age. The stub catalog (`jir-stubcat`), the
+native kernel units (`jir-kernel-units`) and the per-checkout compiler digests
+(`jir-digests`) are further buckets under `jir/` with the same 14-day
+last-use policy. Sweeps run opportunistically from each bucket's write path,
+at most once per process and once per day; `jac cache gc` runs them on
+demand.
 
 Each cache entry is a **JIR file** (Jac IR) with named sections defined in
 [`compiler/driver/jir.jac`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/compiler/driver/jir.jac):
@@ -695,14 +733,17 @@ Hydration is always on; `JAC_REBUILD` recomputes and rewrites the cache, and
 `JAC_IFACE_VERIFY=1` recomputes everything served from cache and fails on
 any divergence. See [The analysis cache](analysis-cache.md) for the design.
 
-When debugging compiler changes, clear the relevant cache:
+When debugging compiler changes, clear the relevant bucket:
 
 ```bash
-# Bootstrap or core compiler change
-rm -rf ~/.cache/jac/jir/
+# Just the compiled modules
+jac cache purge --bucket jir-modules
 
-# Or just user modules
-rm -rf ~/.cache/jac/jir/modules/
+# The bootstrap tier too
+jac cache purge --bucket jir-bootstrap
+
+# Everything jac manages (fused runtimes, app images, toolchains included)
+jac cache purge
 ```
 
 ---
@@ -735,7 +776,7 @@ A short index, organised by the role each file plays in the pipeline.
 
 **Orchestration**
 
-- [`compiler/driver/schedules.jac`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/compiler/driver/schedules.jac)
+- [`compiler/driver/pipeline.jac`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/compiler/driver/pipeline.jac)
   -- `JacCompiler`, schedule functions, codespace coercion
 - [`compiler/driver/program.jac`](https://github.com/Jaseci-Labs/jaseci/blob/main/jac/jaclang/compiler/driver/program.jac)
   -- `JacProgram`, the module hub passes operate on

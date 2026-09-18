@@ -2,6 +2,13 @@ impl InteropBinding.is_cross_module.getter -> bool {
     return (self.source_module is not None);
 }
 
+impl InteropManifest.boundary_types_for(scope: str) -> dict[str, BoundaryTypeInfo] {
+    return {
+        name: self.boundary_types[type_id]
+        for (name, type_id) in self.boundary_type_names.get(scope, {}).items()
+    };
+}
+
 impl InteropManifest.native_imports.getter -> list[InteropBinding] {
     return [
         b
@@ -81,6 +88,22 @@ impl InteropManifest.server_exports_to_server.getter -> list[InteropBinding] {
     ];
 }
 
+impl CodeGenTarget.py.getter -> str {
+    if self._py is None {
+        if self.py_ast {
+            import ast;
+            self._py = ast.unparse(self.py_ast[0]);
+        } else {
+            return '';
+        }
+    }
+    return self._py;
+}
+
+impl CodeGenTarget.py.setter(value: str) -> None {
+    self._py = value;
+}
+
 impl CodeGenTarget.doc_ir.getter -> Doc {
     if (self._doc_ir is None) {
         import jaclang.compiler.tools.doc_ir as doc;
@@ -158,7 +181,9 @@ impl ClientArtifact.from_bytes(raw: bytes) -> (ClientArtifact | None) {
         manifest=manifest,
         native_import_sources=[str(s) for s in native_import_sources],
         source_map=[tuple(seg) for seg in source_map],
-        dep_digests={str(k): str(v) for (k, v) in dict(dep_digests).items()},
+        dep_digests={
+            str(k): str(v) for (k, v) in dict[object, object](dep_digests).items()
+        },
         framework=str(framework),
         boundary_contracts=dict(boundary_contracts)
     );

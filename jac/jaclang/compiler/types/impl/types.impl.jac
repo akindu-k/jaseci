@@ -855,6 +855,20 @@ impl Parameter.is_optional.getter -> bool {
     return self.default_value is not None or self.has_default;
 }
 
+impl FunctionType.clone -> FunctionType {
+    return FunctionType(
+        func_name=self.func_name,
+        return_type=self.return_type,
+        parameters=[param.clone() for param in self.parameters],
+        function_flags=self.function_flags,
+        type_params=self.type_params,
+        is_async=self.is_async,
+        type_guard=self.type_guard,
+        type_guard_is_strict=self.type_guard_is_strict,
+        flags=self.flags,
+    );
+}
+
 impl FunctionType.specialize(class_type: ClassType) -> FunctionType {
     import from jaclang.compiler.types.type_utils {
         apply_solved_type_vars,
@@ -863,15 +877,7 @@ impl FunctionType.specialize(class_type: ClassType) -> FunctionType {
 
     solution = build_type_var_solution(class_type);
 
-    clone = FunctionType(
-        func_name=self.func_name,
-        return_type=self.return_type,
-        parameters=[param.clone() for param in self.parameters],
-        type_params=self.type_params,
-        is_async=self.is_async,
-        type_guard=self.type_guard,
-        type_guard_is_strict=self.type_guard_is_strict,
-    );
+    clone = self.clone();
 
     for param in clone.parameters {
         if param.param_type {
@@ -895,16 +901,7 @@ impl FunctionType.specialize_func_type_vars(
 ) -> FunctionType {
     import from jaclang.compiler.types.type_utils { apply_solved_type_vars }
 
-    clone = FunctionType(
-        func_name=self.func_name,
-        return_type=self.return_type,
-        parameters=[param.clone() for param in self.parameters],
-        function_flags=self.function_flags,
-        type_params=self.type_params,
-        is_async=self.is_async,
-        type_guard=self.type_guard,
-        type_guard_is_strict=self.type_guard_is_strict,
-    );
+    clone = self.clone();
 
     for param in clone.parameters {
         if param.param_type {
@@ -975,7 +972,7 @@ def _class_scope_category(scope: any) -> any {
 
 impl ClassType.is_node_type -> bool {
     import from jaclang.compiler.frontend.constant { SymbolType }
-    if self.shared.is_root_class {
+    if self.shared.is_root_class or self.is_builtin("Node") {
         return True;
     }
     return _class_scope_category(self.shared.symbol_table) == SymbolType.NODE_ARCH;
@@ -983,11 +980,17 @@ impl ClassType.is_node_type -> bool {
 
 impl ClassType.is_edge_type -> bool {
     import from jaclang.compiler.frontend.constant { SymbolType }
+    if self.is_builtin("Edge") {
+        return True;
+    }
     return _class_scope_category(self.shared.symbol_table) == SymbolType.EDGE_ARCH;
 }
 
 impl ClassType.is_walker_type -> bool {
     import from jaclang.compiler.frontend.constant { SymbolType }
+    if self.is_builtin("Walker") {
+        return True;
+    }
     return _class_scope_category(self.shared.symbol_table) == SymbolType.WALKER_ARCH;
 }
 
@@ -1021,7 +1024,7 @@ impl ClassType.is_builtin(class_name: (str | list[str] | None) = None) -> bool {
 }
 
 impl ClassType.lookup_member_symbol(
-    member: str, r_overloaded: list | None = None
+    member: str, r_overloaded: list[Symbol] | None = None
 ) -> (Symbol | None) {
     import from jaclang.compiler.frontend.unitree {
         Ability,
@@ -1031,7 +1034,11 @@ impl ClassType.lookup_member_symbol(
         FuncSignature,
         ParamVar
     }
-    import from jaclang.compiler.types.type_utils { collect_member_syms }
+    import from jaclang.compiler.types.type_utils {
+        collect_member_syms,
+        ensure_mro_fresh
+    }
+    ensure_mro_fresh(self);
     for cls in self.shared.mro {
         all_syms = collect_member_syms(cls.shared.symbol_table, member);
         if all_syms {

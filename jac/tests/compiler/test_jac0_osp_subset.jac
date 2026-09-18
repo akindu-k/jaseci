@@ -51,7 +51,7 @@ test "jac0 lowers the object-spatial seed subset to the full compiler's semantic
 test "jac0 refuses object-spatial forms outside the seed subset" {
     for src in [
         "def f(a: any, b: any, c: any) { a ++> b ++> c; }",
-        "def f(a: any) -> list { return [a ->:T:-> (?x == 1)]; }",
+        "def f(a: any) -> list[any] { return [a ->:T:-> (?x == 1)]; }",
 
     ] {
         failed = False;
@@ -73,4 +73,10 @@ test "jac0 type filters preserve order and avoid capturing a type name" {
     exec(compile(generated, "seed_type_filter.jac", "exec"), namespace);
     assert namespace["select"]([1, "x", 2, "y"], str) == ["x", "y"];
     assert namespace["chained"]([1, "x", 2]) == [1, 2];
+}
+
+test "jac0 erases edge endpoint annotations without evaluating their types" {
+    plain = compile_jac("edge Link {}", "endpoints.jac");
+    typed = compile_jac("edge Link: Source --> Target {}", "endpoints.jac");
+    assert plain == typed;
 }

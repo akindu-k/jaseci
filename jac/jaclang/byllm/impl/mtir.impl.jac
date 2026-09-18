@@ -50,7 +50,7 @@ impl MTRuntime.factory(mtir: MTIR) -> MTRuntime {
     }
 
     inputs_detail: list[str] = [];
-    media_inputs: list = [];
+    media_inputs: list[any] = [];
     if fn_info is not None and fn_info.params is not None {
         params = [param for param in fn_info.params];
         for (key, value) in args.items() {
@@ -118,7 +118,9 @@ impl MTRuntime.factory(mtir: MTIR) -> MTRuntime {
         }
     }
 
-    system_content = SYSTEM_PERSONA;
+    return_type = get_type_hints(caller).get("return");
+    image_kind = image_resp_kind(return_type);
+    system_content = "" if image_kind else SYSTEM_PERSONA;
     try {
         import from jaclang.project.config { find_project_root }
         import from pathlib { Path }
@@ -142,7 +144,9 @@ impl MTRuntime.factory(mtir: MTIR) -> MTRuntime {
         }
     }
     if call_system_prompt {
-        system_content += "\n\n" + str(call_system_prompt);
+        system_content = f"{system_content}\n\n{call_system_prompt}"
+            if system_content
+            else str(call_system_prompt);
     }
 
     conv_arg = call_params.get("conversation");
@@ -177,7 +181,6 @@ impl MTRuntime.factory(mtir: MTIR) -> MTRuntime {
     );
     messages: list[MessageType] = [sys_msg, *conv_msgs, user_msg];
 
-    return_type = get_type_hints(caller).get("return");
     is_streaming = bool(call_params.get("stream", False));
     if is_streaming
         and return_type is not str
@@ -187,6 +190,13 @@ impl MTRuntime.factory(mtir: MTIR) -> MTRuntime {
             "Pass a stream_handler to receive stream events for a structured "
             "return type (e.g. `visit [-->] by model(stream=True, "
             "stream_handler=fn)`)."
+        );
+    }
+    if image_kind and (is_streaming or len(tools) > 0) {
+        raise ConfigurationError(
+            "An Image return type is served by one image-generation call, which "
+            "takes no tools and does not stream. Drop tools= and stream= from "
+            "this `by` call, or return text and generate the image from a tool."
         );
     }
     if len(tools) > 0 {
@@ -234,7 +244,7 @@ impl MTRuntime.write_back_conversation -> None {
     if self._conversation_list is None {
         return;
     }
-    out: list = [];
+    out: list[dict[str, any]] = [];
     for msg in self.get_history_for_persist() {
         m: any = msg;
         if hasattr(m, "to_dict") {
@@ -269,7 +279,7 @@ def _is_finish_tool_call(tc: any) -> bool {
 
 impl MTRuntime.get_history_for_persist -> list[MessageType] {
     scaff_ids = set(self._scaffolding_ids);
-    out: list = [];
+    out: list[any] = [];
     for msg in self.messages {
         if id(msg) in scaff_ids {
             continue;
@@ -328,11 +338,11 @@ impl MTRuntime.get_tool(tool_name: str) -> Tool | McpTool | None {
     return None;
 }
 
-impl MTRuntime.get_tool_list -> list[dict] {
+impl MTRuntime.get_tool_list -> list[dict[str, any]] {
     return [tool.get_json_schema() for tool in self.tools];
 }
 
-impl MTRuntime.get_output_schema -> dict | None {
+impl MTRuntime.get_output_schema -> dict[str, any] | None {
     assert (len(self.tools) == 0 or self.get_tool("finish_tool") is not None);
     if len(self.tools) == 0 {
         return self.get_typed_output_schema();
@@ -341,7 +351,7 @@ impl MTRuntime.get_output_schema -> dict | None {
     return None;
 }
 
-impl MTRuntime.get_typed_output_schema -> dict | None {
+impl MTRuntime.get_typed_output_schema -> dict[str, any] | None {
     if self.resp_type is None or self.resp_type is str {
         return None;
     }

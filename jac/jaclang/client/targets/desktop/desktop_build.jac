@@ -273,9 +273,9 @@ def serving_app_for(config: any, entry_file: Path, backend: str) -> str {
     if config is None or not config.is_workspace or not config.apps {
         return "";
     }
-    owner = config.app_for_path(str(entry_file.resolve()));
+    selected_app = config.app_for_path(str(entry_file.resolve()));
     if backend != "embedded" {
-        return owner.name if owner is not None else "";
+        return selected_app.name if selected_app is not None else "";
     }
     try {
         chosen = config.resolve_app("");
@@ -290,17 +290,31 @@ def serving_app_for(config: any, entry_file: Path, backend: str) -> str {
             return app.name;
         }
     }
-    return owner.name if owner is not None else "";
+    return selected_app.name if selected_app is not None else "";
 }
 
 
 def stage_program(
     entry_file: Path,
     project_dir: Path,
-    output_dir: Path,
+    image_dir: Path,
     backend: str,
     dist_dir: (Path | None)
 ) -> dict[str, str] {
+    if backend != "embedded" {
+        if dist_dir is not None {
+            import from jaclang.project.client_paths { client_assets_dir }
+            import from jaclang.project.config { get_config_for_dir }
+            config = get_config_for_dir(str(project_dir));
+            assets = client_assets_dir(config, project_dir, str(entry_file));
+            if assets.is_dir() {
+                shutil.copytree(
+                    assets, image_dir / "dist" / "assets", dirs_exist_ok=True
+                );
+            }
+        }
+        return {};
+    }
     if dist_dir is None {
         return {"entry": str(entry_file.resolve())};
     }
@@ -312,15 +326,8 @@ def stage_program(
     }
     app = serving_app_for(config, entry_file, backend);
     console.print(
-        "  Sealing the app image"
-            + (f" for '{app}'" if app else "")
-            + (
-                " (remote backend: the bundle calls it)"
-                    if backend != "embedded"
-                    else ""
-            ),
-        style="muted"
+        "  Sealing the app image" + (f" for '{app}'" if app else ""), style="muted"
     );
-    build_jab(config, output_dir / "app.jab", app=app, bake_client=False);
+    build_jab(config, image_dir / "app.jab", app=app, bake_client=False);
     return {"jab": "app.jab"};
 }

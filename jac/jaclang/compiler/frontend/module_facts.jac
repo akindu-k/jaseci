@@ -1,4 +1,4 @@
-import from jaclang.runtime.object_model { field }
+import from jaclang.compiler.frontend.roles { Kid }
 import from jaclang.compiler.frontend.unitree {
     Ability,
     Archetype,
@@ -16,10 +16,12 @@ import from jaclang.compiler.frontend.unitree {
     ModuleCode,
     ModuleItem,
     ListVal,
+    LambdaExpr,
     Name,
     literal_string_value,
     TupleVal,
-    UniNode
+    UniNode,
+    YieldExpr
 }
 import from jaclang.compiler.frontend.constant {
     CodeContext,
@@ -28,6 +30,23 @@ import from jaclang.compiler.frontend.constant {
 }
 
 obj ModuleFacts {
+    static def ability_is_generator(ability: Ability) -> bool {
+        pending = list(ModuleFacts.unwrap_body(ability) or []);
+        while pending {
+            current = pending.pop();
+            if current.ct_pruned {
+                continue;
+            }
+            if isinstance(current, YieldExpr) {
+                return True;
+            }
+            if not isinstance(current, (Ability, ImplDef, Archetype, LambdaExpr)) {
+                pending.extend([current->:Kid:->]);
+            }
+        }
+        return False;
+    }
+
     static def literal_exports(module: Module) -> set[str] | None {
         assignments: list[Assignment] = [];
         for stmt in module.body {

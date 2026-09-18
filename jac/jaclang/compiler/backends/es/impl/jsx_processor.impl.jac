@@ -3,7 +3,7 @@ impl EsJsxProcessor.init(self: EsJsxProcessor, pass_ref: EsastGenPass) -> None {
     import from jaclang.compiler.backends.es { estree as es }
     self.es = es;
 
-    self._view_by_node = {};
+    self._view_by_node: dict[int, ViewElement] = {};
 }
 
 impl EsJsxProcessor.element(self: EsJsxProcessor, nd: uni.JsxElement) -> Expression {
@@ -116,8 +116,7 @@ impl EsJsxProcessor.element(self: EsJsxProcessor, nd: uni.JsxElement) -> Express
     }
     view = ViewElement(tag=tag, attrs=attrs, children=children, jac_node=nd);
     self._view_by_node[id(nd)] = view;
-    self.pass_ref._ensure_backend();
-    backend = self.pass_ref.backend;
+    backend = self.pass_ref.resolved_backend;
     assert backend is not None , "framework backend was not initialized";
     return backend.lower_view(view, self.pass_ref.sync_loc);
 }
@@ -244,7 +243,7 @@ impl EsJsxProcessor._lift_if(
 
 impl EsJsxProcessor._view_arm(
     self: EsJsxProcessor, nd: uni.JsxElement
-) -> (list | None) {
+) -> (list[ViewChild] | None) {
     import from jaclang.compiler.backends.es.view_ir { ElementChild }
     ve = self._view_by_node.get(id(nd));
     if ve is None {
@@ -253,7 +252,12 @@ impl EsJsxProcessor._view_arm(
     return [ElementChild(element=ve, jac_node=nd)];
 }
 
-impl EsJsxProcessor._split_key(self: EsJsxProcessor, ve: ViewElement) -> tuple {
+impl EsJsxProcessor._split_key(
+    self: EsJsxProcessor, ve: ViewElement
+) -> tuple[
+    Expression | None,
+    list[StaticAttr | DynamicAttr | EventAttr | RefAttr | SpreadAttr]
+] {
     import from jaclang.compiler.backends.es.view_ir { StaticAttr, DynamicAttr }
     key_expr = None;
     kept = [];
@@ -337,7 +341,9 @@ impl EsJsxProcessor.normal_attribute(
         return StaticAttr(name=attr_name, value=value_expr, jac_node=nd);
     } elif isinstance(nd.value, uni.String) {
         import html;
-        attr_value = html.unescape(nd.value.lit_value);
+        literal = uni.literal_string_value(nd.value);
+        assert literal is not None;
+        attr_value = html.unescape(literal);
         sheet = self.pass_ref.scoped_styles;
         if (sheet is not None and attr_name in ('className', 'class')) {
             attr_value = sheet.rewrite_class_value(attr_value);

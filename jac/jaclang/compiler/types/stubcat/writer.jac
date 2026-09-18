@@ -1,3 +1,4 @@
+import from jaclang.compiler.frontend.roles { Kid }
 import os;
 import json;
 import struct;
@@ -29,17 +30,19 @@ import from jaclang.compiler.types.types {
     AnyType,
     ClassDetailsShared,
     ClassType,
+    EnumMemberInfo,
     EnumMemberType,
     FunctionType,
     ModuleType,
     NeverType,
     OverloadedType,
+    Parameter,
     TypeBase,
     TypeVarType,
     UnionType,
     UnknownType
 }
-import from jaclang.compiler.frontend.constant { BindingKind }
+import from jaclang.compiler.frontend.constant { BindingKind, ImmutabilityKind }
 import from jaclang.compiler.types.stubcat.format {
     ACCESS_PRIVATE,
     ACCESS_PROTECTED,
@@ -74,12 +77,14 @@ import from jaclang.compiler.types.stubcat.format {
     SH_TYPEDDICT,
     SH_XREF,
     SYMF_DEFER,
+    SYMF_FINAL,
     SYMF_HAS_DEFAULT,
     SYMF_INSTANCE_METHOD,
     SYMF_NA_ESCAPES,
     SYMF_NA_REGION_HANDLE,
     SYMF_NA_STACK_OK,
     SYMF_PARAM_REBOUND,
+    SYMF_READONLY,
     TV_CLASS_PARAM,
     TV_CONTRAVARIANT,
     TV_COVARIANT,
@@ -244,7 +249,7 @@ def metaclass_of_scope(scope: UniScopeNode, evaluator: any) -> (TypeBase | None)
     if not isinstance(scope, Archetype) {
         return None;
     }
-    for kid in scope.kid {
+    for kid in [scope->:Kid:->] {
         if (
             isinstance(kid, KWPair)
             and kid.key is not None
@@ -296,6 +301,7 @@ obj CatalogWriter {
         type_ids: dict[any, int] postinit,
         _ident_visiting: set[int] postinit,
         _type_ident_memo: dict[int, any] postinit,
+        _canonical_paths: dict[str, str] postinit,
         types: list[TypeBase] postinit,
         pending_types: list[int] postinit,
         shared_ids: dict[any, int] postinit,
@@ -312,6 +318,7 @@ obj CatalogWriter {
         base_dir: str postinit,
         external_modules: set[any] postinit,
         boundary: (Module | None) = None,
+        path_mapper: Callable[[str], str] | None = None,
         failures: int = 0,
         evaluated: int = 0,
         failure_log: list[str] = [],
@@ -344,10 +351,20 @@ obj CatalogWriter {
         self.sym_types = {};
         self.sym_props = {};
         self.forced_scopes = set();
-        self.base_dir = os.path.realpath(self.pkg_dir);
+        self._canonical_paths = {};
+        self.base_dir = self._real_path(self.pkg_dir);
         self.external_modules = set();
         self._ident_visiting = set();
         self._type_ident_memo = {};
+    }
+
+    def _real_path(path: str) -> str {
+        found = self._canonical_paths.get(path);
+        if found is None {
+            found = os.path.realpath(path);
+            self._canonical_paths[path] = found;
+        }
+        return found;
     }
 
     def in_boundary(mod: (Module | None)) -> bool {
@@ -366,7 +383,7 @@ obj CatalogWriter {
             if not bpath or not mpath {
                 return False;
             }
-            return os.path.realpath(mpath) == os.path.realpath(bpath);
+            return self._real_path(mpath) == self._real_path(bpath);
         } except Exception {
             return False;
         }
@@ -385,7 +402,7 @@ obj CatalogWriter {
             mpath = "";
         }
         if mpath {
-            return os.path.realpath(mpath);
+            return self._real_path(mpath);
         }
         return id(mod);
     }
@@ -483,12 +500,12 @@ obj CatalogWriter {
         if not path {
             return "";
         }
-        real = os.path.realpath(path);
+        real = self._real_path(path);
         prefix = self.base_dir + os.sep;
         if real.startswith(prefix) {
             return real[len(prefix):].replace(os.sep, "/");
         }
-        return real;
+        return self.path_mapper(real) if self.path_mapper is not None else real;
     }
 
     def add_module(mod: Module, dotted: str) -> None {
@@ -778,7 +795,7 @@ obj CatalogWriter {
                 );
             }
             if isinstance(t, FunctionType) {
-                params: list = [];
+                params: list[tuple[str, int, int, any, bool, bool, bool, bool]] = [];
                 for p in (t.parameters or []) {
                     params.append(
                         (
@@ -876,8 +893,8 @@ obj CatalogWriter {
         }
     }
 
-    def _types_ident(ts: (list | None)) -> tuple {
-        out: list = [];
+    def _types_ident(ts: (list[TypeBase] | None)) -> tuple[any, ...] {
+        out: list[any] = [];
         for x in (ts or []) {
             out.append(self._type_ident(x) if x is not None else -1);
         }
@@ -1087,9 +1104,16 @@ obj CatalogWriter {
         if self._sym_ident(sym) not in self.sym_types {
             self.force_symbol(sym);
         }
+        target = sym;
+        if sym.imported {
+            try {
+                target = self.evaluator.resolve_to_definition_symbol(sym);
+            } except Exception {}
+        }
         out = bytearray();
         put_uvar(out, self.sid(sym.sym_name));
-        put_uvar(out, self.sid(str(sym.sym_type.value)));
+
+        put_uvar(out, self.sid(str(target.sym_type.value)));
         access = ACCESS_PUBLIC;
         if sym.access.value == "private" {
             access = ACCESS_PRIVATE;
@@ -1110,11 +1134,6 @@ obj CatalogWriter {
         alias_mod = -1;
         alias_name = "";
         if sym.imported {
-            try {
-                target = self.evaluator.resolve_to_definition_symbol(sym);
-            } except Exception {
-                target = sym;
-            }
             if target is not sym {
                 target_mod = module_of(home_scope(target));
                 alias_mod = self.ref_module(target_mod);
@@ -1168,6 +1187,11 @@ obj CatalogWriter {
         if self._jac_method_of(sym) is not None {
             symbits |= SYMF_INSTANCE_METHOD;
         }
+        if sym.immutability is ImmutabilityKind.FINAL {
+            symbits |= SYMF_FINAL;
+        } elif sym.immutability is ImmutabilityKind.READONLY {
+            symbits |= SYMF_READONLY;
+        }
         try {
             decl_node = sym.decl.name_of if sym.decl else None;
             if isinstance(decl_node, HasVar) {
@@ -1219,7 +1243,7 @@ obj CatalogWriter {
                 tps.append(tv);
             }
             put_refs(out, self.ref_types(tps));
-            params = t.parameters or [];
+            params: list[Parameter] = t.parameters or [];
             put_uvar(out, len(params));
             for p in params {
                 put_uvar(out, self.sid(p.name or ""));
@@ -1400,26 +1424,26 @@ obj CatalogWriter {
         }
         put_refs(out, self.ref_types(tps));
         put_refs(out, self.ref_types(sh.base_classes));
-        fields = sh.typeddict_fields or {};
+        fields: dict[str, TypeBase] = sh.typeddict_fields or {};
         put_uvar(out, len(fields));
         for (fname, ftype) in fields.items() {
             put_uvar(out, self.sid(fname));
             put_ref(out, self.ref_type(ftype));
         }
         put_ref(out, self.ref_type(sh.enum_value_type));
-        members = sh.enum_members or {};
+        members: dict[str, EnumMemberInfo] = sh.enum_members or {};
         put_uvar(out, len(members));
         for (mname, info) in members.items() {
             put_uvar(out, self.sid(mname));
             put_ref(out, self.ref_type(info.value_type));
             self.put_literal(out, info.literal_value);
         }
-        ct_params = sh.ct_params or [];
+        ct_params: list[str] = sh.ct_params or [];
         put_uvar(out, len(ct_params));
         for name in ct_params {
             put_uvar(out, self.sid(name));
         }
-        derived = sh._derived_special_types or {};
+        derived: dict[str, ClassType] = sh._derived_special_types or {};
         put_uvar(out, len(derived));
         for (dname, dtype) in derived.items() {
             put_uvar(out, self.sid(dname));
@@ -1482,7 +1506,7 @@ obj CatalogWriter {
         ambient_sid = self.sid(json.dumps(ambient_json, sort_keys=True));
 
         recblob = bytearray();
-        def lay(recs: list) -> bytes {
+        def lay(recs: list[bytes | None]) -> bytes {
             offsets: list[bytes] = [];
             for r in recs {
                 offsets.append(len(recblob).to_bytes(4, "little"));

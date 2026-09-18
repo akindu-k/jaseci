@@ -107,8 +107,11 @@ impl Parser.expect(kind: TokenKind) -> LexToken {
     return self.current();
 }
 
-impl Parser.consume_uni(kind: TokenKind) -> Token {
+impl Parser.consume_uni(kind: TokenKind, value: str | None = None) -> Token {
     tok = self.expect(kind);
+    if value is not None and tok.value != value {
+        self.emit_diag(f"Expected '{value}', got '{tok.value}'", "E0001", loc=tok.loc);
+    }
     return self.make_uni_token(tok);
 }
 
@@ -475,7 +478,7 @@ impl Parser.parse_module -> Module {
         if nid not in seen {
             seen[nid] = True;
             node_list.append(nd);
-            for child in nd.kid {
+            for child in [nd->:Kid:->] {
                 walk.append(child);
             }
         }
@@ -1273,7 +1276,7 @@ impl Parser.parse_atomic_chain -> Expr {
                     lparen_tok = call_kid[1];
                     rparen_tok = call_kid[len(call_kid) - 1];
                     new_gc_kid: list[UniNode] = [lparen_tok];
-                    for c in first_arg.kid {
+                    for c in [first_arg->:Kid:->] {
                         new_gc_kid.append(c);
                     }
                     new_gc_kid.append(rparen_tok);
@@ -1812,6 +1815,9 @@ impl Parser.parse_special_ref -> Expr | None {
 }
 
 impl Parser.parse_atom -> Expr {
+    if self.check(TokenKind.KW_GRAPH) {
+        return self.parse_graph_expr();
+    }
     if self.check_any(
         TokenKind.INT,
         TokenKind.HEX,
@@ -1927,6 +1933,30 @@ impl Parser.parse_atom -> Expr {
         f"Unexpected token in expression: '{self.current().kind.value}'", "E0004"
     );
     return self.make_name(self.advance());
+}
+
+impl Parser.parse_graph_expr -> GraphExpr {
+    kid: list[UniNode] = [
+        self.consume_uni(TokenKind.KW_GRAPH),
+        self.consume_uni(TokenKind.LBRACE)
+    ];
+    exprs: list[Expr] = [];
+    while not self.check(TokenKind.RBRACE) and not self.at_end() {
+        start = self.pos;
+        expr = self.parse_expression();
+        exprs.append(expr);
+        kid.append(expr);
+        if self.check(TokenKind.SEMI) {
+            kid.append(self.consume_uni(TokenKind.SEMI));
+        } elif not self.check(TokenKind.RBRACE) {
+            kid.append(self.consume_uni(TokenKind.SEMI));
+        }
+        if self.pos == start {
+            self.advance();
+        }
+    }
+    kid.append(self.consume_uni(TokenKind.RBRACE));
+    return GraphExpr(exprs=exprs, kid=kid);
 }
 
 impl Parser.parse_tuple_item -> Expr | KWPair {
@@ -2684,7 +2714,7 @@ impl Parser.parse_lambda_expr -> Expr {
         ret_hint_uni = self.make_uni_token(self.previous());
         return_type = self.parse_expression();
     }
-    body_stmts2: (list | None) = None;
+    body_stmts2: (list[CodeBlockStmt] | None) = None;
     body_expr2: Expr | None = None;
     lbrace_uni: Token | None = None;
     rbrace_uni: Token | None = None;
@@ -5139,7 +5169,7 @@ impl Parser.parse_from_path -> tuple[(ModulePath | None, bool)] {
 
 impl Parser.parse_import_items(
     kid: list[UniNode], is_clib_import: bool
-) -> tuple[(list, list)] {
+) -> tuple[(list[ModuleItem | ModulePath], list[UniNode])] {
     items: list[ModuleItem | ModulePath] = [];
     clib_decls: list[UniNode] = [];
     self.expect(TokenKind.LBRACE);
@@ -5234,7 +5264,7 @@ impl Parser.parse_archetype -> Archetype {
     name_tok = self.expect_name("archetype");
     name = self.make_name(name_tok);
 
-    tp_list: (list | None) = None;
+    tp_list: (list[TypeParam] | None) = None;
     tp_lb_uni: Token | None = None;
     tp_rb_uni: Token | None = None;
     tp_comma_unis: list[Token] = [];
@@ -5696,13 +5726,14 @@ impl Parser.parse_accessor -> Ability {
 
     signature: FuncSignature | None = self.parse_func_signature();
     has_sig_content = not (
-        len(signature.kid) == 1 and isinstance(signature.kid[0], EmptyToken)
+        len([signature->:Kid:->]) == 1
+        and isinstance([signature->:Kid:->][0], EmptyToken)
     );
     if not has_sig_content {
         signature = None;
     }
 
-    body: (list | None) = None;
+    body: (list[CodeBlockStmt] | None) = None;
     body_lb_uni: Token | None = None;
     body_rb_uni: Token | None = None;
     if self.match_tok(TokenKind.LBRACE) {
@@ -5809,7 +5840,7 @@ impl Parser.parse_ability -> Ability {
         name = self.make_name(name_tok);
     }
 
-    tp_list: (list | None) = None;
+    tp_list: (list[TypeParam] | None) = None;
     tp_lb_uni: Token | None = None;
     tp_rb_uni: Token | None = None;
     tp_comma_unis: list[Token] = [];
@@ -5844,7 +5875,7 @@ impl Parser.parse_ability -> Ability {
     } else {
         signature = self.parse_func_signature();
     }
-    body_stmts: (list | None) = None;
+    body_stmts: (list[CodeBlockStmt] | None) = None;
     body_expr: Expr | None = None;
     is_abstract = False;
     body_type = "semi";
@@ -6923,7 +6954,7 @@ impl Parser.parse_type_alias -> TypeAlias {
         name_tok = self.expect_name();
     }
     name = self.make_name_or_special(name_tok);
-    tp_list: (list | None) = None;
+    tp_list: (list[TypeParam] | None) = None;
     tp_lb_uni: Token | None = None;
     tp_rb_uni: Token | None = None;
     tp_comma_unis: list[Token] = [];
@@ -6972,7 +7003,7 @@ impl Parser.parse_type_alias -> TypeAlias {
     );
 }
 
-impl Parser.parse_type_params -> tuple[(list, list)] {
+impl Parser.parse_type_params -> tuple[(list[TypeParam], list[Token])] {
     params: list[TypeParam] = [];
     comma_unis: list[Token] = [];
 

@@ -1,9 +1,9 @@
 import from kubernetes.client.exceptions { ApiException }
 import from jaclang.scale.deploy.target.kubernetes.manifest_builder {
     ManifestBuilder,
-    GATEWAY_NAME,
     ScalingMode
 }
+import from jaclang.scale.runtime.context.util { GATEWAY_NAME }
 import from jaclang.scale.deploy.target.kubernetes.target {
     KubernetesTarget,
     apply_http_activations_for_bundle,
@@ -40,7 +40,7 @@ import from jaclang.scale.runtime.fleet { fleet_of }
 
 
 def _builder(
-    services: dict, k8s_config: KubernetesConfig | None = None
+    services: dict[str, any], k8s_config: KubernetesConfig | None = None
 ) -> ManifestBuilder {
     return ManifestBuilder(
         k8s_config=k8s_config or KubernetesConfig(app_name="t", namespace="t-ns"),
@@ -52,12 +52,12 @@ def _builder(
 
 # Minimal Deployment/Service manifests: _resolve_scaling only reads
 # metadata.name off each, so a full manifest is unnecessary here.
-def _dep(name: str) -> dict {
+def _dep(name: str) -> dict[str, any] {
     return {"metadata": {"name": name}};
 }
 
 
-def _svc(name: str) -> dict {
+def _svc(name: str) -> dict[str, any] {
     return {"metadata": {"name": name}};
 }
 
@@ -199,6 +199,40 @@ test "_resolve_scaling: the gateway never inherits http_activation even when the
     # inbound traffic, so it must never pick up the shared activation default.
     assert plan["mode"] != ScalingMode.HTTP_ACTIVATION;
     assert plan["http_activation"] == {};
+}
+
+test "generate_manifests never activates the gateway, even though every microservice inherits the shared default" {
+    import from jaclang.scale.config.app_config { AppConfig }
+    import tempfile;
+    import from pathlib { Path }
+    services = {"billing_ops": {}};
+    with tempfile.TemporaryDirectory() as project {
+        for name in list(services.keys()) + ["main"] {
+            (Path(project) / f"{name}.jac").write_text("");
+        }
+        b = ManifestBuilder(
+            k8s_config=KubernetesConfig(
+                app_name="t",
+                namespace="t-ns",
+                bundle_storage_class="standard",
+                http_activation={
+                    "enabled": True,
+                    "target_port": 8080,
+                    "concurrency_target": 10,
+                    "rules": [{"hosts": ["*"]}]
+                }
+            ),
+            fleet=fleet_of({"billing_ops": "/"}, overrides=services),
+            dry_run=True
+        );
+        bundle = b.generate_manifests(AppConfig(code_folder=project, app_name="t"), "");
+        # The microservice picks up the shared default unchanged...
+        assert bundle["scaling"]["billing_ops"]["mode"] == ScalingMode.HTTP_ACTIVATION;
+        # ...but the gateway, present in every bundle regardless of the routes
+        # table, never does - it is the ingress entry point and must stay warm.
+        assert bundle["scaling"][GATEWAY_NAME]["mode"] != ScalingMode.HTTP_ACTIVATION;
+        assert bundle["scaling"][GATEWAY_NAME]["http_activation"] == {};
+    }
 }
 
 test "_resolve_scaling: a plain service with the default hpa is METRIC, not activation" {

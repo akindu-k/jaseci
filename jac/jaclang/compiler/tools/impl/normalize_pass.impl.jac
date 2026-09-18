@@ -27,7 +27,7 @@ impl NormalizePass.enter_module with uni.Module entry {
                 imp.set_kids(
                     nodes=[
                         k
-                        for k in imp.kid
+                        for k in [imp->:Kid:->]
                         if not (isinstance(k, uni.ModuleItem) and k.name.value == "Any")
                     ]
                 );
@@ -271,7 +271,8 @@ impl NormalizePass.enter_archetype with uni.Archetype entry {
         }
         new_kid.append(here.gen_token(Tok.RSQUARE));
     }
-    inherit: list = list(here.base_classes) + list(here.keywords);
+    inherit: list[uni.Expr | uni.KWPair] = list(here.base_classes)
+        + list(here.keywords);
     if inherit {
         new_kid.append(here.gen_token(Tok.LPAREN));
         for idx in range(len(inherit)) {
@@ -1271,6 +1272,19 @@ impl NormalizePass.enter_atom_unit with uni.AtomUnit entry {
     new_kid.append(here.value);
     new_kid.append(here.gen_token(Tok.RPAREN));
     here.set_kids(nodes=new_kid);
+}
+
+impl NormalizePass.enter_graph_expr with uni.GraphExpr entry {
+    kids: list[uni.UniNode] = [
+        here.gen_token(Tok.NAME, "graph"),
+        here.gen_token(Tok.LBRACE)
+    ];
+    for expr in here.exprs {
+        kids.append(expr);
+        kids.append(here.gen_token(Tok.SEMI));
+    }
+    kids.append(here.gen_token(Tok.RBRACE));
+    here.set_kids(nodes=kids);
 }
 
 impl NormalizePass.enter_yield_expr with uni.YieldExpr entry {

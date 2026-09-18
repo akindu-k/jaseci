@@ -62,16 +62,36 @@ impl JcirGenPass._get_sem_decorator(nd: UniNode) -> (CgNode | None) {
 
 impl JcirGenPass.enter_archetype with Archetype entry {
     if isinstance(here.body, ImplDef) {
-        self.traverse(here.body);
+        self.ctx.walk_subtree(here.body, self);
     }
 }
 
 impl JcirGenPass.exit_archetype with Archetype exit {
     inner = ModuleFacts.unwrap_body(here);
     decorators = [self.val(i) for i in here.decorators] if here.decorators else [];
-    body: list = self.resolve_stmt_block(inner, doc=here.doc);
+    body: list[CgItem] = self.resolve_stmt_block(inner, doc=here.doc);
+    if here.arch_type.name != Tok.KW_CLASS {
+        import from jaclang.compiler.frontend.codeinfo { endpoint_key }
+        type_id = endpoint_key(self.module, 'type', here.sym_name);
+        body.append(
+            self.nod(
+                'Assign',
+                ['targets', 'value'],
+                [
+                    [
+                        self.nod(
+                            'Name',
+                            ['id', 'ctx'],
+                            ['__jac_type_id__', self.nod('Store', [], [])]
+                        )
+                    ],
+                    self.const_of(type_id)
+                ]
+            )
+        );
+    }
     if (not body and not isinstance(here.body, Expr)) {
-        self.emit(E5003, node_override=here);
+        self.ctx.emit(E5003, node_override=here);
         body = [self.nod('Pass', [], [], jac_node=here)];
     }
     ct_fields = self._ct_param_fields(here);
@@ -79,7 +99,13 @@ impl JcirGenPass.exit_archetype with Archetype exit {
         insert_at = 1 if here.doc else 0;
         body[insert_at:insert_at] = ct_fields;
     }
-    if here.is_async {
+    async_walker = here.arch_kind == 'walker'
+        and any(
+            isinstance(stmt, Ability)
+                and stmt.is_async
+                and isinstance(stmt.signature, EventSignature) for stmt in (inner or [])
+        );
+    if here.is_async or async_walker {
         body.insert(
             0,
             self.nod(
@@ -93,7 +119,7 @@ impl JcirGenPass.exit_archetype with Archetype exit {
                             ['__jac_async__', self.nod('Store', [], [])]
                         )
                     ],
-                    self.const_of(here.is_async)
+                    self.const_of(True)
                 ]
             )
         );
@@ -124,7 +150,7 @@ impl JcirGenPass.exit_archetype with Archetype exit {
 
 impl JcirGenPass.enter_enum with Enum entry {
     if isinstance(here.body, ImplDef) {
-        self.traverse(here.body);
+        self.ctx.walk_subtree(here.body, self);
     }
 }
 
@@ -160,7 +186,7 @@ impl JcirGenPass.exit_enum with Enum exit {
 impl JcirGenPass.enter_ability with Ability entry {
     self._push_hoist_frame();
     if isinstance(here.body, ImplDef) {
-        self.traverse(here.body);
+        self.ctx.walk_subtree(here.body, self);
     }
 }
 
@@ -219,7 +245,7 @@ impl JcirGenPass.exit_ability with Ability exit {
                 if here.is_abstract
                 else self.resolve_stmt_block(stmt_body, doc=here.doc);
     if (here.is_abstract and here.body) {
-        self.emit(E5004, node_override=here, name=str(here.sym_name));
+        self.ctx.emit(E5004, node_override=here, name=str(here.sym_name));
     }
     decorator_list = [self.val(i) for i in here.decorators] if here.decorators else [];
     if (sem_decorator := self._get_sem_decorator(here)) {
@@ -324,7 +350,7 @@ impl JcirGenPass.exit_ability with Ability exit {
         }
     }
     if (not body and not isinstance(here.body, Expr)) {
-        self.emit(E5005, node_override=here);
+        self.ctx.emit(E5005, node_override=here);
         body = [self.nod('Pass', [], [], jac_node=here)];
     }
     if body_hoists {
@@ -642,7 +668,7 @@ impl JcirGenPass.exit_has_var with HasVar exit {
         value = self.val(here.value) if here.value else None;
     } elif here.defer {
         value = self.call_node(
-            self.jaclib_obj('field'),
+            self.jaclib_obj('ObjectField'),
             [],
             [self.nod('keyword', ['arg', 'value'], ['init', self.const_of(False)])]
         );
@@ -653,7 +679,7 @@ impl JcirGenPass.exit_has_var with HasVar exit {
             value = value_expr;
         } else {
             value = self.call_node(
-                self.jaclib_obj('field'),
+                self.jaclib_obj('ObjectField'),
                 [],
                 [
                     self.nod(
@@ -738,7 +764,7 @@ impl JcirGenPass._invoke_llm_call(
     return call;
 }
 
-impl JcirGenPass.gen_llm_body(nd: Ability) -> list {
+impl JcirGenPass.gen_llm_body(nd: Ability) -> list[CgNode] {
     assert isinstance(nd.signature, FuncSignature);
     model_expr: CgNode;
     if (
@@ -751,7 +777,9 @@ impl JcirGenPass.gen_llm_body(nd: Ability) -> list {
     } elif isinstance(nd.body, Expr) {
         model_expr = self.val(nd.body);
     } else {
-        raise RuntimeError(self.ice('gen_llm_body called without model expression'));
+        raise RuntimeError(
+            self.ctx.ice('gen_llm_body called without model expression')
+        );
     }
     llm_name_ref = nd.name_ref;
     caller: CgNode;

@@ -1,5 +1,8 @@
-import from jaclang.runtime.object_model { field }
+import from jaclang.compiler.frontend.roles { Kid }
 import from jaclang.compiler.frontend.unitree {
+    Module,
+    TreeWalker,
+    UniNode,
     Ability,
     ArchHas,
     Archetype,
@@ -21,7 +24,6 @@ import from jaclang.compiler.frontend.unitree {
     KVPair,
     LambdaExpr,
     ListVal,
-    Module,
     ModuleItem,
     ModulePath,
     MultiString,
@@ -34,10 +36,11 @@ import from jaclang.compiler.frontend.unitree {
     Token,
     TupleVal,
     UnaryExpr,
-    UniNode,
     ability_of_symbol,
     resolved_decl_of
 }
+import from jaclang.compiler.passes.context { CompileContext }
+import type from jaclang.compiler.driver.program { JacProgram }
 import from jaclang.compiler.frontend.constant {
     CodeContext,
     SymbolType,
@@ -48,20 +51,26 @@ import from jaclang.compiler.frontend.codeinfo {
     InteropBinding,
     InteropContext
 }
-import from jaclang.compiler.passes.uni_pass { UniPass }
 
-walker BoundaryAnalysisPass(UniPass) {
-    has _func_defs: dict[(str, tuple[(InteropContext, Ability)])] = field(
-        default_factory=`dict
-    ),
-        _imported_native_funcs: dict[(str, tuple[(str, InteropContext)])] = field(
-            default_factory=`dict
-        ),
-        _imported_native_modules: dict[(str, tuple[(str, InteropContext)])] = field(
-            default_factory=`dict
-        );
+walker BoundaryAnalysisPass(TreeWalker) {
+    can enter_walk with UniNode entry {
+        self.ctx.enter_node(here);
+    }
 
-    def before_pass -> None;
+    can exit_walk with UniNode exit {
+        self.ctx.exit_node(here);
+    }
+
+    has ctx: CompileContext,
+        module: Module,
+        prog: JacProgram;
+
+    static has HOST_PASS: bool = True;
+    has _func_defs: dict[(str, tuple[(InteropContext, Ability)])] = {},
+        _imported_native_funcs: dict[(str, tuple[(str, InteropContext)])] = {},
+        _imported_native_modules: dict[(str, tuple[(str, InteropContext)])] = {};
+
+    can prepare with entry;
     def _resolved_native_decl(name_node: (UniNode | None)) -> (Ability | None);
     def _signature_of_decl(
         decl: (Ability | None)
@@ -79,6 +88,13 @@ walker BoundaryAnalysisPass(UniPass) {
 
     def _register_na_client_import(nd: Import) -> None;
     def _register_client_bridged_import(nd: Import) -> None;
+    def _register_type_import(
+        nd: Import,
+        item: ModuleItem,
+        source_mod: (Module | None),
+        caller_ctx: InteropContext
+    ) -> bool;
+
     def _provider_module_of(nd: Import) -> (Module | None);
     def _record_app_edge(nd: Import) -> None;
     def _bridge_targets(mod: Module) -> list[tuple[(str, str)]];
@@ -102,12 +118,11 @@ walker BoundaryAnalysisPass(UniPass) {
     def _extract_subscript_inner(expr: (UniNode | None)) -> str;
     def _extract_all_subscript_types(expr: (UniNode | None)) -> list[str];
     def _extract_all_type_names(expr: (UniNode | None)) -> list[str];
-    def _collect_boundary_type(type_name: str, source_mod: (Module | None)) -> None;
+    def _collect_boundary_type(
+        type_name: str, source_mod: (Module | None)
+    ) -> (BoundaryTypeInfo | None);
+
     def _literal_default(expr: (UniNode | None)) -> tuple[(bool, any)];
-    def after_pass -> None;
+    can finish with exit;
     def _record_access_levels(manifest: any) -> None;
 }
-
-glob _type_parse_memo: dict[str, tuple[float, Module | None]] = {};
-
-def _parse_module_for_types(file_path: str) -> (Module | None);

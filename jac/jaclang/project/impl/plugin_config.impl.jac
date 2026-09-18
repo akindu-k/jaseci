@@ -1,5 +1,5 @@
 import from pathlib { Path }
-import from jaclang.project.config { JacConfig, find_project_root }
+import from jaclang.project.config { JacConfig, find_project_root, get_config_for_path }
 import from jaclang.runtime.runtime { JacRuntime }
 
 impl deep_merge(base: dict[str, any], override_dict: dict[str, any]) -> dict[str, any] {
@@ -19,7 +19,7 @@ impl deep_merge(base: dict[str, any], override_dict: dict[str, any]) -> dict[str
 }
 
 impl PluginConfigBase.postinit{
-    full_target = JacRuntime.get_full_target_path();
+    full_target = self.entry_path or JacRuntime.get_full_target_path();
     project_root_result = find_project_root(Path(full_target)) if full_target else None;
     self.project_dir = (
         self.project_dir
@@ -34,7 +34,7 @@ impl PluginConfigBase.postinit{
 
 impl PluginConfigBase.effective_jac_config -> JacConfig {
     jac_config = self.get_jac_config();
-    app = jac_config.app_for_target();
+    app = jac_config.app_for_target(self.entry_path);
     if app is None {
         return jac_config;
     }
@@ -46,24 +46,28 @@ impl PluginConfigBase.effective_jac_config -> JacConfig {
 }
 
 impl PluginConfigBase.load -> dict[str, any] {
-    target_app = self.get_jac_config().app_for_target();
-    app_name = target_app.name if target_app is not None else '';
+    jac_config = self.get_jac_config();
+    app = jac_config.app_for_target(self.entry_path);
+    app_name = app.name if app is not None else '';
     if self._config is not None and self._config_app == app_name {
         return self._config;
     }
-    default_config = self.get_default_config();
-    jac_config = self.effective_jac_config();
-
     plugin_name = self.get_plugin_name();
-    plugin_config = jac_config.get_plugin_config(plugin_name);
-    self._config_app = app_name;
-
-    if plugin_config is not None {
-        self._validate_declared_keys(plugin_config);
-        self._config = deep_merge(default_config, plugin_config);
-    } else {
-        self._config = default_config;
+    schema = self.get_config_schema();
+    section = str(schema.get("section") or plugin_name);
+    self._validate_layer(jac_config.get_plugin_config(plugin_name), schema, section);
+    if app is not None {
+        self._validate_layer(
+            app.overlays.get(plugin_name),
+            self.get_app_config_schema(),
+            f"apps.{app_name}.{section}"
+        );
     }
+    self._config_app = app_name;
+    self._config = deep_merge(
+        self.get_default_config(),
+        self.effective_jac_config().get_plugin_config(plugin_name)
+    );
     return self._config;
 }
 
@@ -71,24 +75,25 @@ impl PluginConfigBase.get_config_schema -> dict[str, any] {
     return {};
 }
 
+impl PluginConfigBase.get_app_config_schema -> dict[str, any] {
+    return self.get_config_schema();
+}
+
 impl PluginConfigBase.get_config_strict_env -> str {
     return "";
 }
 
-impl PluginConfigBase._validate_declared_keys(raw: dict[str, any]) -> None {
+impl PluginConfigBase._validate_layer(
+    raw: dict[str, any] | None, schema: dict[str, any], section: str
+) -> None {
     import from jaclang.project.config_schema {
         report_schema_findings,
         validate_against_schema
-    }
-    schema = self.get_config_schema();
-    if not isinstance(schema, dict) or not schema {
-        return;
     }
     options = schema.get("options");
     if not isinstance(options, dict) or not options {
         return;
     }
-    section = str(schema.get("section") or self.get_plugin_name());
     report_schema_findings(
         validate_against_schema(raw, options, section),
         section,
@@ -97,24 +102,18 @@ impl PluginConfigBase._validate_declared_keys(raw: dict[str, any]) -> None {
 }
 
 impl PluginConfigBase.get_jac_config -> JacConfig {
-    if self._jac_config is None {
-        if self.config_file.exists() {
-            config = JacConfig.load(self.config_file);
-
-            import os;
-            profile: str = (
-                os.environ.get("JAC_PROFILE", "").strip()
-                or config.environment.default_profile
-            );
-            config.apply_profile_overlay(profile or None);
-            self._jac_config = config;
-        } else {
-            self._jac_config = JacConfig();
-            self._jac_config.toml_path = self.config_file;
-            self._jac_config.project_root = self.project_dir;
-        }
+    config = get_config_for_path(
+        self.config_file, force_discover=self._jac_config is None
+    )
+        if self.config_file.exists()
+        else None;
+    if config is not self._jac_config {
+        self._config = None;
+        self._jac_config = config;
     }
-    return self._jac_config;
+    return config
+        if config is not None
+        else JacConfig(toml_path=self.config_file, project_root=self.project_dir);
 }
 
 impl PluginConfigBase.get_section(

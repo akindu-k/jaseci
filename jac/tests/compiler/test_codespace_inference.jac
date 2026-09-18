@@ -8,6 +8,7 @@ server signals and closure poison opt modules back out).
 """
 
 import os;
+import re;
 import from tests.support { JAC_ROOT }
 import jaclang;
 import jaclang.compiler.frontend.unitree as uni;
@@ -607,9 +608,13 @@ test "unpullable closure bridges as a wire type instead of pulling" {
         f"declined pull must bridge, not E5082: {[str(e) for e in prog.errors_had]}"
     );
     js = mod.gen.js;
-    assert 'infer_xmod_poison_service' not in js , (
+    # Qualified wire identities include the source module's name; only actual
+    # import statements would pull its Python-dependent implementation client-side.
+    es_imports = re.findall(r"(?m)^\s*import\b[^;]*;", js);
+    assert all('infer_xmod_poison_service' not in stmt for stmt in es_imports) , (
         "unpullable module must not be ES-imported by the client bundle"
     );
+    assert 'class Ticket' in js , "the client must receive a boundary class";
     service = hub_module(prog, "infer_xmod_poison_service.jac");
     assert service is not None , "imported module missing from hub";
     assert stamp_of(service, "Ticket") == 'server' , (
@@ -733,6 +738,25 @@ test "annotation-only use of a bare python import stays silent" {
         f"{[str(e) for e in bare_errs]}"
     );
 }
+
+test "cast-only use of a bare python import stays silent" {
+    import from jaclang.compiler.driver.compile_options { CompileOptions }
+    prog = JacProgram();
+    prog.compile(
+        os.path.join(FIXTURE_DIR, "infer_import_bare_py_cast.jac"),
+        options=CompileOptions(no_cgen=True)
+    );
+    bare_errs = [
+        e
+        for e in prog.errors_had
+        if e.code is not None and e.code.code == 'E5084'
+    ];
+    assert not bare_errs , (
+        f"an `as` cast is erased in ES output just like an annotation and "
+        f"must not fire E5084, got {[str(e) for e in bare_errs]}"
+    );
+}
+
 
 test "server-side use of a bare python import stays silent" {
     import from jaclang.compiler.driver.compile_options { CompileOptions }

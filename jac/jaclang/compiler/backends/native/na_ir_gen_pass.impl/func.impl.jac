@@ -1,7 +1,6 @@
 import from jaclang.compiler.backends.native.abi { classify_foreign_fn }
 import from jaclang.compiler.frontend.constant { OwnershipKind }
 
-
 impl NaIRGenPass._forward_declare_functions(module: uni.Module) -> None {
     for stmt in ModuleFacts.iter_context_stmts(module, CodeContext.NATIVE) {
         self._maybe_declare_ability(stmt);
@@ -58,7 +57,7 @@ impl NaIRGenPass._maybe_declare_ability(nd: uni.ElementStmt) -> None {
     }
     sig = nd.signature;
 
-    _sig_mark = len(self.errors_had);
+    _sig_mark = len(self.ctx.errors_had);
     _saved_sig_kind = self._sig_decl_kind;
     self._sig_decl_kind = "signature type";
 
@@ -124,7 +123,9 @@ impl NaIRGenPass._maybe_declare_ability(nd: uni.ElementStmt) -> None {
             import from jaclang.compiler.frontend.codeinfo { native_safe_sym }
             _def_m = nd.find_parent_of_type(uni.Module);
             if _def_m is not None {
-                _emit_name = f"{name}.__jacp_{native_safe_sym(_def_m.name)}";
+                _emit_name = f"{name}.__jacp_{native_safe_sym(
+                    os.path.realpath(_def_m.source.file_path)
+                )}";
             }
         }
         func = ir.Function(self.llvm_module, fnty, name=_emit_name);
@@ -145,11 +146,11 @@ impl NaIRGenPass._maybe_declare_ability(nd: uni.ElementStmt) -> None {
     self._record_ret_facts(name, sig);
     self.has_native_code = True;
 
-    if len(self.errors_had) > _sig_mark {
+    if len(self.ctx.errors_had) > _sig_mark {
         self.generator_fns.pop(name, None);
         self.decorated_fns.pop(name, None);
 
-        _fd_imported = _fdm is not None and _fdm is not self.ir_in;
+        _fd_imported = _fdm is not None and _fdm is not self.module;
         if self._demote_method_if_unlowerable(
             name, func, _sig_mark, stub_body=not _fd_imported
         )
@@ -178,7 +179,9 @@ impl NaIRGenPass._normalize_type_key(key: str) -> str {
     return key;
 }
 
-impl NaIRGenPass._elem_keys_of_annotation(ann: (uni.UniNode | None)) -> (list | None) {
+impl NaIRGenPass._elem_keys_of_annotation(
+    ann: (uni.UniNode | None)
+) -> (list[str | None] | None) {
     if ann is None {
         return None;
     }
@@ -208,7 +211,7 @@ impl NaIRGenPass._elem_keys_of_annotation(ann: (uni.UniNode | None)) -> (list | 
     if not elems {
         return None;
     }
-    keys: list = [];
+    keys: list[str | None] = [];
     for e in elems {
         while (isinstance(e, uni.BinaryExpr) and getattr(e.op, 'value', '') == "|") {
             e = e.left;
@@ -268,7 +271,7 @@ impl NaIRGenPass._declare_clib_ability(nd: uni.Ability) -> None {
     _decl_params = sig.get_parameters();
 
     is_variadic = sig.varargs is not None;
-    plan: (dict | None) = None;
+    plan: (dict[str, any] | None) = None;
     if _abi_supported {
         _fdecl = self._foreign_fns().get(name);
         if _fdecl is not None {
@@ -371,7 +374,7 @@ impl NaIRGenPass._declare_clib_ability(nd: uni.Ability) -> None {
         return;
     }
 
-    fixed_params: list = [];
+    fixed_params: list[uni.ParamVar] = [];
     for p in sig.get_parameters() {
         if p.is_vararg or p.is_kwargs {
             continue;
@@ -446,7 +449,7 @@ impl NaIRGenPass._codegen_ability(nd: uni.Ability) -> None {
         return;
     }
 
-    _local_mark = len(self.errors_had);
+    _local_mark = len(self.ctx.errors_had);
     state = self._enter_function(func);
     try {
         self._attach_di_subprogram(
@@ -483,7 +486,7 @@ impl NaIRGenPass._codegen_ability(nd: uni.Ability) -> None {
         }
 
         if not self.builder.block.is_terminated {
-            _fc_loc = f"{self.ir_in.loc.mod_path}:{nd.loc.last_line if nd.loc else 0}";
+            _fc_loc = f"{self.module.loc.mod_path}:{nd.loc.last_line if nd.loc else 0}";
 
             self._emit_scope_cleanup(skip_var=None, loc=_fc_loc);
             ret_type = func.return_value.type;
@@ -504,7 +507,7 @@ impl NaIRGenPass._codegen_ability(nd: uni.Ability) -> None {
             sys.stderr.write(f"NA_DEBUG raise {name}\n");
             traceback.print_exc(file=sys.stderr);
         }
-        self.emit(
+        self.ctx.emit(
             E5092,
             node_override=nd,
             kind="function (native emitter error in)",
@@ -527,9 +530,9 @@ impl NaIRGenPass._codegen_ability(nd: uni.Ability) -> None {
     }
 
     _is_pub = nd.access and nd.access.tag.name == Tok.KW_PUB;
-    if _is_pub and self.ir_in?.gen and func.name.isidentifier() {
-        if func.name not in self.ir_in.gen._exported_symbols {
-            self.ir_in.gen._exported_symbols.append(func.name);
+    if _is_pub and self.module?.gen and func.name.isidentifier() {
+        if func.name not in self.module.gen._exported_symbols {
+            self.module.gen._exported_symbols.append(func.name);
         }
     }
 }
@@ -580,7 +583,7 @@ impl NaIRGenPass._codegen_test(nd: uni.Test) -> None {
 
         self.builder.position_at_end(success_bb);
         self.builder.call(self._exc_pop_fn, []);
-        _tc_loc = f"{self.ir_in.loc.mod_path}:{nd.loc.last_line if nd.loc else 0}";
+        _tc_loc = f"{self.module.loc.mod_path}:{nd.loc.last_line if nd.loc else 0}";
         self._emit_scope_cleanup(skip_var=None, loc=_tc_loc);
         self.builder.ret(ir.Constant(i8p, None));
 
@@ -595,7 +598,7 @@ impl NaIRGenPass._codegen_test(nd: uni.Test) -> None {
     } finally {
         self._leave_function(state);
     }
-    desc = nd.description.lit_value if nd.description else "";
+    desc = str(nd.description.lit_value) if nd.description else "";
     self.native_tests.append((test_name, symbol, desc, line));
     self.has_native_code = True;
 
@@ -606,7 +609,7 @@ impl NaIRGenPass._codegen_nested_ability(nd: uni.Ability) -> None {
     name = nd.name_ref.sym_name if nd.name_ref else "unnamed";
     sig = nd.signature;
     if sig is not None and not isinstance(sig, uni.FuncSignature) {
-        self.emit(
+        self.ctx.emit(
             E5092,
             node_override=nd,
             kind="function",
@@ -616,8 +619,8 @@ impl NaIRGenPass._codegen_nested_ability(nd: uni.Ability) -> None {
         return;
     }
 
-    param_types: list = [];
-    param_names: list = [];
+    param_types: list[ir.Type] = [];
+    param_names: list[str] = [];
     sig_params = sig.get_parameters() if isinstance(sig, uni.FuncSignature) else [];
     for (i, p) in enumerate(sig_params) {
         p_name = p.name.value if p?.name and p.name else f"arg{i}";
@@ -639,7 +642,7 @@ impl NaIRGenPass._codegen_nested_ability(nd: uni.Ability) -> None {
         self._predeclare_nested_siblings(nd);
         _pre = self._nested_predecl.get(nd);
     }
-    captures: list[tuple] = [];
+    captures: list[tuple[str, str, ir.Type]] = [];
     if _pre is not None {
         (fn, captures, param_names, ret_type) = _pre;
     } else {
@@ -715,7 +718,12 @@ impl NaIRGenPass._codegen_nested_ability(nd: uni.Ability) -> None {
         }
         for (i, arg) in enumerate(fn.args) {
             if i < len(param_names) {
-                self._bind_function_parameter(param_names[i], arg);
+                self._bind_function_parameter(
+                    param_names[i],
+                    arg,
+                    rebound=i < len(sig_params)
+                        and bool(sig_params[i].name?.sym?.param_rebound)
+                );
                 continue;
             }
             (cap_name, cap_mode, _cap_type) = captures[i - len(param_names)];
@@ -775,17 +783,19 @@ impl NaIRGenPass._predeclare_nested_siblings(nd: uni.Ability) -> None {
     if not _fbody {
         return;
     }
-    sibs: list = [];
+    sibs: list[uni.Ability] = [];
+    sib_names: dict[uni.Ability, str] = {};
     for _st in _fbody {
         if (
             isinstance(_st, uni.Ability)
-            and _st.name_ref
+            and _st.name_ref is not None
             and (_st.signature is None or isinstance(_st.signature, uni.FuncSignature))
             and not self._ability_is_generator(_st)
             and not _st?.type_params
             and _st not in self._nested_predecl
         ) {
             sibs.append(_st);
+            sib_names[_st] = _st.name_ref.sym_name;
         }
     }
     _found_self = False;
@@ -798,14 +808,13 @@ impl NaIRGenPass._predeclare_nested_siblings(nd: uni.Ability) -> None {
     if not _found_self {
         return;
     }
-    _sib_by_name: dict = {};
-    for s in sibs {
-        _sib_by_name[s.name_ref.sym_name] = s;
-    }
-    _cap_order: dict = {};
-    _cap_modes: dict = {};
-    _sib_refs: dict = {};
-    _cap_syms: dict = {};
+    _sib_by_name: dict[str, uni.Ability] = {
+        name: sib for (sib, name) in sib_names.items()
+    };
+    _cap_order: dict[uni.Ability, list[str]] = {};
+    _cap_modes: dict[uni.Ability, dict[str, str]] = {};
+    _sib_refs: dict[uni.Ability, set[str]] = {};
+    _cap_syms: dict[str, uni.Symbol] = {};
     for s in sibs {
         _reb: set = set();
         for _scope in ([s] + s.get_all_sub_nodes(typ=uni.UniScopeNode)) {
@@ -813,8 +822,8 @@ impl NaIRGenPass._predeclare_nested_siblings(nd: uni.Ability) -> None {
                 _reb.add(_rn);
             }
         }
-        _ord: list = [];
-        _md: dict = {};
+        _ord: list[str] = [];
+        _md: dict[str, str] = {};
         for _sym in s.get_enclosing_captures() {
             if _sym.sym_name in _md or _sym.sym_name in _sib_by_name {
                 continue;
@@ -863,11 +872,11 @@ impl NaIRGenPass._predeclare_nested_siblings(nd: uni.Ability) -> None {
         }
     }
     for s in sibs {
-        _sname = s.name_ref.sym_name;
-        _ssig = s.signature;
+        _sname = sib_names[s];
+        _ssig = s.signature if isinstance(s.signature, uni.FuncSignature) else None;
 
         _defer = False;
-        _cap_types: dict = {};
+        _cap_types: dict[str, ir.Type] = {};
         for _cn in _cap_order[s] {
             _slot = self.local_vars.get(_cn);
             if _slot is not None {
@@ -897,8 +906,8 @@ impl NaIRGenPass._predeclare_nested_siblings(nd: uni.Ability) -> None {
         if _defer {
             continue;
         }
-        _ptypes: list = [];
-        _pnames: list = [];
+        _ptypes: list[ir.Type] = [];
+        _pnames: list[str] = [];
         _sparams = _ssig.get_parameters() if _ssig is not None else [];
         for (i, p) in enumerate(_sparams) {
             _pn = p.name.value if p?.name and p.name else f"arg{i}";
@@ -912,7 +921,7 @@ impl NaIRGenPass._predeclare_nested_siblings(nd: uni.Ability) -> None {
         if _ssig is not None and _ssig.return_type is not None {
             _rt = self._resolve_jac_type(_ssig.return_type);
         }
-        _caps: list[tuple] = [];
+        _caps: list[tuple[str, str, ir.Type]] = [];
         for _cn in _cap_order[s] {
             _ct0 = _cap_types.get(_cn);
             if _ct0 is None {
@@ -1001,7 +1010,7 @@ impl NaIRGenPass._codegen_generator(nd: uni.Ability, func: ir.Function) -> None 
 
     elem_type = self._generator_elem_type(nd);
     if elem_type is None {
-        self.emit(
+        self.ctx.emit(
             E5092,
             node_override=nd,
             kind="function",
@@ -1067,7 +1076,7 @@ impl NaIRGenPass._codegen_generator(nd: uni.Ability, func: ir.Function) -> None 
         }
 
         if not self.builder.block.is_terminated {
-            _gd_loc = f"{self.ir_in.loc.mod_path}:{nd.loc.last_line if nd.loc else 0}";
+            _gd_loc = f"{self.module.loc.mod_path}:{nd.loc.last_line if nd.loc else 0}";
             self._emit_scope_cleanup(skip_var=None, loc=_gd_loc);
             _ip_done = self.builder.bitcast(gc.frame_i8, i64p, name="gen.ip.done");
             self.builder.store(ir.Constant(i64, -1), _ip_done);
@@ -1097,12 +1106,18 @@ impl NaIRGenPass._codegen_generator(nd: uni.Ability, func: ir.Function) -> None 
 
         frame_size = (gc.cursor + 7) // 8 * 8;
         frame_slots = list(gc.slots);
+        frame_bindings = {
+            binding
+            for binding in self.local_vars
+            if binding not in self.nogc_no_free_vars
+                and binding not in self.closure_cell_handles
+        };
         cell_inits = list(gc.cell_inits);
     } finally {
         self._leave_function(state);
     }
 
-    drop_fn = self._emit_generator_drop_fn(_sym_base, frame_slots);
+    drop_fn = self._emit_generator_drop_fn(_sym_base, frame_slots, frame_bindings);
 
     state = self._enter_function(func);
     try {
@@ -1136,9 +1151,7 @@ impl NaIRGenPass._codegen_generator(nd: uni.Ability, func: ir.Function) -> None 
                 p_raw, ptype.as_pointer(), name=f"gen.ps.{pname}"
             );
             self.builder.store(arg, p_slot);
-            if isinstance(ptype, ir.PointerType) {
-                self._emit_rc_retain(arg, op="gen_param", loc=name);
-            }
+            self._emit_take_ref(arg, op="gen_param", loc=name);
         }
 
         _ci32 = ir.IntType(32);
@@ -1161,9 +1174,7 @@ impl NaIRGenPass._codegen_generator(nd: uni.Ability, func: ir.Function) -> None 
             if param_index is not None {
                 _parg = func.args[param_index];
                 self.builder.store(_parg, _cvalp);
-                if isinstance(_vt, ir.PointerType) {
-                    self._emit_rc_retain(_parg, op="gen_param", loc=name);
-                }
+                self._emit_take_ref(_parg, op="gen_param", loc=name);
             }
             _ch_raw = self.builder.gep(
                 raw, [ir.Constant(i64, ci.slot_off)], name=f"gen.cellh.{ci.name}"
@@ -1185,7 +1196,9 @@ impl NaIRGenPass._codegen_generator(nd: uni.Ability, func: ir.Function) -> None 
     self.has_native_code = True;
 }
 
-impl NaIRGenPass._emit_generator_drop_fn(name: str, slots: list[tuple]) -> ir.Function {
+impl NaIRGenPass._emit_generator_drop_fn(
+    name: str, slots: list[tuple[str, int, ir.Type]], bindings: set[str]
+) -> ir.Function {
     i8 = ir.IntType(8);
     i8p = i8.as_pointer();
     i64 = ir.IntType(64);
@@ -1197,10 +1210,8 @@ impl NaIRGenPass._emit_generator_drop_fn(name: str, slots: list[tuple]) -> ir.Fu
     state = self._enter_function(fn);
     try {
         for (sname, soff, stype) in slots {
-            if not isinstance(stype, ir.PointerType) {
-                continue;
-            }
-            if isinstance(stype.pointee, ir.FunctionType) {
+            if not self._is_reference_type(stype)
+                or (not isinstance(stype, ir.PointerType) and sname not in bindings) {
                 continue;
             }
             s_raw = self.builder.gep(
@@ -1209,9 +1220,13 @@ impl NaIRGenPass._emit_generator_drop_fn(name: str, slots: list[tuple]) -> ir.Fu
             s_slot = self.builder.bitcast(
                 s_raw, stype.as_pointer(), name=f"drop.s.{sname}"
             );
-            val = self.builder.load(s_slot, name=f"drop.v.{sname}");
-            self._emit_rc_release_typed(val, op="gen_drop", loc=name);
-            self.builder.store(ir.Constant(stype, None), s_slot);
+            if isinstance(stype, ir.PointerType) {
+                val = self.builder.load(s_slot, name=f"drop.v.{sname}");
+                self._emit_rc_release_typed(val, op="gen_drop", loc=name);
+                self.builder.store(ir.Constant(stype, None), s_slot);
+            } else {
+                self._emit_slot_clear(s_slot, op="gen_drop", loc=name);
+            }
         }
         self.builder.ret_void();
     } finally {
@@ -1240,9 +1255,9 @@ impl NaIRGenPass._emit_glob_init_func -> None {
     self.func_symtab["__jac_glob_init"] = func;
     state = self._enter_function(func);
     try {
-        if self?._global_init_nodes and self._global_init_nodes {
+        if self._global_init_nodes {
             self._scan_closure_escapes(
-                self.ir_in, [t[1] for t in self._global_init_nodes]
+                self.module, [t[1] for t in self._global_init_nodes]
             );
         }
 
@@ -1266,7 +1281,7 @@ impl NaIRGenPass._emit_glob_init_func -> None {
         self.builder.ret_void();
         self.builder.position_at_end(_gi_run);
         self.builder.store(ir.Constant(_i8, 1), _gi_done_gv);
-        if self?._global_init_nodes and self._global_init_nodes {
+        if self._global_init_nodes {
             for init_tuple in self._global_init_nodes {
                 var_name = init_tuple[0];
                 init_node = init_tuple[1];
@@ -1303,7 +1318,12 @@ impl NaIRGenPass._emit_glob_init_func -> None {
                 if init_val is not None {
                     global_var = self.global_vars.get(var_name);
                     if global_var is not None {
-                        coerced = self._coerce_type(init_val, var_type);
+                        coerced = self._coerce_container_element(init_val, var_type)
+                            if var_type == self.jacval_type
+                            else self._coerce_type(init_val, var_type);
+                        if not self._is_raw_int_ptr(coerced) {
+                            self._emit_take_ref(coerced, op="glob_init");
+                        }
                         self.builder.store(coerced, global_var);
                     }
                 }
@@ -1331,9 +1351,9 @@ impl NaIRGenPass._apply_static_decorators -> None {
         for dec in reversed(dec_names) {
             d_fn = self.func_symtab.get(dec);
             if d_fn is None or len(d_fn.args) != 1 {
-                self.emit(
+                self.ctx.emit(
                     E5092,
-                    node_override=self.ir_in,
+                    node_override=self.module,
                     kind="decorator",
                     name=dec,
                     help_text="A native decorator must resolve to a module-level native function taking exactly one argument."
@@ -1451,7 +1471,7 @@ impl NaIRGenPass._codegen_entry(nodes: list[uni.ModuleCode]) -> None {
             b_on.branch(_gc_cont);
             self._builder = ir.IRBuilder(_gc_cont);
         }
-        _manifest = self.ir_in.gen.interop_manifest if (self.ir_in?.gen) else None;
+        _manifest = self.module.gen.interop_manifest if (self.module?.gen) else None;
         _all_na_sources = _manifest.native_transitive_sources if _manifest else [];
         _seen_init_mods: set = set();
         for _source_mod in _all_na_sources {
@@ -1560,7 +1580,7 @@ impl NaIRGenPass._codegen_entry(nodes: list[uni.ModuleCode]) -> None {
             _last = nodes[-1];
             self._emit_scope_cleanup(
                 skip_var=None,
-                loc=f"{os.path.basename(self.ir_in.loc.mod_path)}:{_last.loc.last_line
+                loc=f"{os.path.basename(self.module.loc.mod_path)}:{_last.loc.last_line
                     if _last.loc
                     else 0}"
             );

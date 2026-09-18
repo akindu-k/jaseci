@@ -172,7 +172,10 @@ impl NaIRGenPass._emit_exc_raise_helper -> None {
 }
 
 impl NaIRGenPass._emit_runtime_raise(
-    is_error: ir.Value, exc_type_name: str, msg: str
+    is_error: ir.Value,
+    exc_type_name: str,
+    msg: str,
+    release_on_error: list[ir.Value] = []
 ) -> None {
     if not self._slot_lowering_active() and self._exc_raise_fn is None {
         self._declare_exception_runtime();
@@ -187,6 +190,12 @@ impl NaIRGenPass._emit_runtime_raise(
     self.builder.cbranch(is_error, raise_bb, ok_bb);
 
     self.builder.position_at_end(raise_bb);
+
+    for value in release_on_error {
+        if self._is_owned(value) {
+            self._emit_rc_release_simple(value, op="read_error");
+        }
+    }
     exc_type_id = self._get_or_register_exc_type(exc_type_name);
 
     if msg in self._rt_error_msgs {
@@ -270,7 +279,7 @@ impl NaIRGenPass._codegen_raise(nd: uni.RaiseStmt) -> None {
             exc_type_name = self._get_name(nd.cause.target) or "Exception";
             exc_type_id = self._get_or_register_exc_type(exc_type_name);
 
-            _exc_pos_args = [];
+            _exc_pos_args: list[uni.Expr] = [];
             for _p in (nd.cause.params or []) {
                 if not isinstance(_p, uni.KWPair) {
                     _exc_pos_args.append(_p);
@@ -293,7 +302,17 @@ impl NaIRGenPass._codegen_raise(nd: uni.RaiseStmt) -> None {
                 exc_msg = self._codegen_expr(nd.cause.params[0]);
             }
         } else {
-            exc_msg = self._codegen_expr(nd.cause);
+            cause_struct = self._struct_name_of(nd.cause);
+            if cause_struct is not None and cause_struct in self.struct_types {
+                exc_type_name = cause_struct;
+                exc_type_id = self._get_or_register_exc_type(cause_struct);
+                exc_payload = self._codegen_expr(nd.cause);
+                if exc_payload is not None {
+                    self._emit_take_ref(exc_payload, op="raise");
+                }
+            } else {
+                exc_msg = self._codegen_expr(nd.cause);
+            }
         }
     }
 
@@ -572,7 +591,7 @@ impl NaIRGenPass._codegen_try_unwind(
 
 impl NaIRGenPass._slot_lowering_active -> bool {
     return (
-        bool(getattr(self.ir_in.gen, "nogc_enforced", False))
+        bool(getattr(self.module.gen, "nogc_enforced", False))
         or "wasm" in str(self.llvm_module.triple)
     )
         and self._gen_ctx is None;
@@ -671,7 +690,13 @@ impl NaIRGenPass._emit_err_propagate(loc: str = "") -> None {
 }
 
 impl NaIRGenPass._emit_err_check(callee: (uni.Ability | None)) -> None {
-    if callee is None or not self._slot_lowering_active() {
+    if callee is not None {
+        self._emit_pending_error_check();
+    }
+}
+
+impl NaIRGenPass._emit_pending_error_check -> None {
+    if not self._slot_lowering_active() {
         return;
     }
     if self._builder is None or self.builder.block.is_terminated {
@@ -846,7 +871,6 @@ impl NaIRGenPass._codegen_try_slot(nd: uni.TryStmt) -> None {
     self.builder.position_at_end(merge_bb);
 }
 
-
 impl NaIRGenPass._emit_finalizers(loop_depth: int = 0) -> bool {
     saved_finalizers = self._finally_stack;
     saved_handlers = self._slot_try_stack;
@@ -875,7 +899,6 @@ impl NaIRGenPass._emit_finalizers(loop_depth: int = 0) -> bool {
         self._slot_try_stack = saved_handlers;
     }
 }
-
 
 impl NaIRGenPass._push_exception_handler(
     dispatch: ir.Block, body: ir.Block

@@ -14,6 +14,8 @@ import shutil;
 import tempfile;
 import uuid;
 import from pathlib { Path }
+import from unittest.mock { patch }
+import from tests.support { cache_env }
 import from jaclang.compiler.driver.compile_options { CompileOptions }
 import from jaclang.compiler.driver.jir { get_native_cache_dir }
 import from jaclang.compiler.driver.program { JacProgram }
@@ -62,29 +64,6 @@ def _dep_cache_files(tmp: str, dep_stem: str, ext: str) -> list[str] {
     cache_dir = str(get_native_cache_dir(os.path.join(tmp, f"{dep_stem}.jac")));
     return sorted(`glob.`glob(os.path.join(cache_dir, f"{dep_stem}.*.{ext}")));
 }
-
-glob _CACHE_ENV_KEYS: tuple = ("XDG_CACHE_HOME", "HOME", "LOCALAPPDATA");
-
-"""Scope the global cache roots into the test tempdir; return the saved env."""
-def _isolate_cache_env(tmp: str) -> dict {
-    saved: dict = {};
-    for k in _CACHE_ENV_KEYS {
-        saved[k] = os.environ.get(k);
-        os.environ[k] = os.path.join(tmp, "cache-root");
-    }
-    return saved;
-}
-
-def _restore_cache_env(saved: dict) {
-    for (k, v) in saved.items() {
-        if v is None {
-            os.environ.pop(k, None);
-        } else {
-            os.environ[k] = v;
-        }
-    }
-}
-
 
 test "rc debug trace gate is driven by the options object, not env" {
     saved = os.environ.pop("JAC_RC_DEBUG_CODEGEN", None);
@@ -141,29 +120,33 @@ def _rekey_body(tmp: str, dep_stem: str) {
         f"option-B compile errors: {[str(e) for e in prog_b.errors_had]}"
     );
     files_b = _dep_cache_files(tmp, dep_stem, "ir_cache");
-    assert len(files_b) == 1;
-    assert os.path.basename(files_a[0]) != os.path.basename(files_b[0]) , (
-        "option flip reused the same native cache artifact"
+    assert len(files_b) == 2 and files_a[0] in files_b , (
+        "option flip removed another compilation mode's native artifact"
     );
-    metas = _dep_cache_files(tmp, dep_stem, "ir_meta");
-    assert len(metas) == 1;
-    with open(metas[0], "r") as f {
-        meta = json.loads(f.read());
+    import from jaclang.compiler.backends.native.na_compile_pass {
+        native_dep_cache_paths
     }
-    expected_fp = _aot_opts(True).codegen_fingerprint();
-    assert meta.get("options_fingerprint") == expected_fp , (
-        f"meta stamp {meta.get('options_fingerprint')} != {expected_fp}"
+    source = os.path.realpath(os.path.join(tmp, f"{dep_stem}.jac"));
+    for options in (_aot_opts(False), _aot_opts(True)) {
+        (_, metadata) = native_dep_cache_paths(source, options);
+        with open(metadata, "r") as f {
+            meta = json.loads(f.read());
+        }
+        assert meta.get("options_fingerprint") == options.codegen_fingerprint();
+    }
+    modified_before = os.stat(files_a[0]).st_mtime_ns;
+    reused = _compile_main(main_path, False);
+    assert not reused.errors_had , str(reused.errors_had);
+    assert os.stat(files_a[0]).st_mtime_ns == modified_before , (
+        "returning to the first compilation mode rebuilt its cached dependency"
     );
 }
 
 test "flipping a codegen option re-keys the native import cache" {
     dep_stem = "g_optdep_rekey_7871";
     with tempfile.TemporaryDirectory() as tmp {
-        _env = _isolate_cache_env(tmp);
-        try {
+        with patch.dict(os.environ, cache_env(os.path.join(tmp, "cache-root"))) {
             _rekey_body(tmp, dep_stem);
-        } finally {
-            _restore_cache_env(_env);
         }
     }
 }
@@ -205,11 +188,8 @@ def _mixed_body(tmp: str, dep_stem: str) {
 test "a fingerprint-mismatched cached dep is a hard E5027, never linked" {
     dep_stem = "g_optdep_mixed_7871";
     with tempfile.TemporaryDirectory() as tmp {
-        _env = _isolate_cache_env(tmp);
-        try {
+        with patch.dict(os.environ, cache_env(os.path.join(tmp, "cache-root"))) {
             _mixed_body(tmp, dep_stem);
-        } finally {
-            _restore_cache_env(_env);
         }
     }
 }

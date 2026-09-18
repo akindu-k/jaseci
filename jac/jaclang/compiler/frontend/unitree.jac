@@ -2,19 +2,21 @@ import os;
 import type from collections.abc { Sequence }
 import type from jaclang.compiler.frontend.codeinfo { CodeGenTarget }
 import from jaclang.compiler.frontend.srcloc { CodeLocInfo }
+import from jaclang.runtime.constants { EdgeDir }
 import from jaclang.compiler.frontend.constant {
     BUILTIN_CALLABLE_NAMES,
     DELIM_MAP,
     BindingKind,
     CodeContext,
-    EdgeDir,
+    DeleteTargetError,
     ExprCtx,
+    ImmutabilityKind,
     OwnershipKind,
     SymbolAccess,
     SymbolStorage,
     SymbolType
 }
-import from jaclang.compiler.frontend.constant { Constants as Con }
+import from jaclang.runtime.constants { Constants as Con }
 import from jaclang.compiler.frontend.constant { JacSemTokenModifier as SemTokMod }
 import from jaclang.compiler.frontend.constant { JacSemTokenType as SemTokType }
 import from jaclang.compiler.frontend.constant { Tokens as Tok }
@@ -166,20 +168,19 @@ node UniNode {
     def postinit -> None;
     can walk_kids with TreeWalker entry;
 
-    has kid: list[UniNode] { getter; }
     has parent: (UniNode | None) { getter; }
     has gen: CodeGenTarget { getter; setter(value: CodeGenTarget); }
     has _sub_node_tab: dict[(type, list[UniNode])] { getter; }
 
     def _link(kid: Sequence[UniNode], roles: dict[type, any]) -> None;
     def detached_copy -> UniNode;
-    def __deepcopy__(memo: dict) -> UniNode;
+    def __deepcopy__(memo: dict[int, object]) -> UniNode;
     def _assert_thawed -> None;
     def freeze_structure -> None;
     def thaw_structure -> None;
     def structure_thawed -> StructureThaw;
-    def _attach(child: UniNode, role: type[Role]) -> None;
-    def _role_clear(role: type[Role]) -> None;
+    def _attach(child: UniNode, role: type[Edge]) -> None;
+    def _role_clear(role: type[Edge]) -> None;
     def _as_node_list(value: any) -> list[UniNode];
     def _children -> list[UniNode];
     def _role_shaped(role: type[Role], found: list[UniNode]) -> any;
@@ -268,6 +269,7 @@ node Symbol {
         imported: bool postinit,
         semstr: str postinit,
         ownership: OwnershipKind = OwnershipKind.NONE,
+        immutability: ImmutabilityKind = ImmutabilityKind.NONE,
         linear: bool = False,
         is_view: bool = False,
         param_rebound: bool = False,
@@ -657,7 +659,6 @@ node Module(AstDocNode, UniScopeNode) {
         app: (str | None) = None,
         app_root: (str | None) = None,
         app_kind: str = "",
-        owner_app: (str | None) = None,
         ct_resolved: bool = False,
         ct_file_deps: list[str] postinit,
         ct_body_deps: list[str] postinit,
@@ -746,7 +747,9 @@ node TypeParam(AstSymbolNode, UniNode) {
 }
 
 node TypeAlias(ContextAwareNode, AstAccessNode, ElementStmt, AstSymbolNode, UniScopeNode, CodeBlockStmt) {
-    has is_distinct: bool = False;
+    has is_distinct: bool = False,
+        distinct_base: (str | None) = None;
+
     has name: Name { getter; }
     has type_params: list[TypeParam] { getter; }
     has value: Expr { getter; }
@@ -1482,7 +1485,9 @@ node DeleteStmt(CodeBlockStmt) {
     def __repr__ -> str;
     def leaf_targets -> list[Expr];
     static def unwrap_target(target: Expr) -> Expr;
+    static def invalid_target(target: UniNode) -> (DeleteTargetError | None);
     static def is_location(target: Expr) -> bool;
+    static def type_has_graph_member(t: (TypeBase | None)) -> bool;
     static def type_may_hold_graph(t: (TypeBase | None)) -> bool;
     static def target_may_hold_graph(target: Expr) -> bool;
 }
@@ -1879,6 +1884,14 @@ node AtomUnit(Expr) {
     def __repr__ -> str;
 }
 
+node GraphExpr(Expr) {
+    has exprs: Sequence[Expr] { getter; }
+
+    def init(*, exprs: Sequence[Expr], kid: Sequence[UniNode] = []) -> None;
+    def postinit -> None;
+    def __repr__ -> str;
+}
+
 node YieldExpr(Expr) {
     has with_from: bool;
     has expr: (Expr | None) { getter; }
@@ -1989,7 +2002,9 @@ node DisconnectOp(WalkerStmtOnlyNode) {
 }
 
 node ConnectOp(UniNode) {
-    has edge_dir: EdgeDir;
+    has edge_dir: EdgeDir,
+        capture_edges: bool = False;
+
     has conn_type: (Expr | None) { getter; }
     has conn_assign: (AssignCompr | None) { getter; }
 
@@ -2779,4 +2794,4 @@ def is_client_destined(nd: UniNode) -> bool;
 
 def type_only_import_of(nd: NameAtom) -> (ModuleItem | None);
 
-def in_type_position(nd: UniNode) -> bool;
+def in_type_position(nd: UniNode, include_subscripts: bool = True) -> bool;

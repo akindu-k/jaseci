@@ -16,16 +16,8 @@ import from jaclang.compiler.frontend.unitree {
 import from jaclang.compiler.frontend.roles { BodyRole }
 import from jaclang.compiler.frontend.constant { SymbolStorage, Tokens as Tok }
 
-impl RegionInferPass.transform(ir_in: Module) -> Module {
-    self.ir_out = ir_in;
-    ir_in spawn self;
-    out = self.ir_out;
-    assert isinstance(out, Module);
-    return out;
-}
-
 impl RegionInferPass.run_walk with Module entry {
-    self.ir_out = self._run_impl(here);
+    self.module = self._run_impl(here);
 }
 
 impl RegionInferPass._run_impl(ir_in: Module) -> Module {
@@ -90,7 +82,7 @@ impl RegionInferPass._sym_of(nm: NameAtom) -> (Symbol | None) {
 impl RegionInferPass._uses_of(sym: Symbol) -> list[NameAtom] {
     if self._use_index is None {
         index: dict[int, list[NameAtom]] = {};
-        for nm in self.ir_in.get_all_sub_nodes(Name) {
+        for nm in self.module.get_all_sub_nodes(Name) {
             if self._is_def_name(nm) {
                 continue;
             }
@@ -389,7 +381,7 @@ impl RegionInferPass._wrap_in_open(
     }
     loc = first.loc;
     handle_name = Name(
-        orig_src=self.ir_in.loc.orig_src,
+        orig_src=self.module.loc.orig_src,
         name=Tok.NAME,
         value="Region",
         line=loc.first_line,
@@ -406,7 +398,7 @@ impl RegionInferPass._wrap_in_open(
         target=handle_name, params=[], genai_call=None, kid=[handle_name]
     );
     opened = OpenStmt(target=handle_call, body=stmts, kid=[handle_call, *stmts]);
-    kids = list(owner.kid);
+    kids = list([owner->:Kid:->]);
     first_pos = -1;
     last_pos = -1;
     for (i, k) in enumerate(kids) {

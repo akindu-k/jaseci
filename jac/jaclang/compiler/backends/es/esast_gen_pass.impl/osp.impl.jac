@@ -1,10 +1,10 @@
 impl EsastGenPass._osp_model -> OspModel {
-    import from jaclang.runtime.osp_model { get_osp_model }
-    _root = self.ir_in if isinstance(self.ir_in, uni.Module) else self.get_main_mod();
+    import from jaclang.compiler.passes.osp_analysis { get_osp_model }
+    _root = self.module if isinstance(self.module, uni.Module) else self.get_main_mod();
     return get_osp_model(_root);
 }
 
-impl EsastGenPass._osp_ability_info(nd: uni.Ability) -> (dict | None) {
+impl EsastGenPass._osp_ability_info(nd: uni.Ability) -> (dict[str, any] | None) {
     if not isinstance(nd.signature, uni.EventSignature) {
         return None;
     }
@@ -44,7 +44,8 @@ impl EsastGenPass._osp_const_decl(
     );
 }
 
-impl EsastGenPass._emit_osp_slot_method(nd: uni.Ability, osp: dict) -> None {
+impl EsastGenPass._emit_osp_slot_method(nd: uni.Ability, osp: dict[str, any]) -> None {
+    assert nd.name_ref is not None;
     self.needs_jac_runtime = True;
     is_walker = osp["kind"] == "walker";
     other_ref = self.sync_loc(es.Identifier(name="__other"), jac_node=nd);
@@ -153,7 +154,7 @@ impl EsastGenPass._arch_kind_by_name(name: str) -> (str | None) {
     if _local is not None {
         return _local;
     }
-    _mod = self.ir_in if isinstance(self.ir_in, uni.Module) else self.get_main_mod();
+    _mod = self.module if isinstance(self.module, uni.Module) else self.get_main_mod();
     _sym = _mod.lookup(name);
     if _sym is None {
         return None;
@@ -171,8 +172,8 @@ impl EsastGenPass._osp_var_arch -> dict[str, str] {
     bindings: dict[str, str] = {};
     kinds = self._osp_arch_kinds();
     if kinds {
-        scan_root = self.ir_in
-            if isinstance(self.ir_in, uni.Module)
+        scan_root = self.module
+            if isinstance(self.module, uni.Module)
             else self.get_main_mod();
         for asn in scan_root.get_all_sub_nodes(uni.Assignment) {
             if isinstance(asn.value, uni.FuncCall) {
@@ -315,7 +316,7 @@ impl EsastGenPass._build_osp_tags_js -> str {
         );
         lines.append(f"__ospC.osp_register_type({tag}, [{isa_members}]);");
     }
-    import from jaclang.runtime.osp_model { stable_osp_tag }
+    import from jaclang.runtime.osp_tag { stable_osp_tag }
     ge_tag = stable_osp_tag("GenericEdge");
     lines.append(f"__ospGenericEdge.prototype.__tag = {ge_tag};");
     lines.append(f"__ospC.osp_register_type({ge_tag}, []);");
@@ -328,8 +329,8 @@ impl EsastGenPass._build_osp_setup_js -> str {
     arch_kinds = self._osp_arch_kinds();
     tags = _model.tags;
 
-    entry_by_owner: dict[str, list] = {};
-    exit_by_owner: dict[str, list] = {};
+    entry_by_owner: dict[str, list[OspSlot]] = {};
+    exit_by_owner: dict[str, list[OspSlot]] = {};
     for slot in _model.local_slots() {
         bucket = entry_by_owner if slot.is_entry else exit_by_owner;
         if slot.owner not in bucket {
@@ -365,7 +366,7 @@ impl EsastGenPass._build_osp_setup_js -> str {
     return "\n".join(lines);
 }
 
-impl EsastGenPass._osp_slots_js(slots: list, tags: dict) -> str {
+impl EsastGenPass._osp_slots_js(slots: list[OspSlot], tags: dict[str, int]) -> str {
     parts: list[str] = [];
     for slot in slots {
         fn = "(o, x) => o." + slot.ability + "(x)";
@@ -376,7 +377,7 @@ impl EsastGenPass._osp_slots_js(slots: list, tags: dict) -> str {
                 ttag = tags[trig] if (trig in tags) else -1;
                 if ttag < 0 {
                     if self._arch_kind_by_name(trig) in ("node", "edge", "walker") {
-                        import from jaclang.runtime.osp_model { stable_osp_tag }
+                        import from jaclang.runtime.osp_tag { stable_osp_tag }
                         ttag = stable_osp_tag(trig);
                     }
                 }
@@ -506,13 +507,13 @@ impl EsastGenPass._edge_tag_literal(
             _xkind = self._arch_kind_of_type(self._expr_class_type(type_expr));
         }
         if _xkind in ("node", "edge") {
-            import from jaclang.runtime.osp_model { stable_osp_tag }
+            import from jaclang.runtime.osp_tag { stable_osp_tag }
             _tag = stable_osp_tag(_etname);
         }
     }
     if (_tag < 0) and hard {
         import from jaclang.compiler.frontend.diagnostics { E5097 }
-        self.emit(
+        self.ctx.emit(
             E5097,
             node_override=nd,
             kind=f"a graph reference with unresolved archetype '{_etname}'"
@@ -526,7 +527,7 @@ impl EsastGenPass._build_edge_ref(nd: uni.EdgeRefTrailer) -> es.Expression {
     fail = self.sync_loc(es.ArrayExpression(elements=[]), jac_node=nd);
     chain = nd.chain;
     if not chain {
-        self.emit(E5097, node_override=nd, kind="an empty edge reference");
+        self.ctx.emit(E5097, node_override=nd, kind="an empty edge reference");
         return fail;
     }
     self.needs_osp_graph = True;
@@ -545,7 +546,7 @@ impl EsastGenPass._build_edge_ref(nd: uni.EdgeRefTrailer) -> es.Expression {
         _idx = 1;
     }
     if (_idx >= len(chain)) or (not isinstance(chain[_idx], uni.EdgeOpRef)) {
-        self.emit(E5097, node_override=nd, kind="this edge reference shape");
+        self.ctx.emit(E5097, node_override=nd, kind="this edge reference shape");
         return fail;
     }
     cur: (es.Expression | None) = None;
@@ -595,45 +596,51 @@ impl EsastGenPass._build_edge_ref(nd: uni.EdgeRefTrailer) -> es.Expression {
             jac_node=nd
         );
         if _step_filter is not None {
-            pred = self._build_osp_filter_pred(nd, _step_filter);
-            if pred is None {
+            filtered = self._build_osp_filter(nd, result, _step_filter);
+            if filtered is None {
                 return fail;
             }
-            result = self.sync_loc(
-                es.CallExpression(
-                    callee=self.sync_loc(
-                        es.MemberExpression(
-                            object=result,
-                            property=self.sync_loc(
-                                es.Identifier(name='filter'), jac_node=nd
-                            ),
-                            computed=False
-                        ),
-                        jac_node=nd
-                    ),
-                    arguments=[
-                        self.sync_loc(
-                            es.ArrowFunctionExpression(
-                                params=[
-                                    self.sync_loc(es.Identifier(name='x'), jac_node=nd)
-                                ],
-                                body=pred,
-                                expression=True
-                            ),
-                            jac_node=nd
-                        )
-                    ]
-                ),
-                jac_node=nd
-            );
+            result = filtered;
         }
         cur = result;
     }
     if (cur is None) or (_idx != len(chain)) {
-        self.emit(E5097, node_override=nd, kind="this edge reference shape");
+        self.ctx.emit(E5097, node_override=nd, kind="this edge reference shape");
         return fail;
     }
     return cur;
+}
+
+impl EsastGenPass._build_osp_filter(
+    nd: uni.UniNode, target: es.Expression, filt: uni.FilterCompr
+) -> (es.Expression | None) {
+    pred = self._build_osp_filter_pred(nd, filt);
+    if pred is None {
+        return None;
+    }
+    return self.sync_loc(
+        es.CallExpression(
+            callee=self.sync_loc(
+                es.MemberExpression(
+                    object=target,
+                    property=self.sync_loc(es.Identifier(name='filter'), jac_node=nd),
+                    computed=False
+                ),
+                jac_node=nd
+            ),
+            arguments=[
+                self.sync_loc(
+                    es.ArrowFunctionExpression(
+                        params=[self.sync_loc(es.Identifier(name='x'), jac_node=nd)],
+                        body=pred,
+                        expression=True
+                    ),
+                    jac_node=nd
+                )
+            ]
+        ),
+        jac_node=nd
+    );
 }
 
 impl EsastGenPass._build_osp_filter_pred(
@@ -680,6 +687,14 @@ impl EsastGenPass._build_osp_filter_pred(
         );
     }
     for cmp in filt.compares {
+        if not isinstance(cmp, uni.CompareExpr) {
+            self.ctx.emit(
+                E5097,
+                node_override=cmp,
+                kind="a graph filter outside 'name <op> value' form"
+            );
+            return None;
+        }
         _lhs = cmp.left;
         _js_op: (str | None) = None;
         if isinstance(_lhs, uni.Name)
@@ -687,12 +702,13 @@ impl EsastGenPass._build_osp_filter_pred(
             and (len(cmp.rights) == 1) {
             _op_name = cmp.ops[0].name;
             _op_tok = Tok(_op_name) if (_op_name in Tok.__members__) else None;
-            if _op_tok in (Tok.EE, Tok.NE, Tok.LT, Tok.GT, Tok.LTE, Tok.GTE) {
+            if _op_tok is not None
+                and _op_tok in (Tok.EE, Tok.NE, Tok.LT, Tok.GT, Tok.LTE, Tok.GTE) {
                 _js_op = ES_COMPARISON_OPS.get(_op_tok);
             }
         }
         if (_js_op is None) or (not isinstance(_lhs, uni.Name)) {
-            self.emit(
+            self.ctx.emit(
                 E5097,
                 node_override=nd,
                 kind="a graph filter outside 'name <op> value' form"
@@ -791,7 +807,7 @@ impl EsastGenPass._build_osp_graph_call(
         }
     }
     if co.conn_assign is not None {
-        props: list = [];
+        props: list[es.Property] = [];
         for kw in co.conn_assign.assigns {
             if kw.key is None {
                 continue;
@@ -846,7 +862,8 @@ impl EsastGenPass._build_osp_graph_call(
                 tgt,
                 make_edge,
                 self.sync_loc(es.Literal(value=undirected), jac_node=nd),
-                self.sync_loc(es.Literal(value=edge_tag), jac_node=nd)
+                self.sync_loc(es.Literal(value=edge_tag), jac_node=nd),
+                self.sync_loc(es.Literal(value=co.capture_edges), jac_node=nd)
             ]
         ),
         jac_node=nd
@@ -970,7 +987,7 @@ impl EsastGenPass._prepare_spawn_call(
     left_walker = self._resolve_spawn_walker(nd.left, left_expr);
     right_walker = self._resolve_spawn_walker(nd.right, right_expr);
     if (left_walker and right_walker) {
-        self.emit(W5013, node_override=nd);
+        self.ctx.emit(W5013, node_override=nd);
         target = self._resolve_spawn_target(nd.left, left_expr);
         return SpawnCallParts(`walker=right_walker, target=target);
     }
@@ -982,7 +999,7 @@ impl EsastGenPass._prepare_spawn_call(
         target = self._resolve_spawn_target(nd.left, left_expr);
         return SpawnCallParts(`walker=right_walker, target=target);
     }
-    self.emit(E5010, node_override=nd);
+    self.ctx.emit(E5010, node_override=nd);
     return None;
 }
 
@@ -1044,9 +1061,13 @@ impl EsastGenPass._build_spawn_arg_object(
     ordered_fields = collect_field_names(walker_symbol, Tok.KW_WALKER.value);
 
     field_type_map: dict[str, str] = {};
+    type_scope = self.module.loc.mod_path;
     if walker_symbol {
         arch = symbol_owner_archetype(walker_symbol);
         if arch {
+            type_scope = (
+                arch.find_parent_of_type(uni.Module) or self.module
+            ).loc.mod_path;
             for field in arch.get_has_vars() {
                 if field.type_tag and field.type_tag.tag {
                     if isinstance(field.type_tag.tag, uni.Name) {
@@ -1056,8 +1077,8 @@ impl EsastGenPass._build_spawn_arg_object(
             }
         }
     }
-    boundary_types = self.ir_in.gen.interop_manifest.boundary_types
-        if self.ir_in.gen.interop_manifest
+    boundary_types = self.module.gen.interop_manifest.boundary_types_for(type_scope)
+        if self.module.gen.interop_manifest
         else {};
     properties: list[(es.Property | es.SpreadElement)] = [];
     positional_index = 0;
@@ -1109,7 +1130,7 @@ impl EsastGenPass._build_spawn_arg_object(
             if (positional_index < len(ordered_fields))
             else f"arg{positional_index}";
         if (positional_index >= len(ordered_fields)) {
-            self.emit(W5014, node_override=param);
+            self.ctx.emit(W5014, node_override=param);
         }
         positional_index += 1;
         key_expr = self.sync_loc(es.Literal(value=key_name), jac_node=param);

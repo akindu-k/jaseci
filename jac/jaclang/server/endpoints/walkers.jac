@@ -3,7 +3,8 @@ import json;
 import logging;
 import from inspect { isgenerator }
 import from typing { AsyncGenerator, get_type_hints }
-import from jaclang.compiler.frontend.constant { Constants as Con }
+import from jaclang.data.serializer { Serializer }
+import from jaclang.runtime.constants { Constants as Con }
 import from jaclang.runtime.builtin { APIProtocol }
 import from jaclang.server.serving.datatypes { Request, Response, StreamingResponse }
 import from jaclang.server.serving.endpoint {
@@ -76,7 +77,7 @@ def _stream(result: any) -> StreamingResponse {
 }
 
 
-def _failure(result: dict, fallback: str) -> TransportResponse {
+def _failure(result: dict[str, any], fallback: str) -> TransportResponse {
     if result.get('error') == 'User not found' {
         return TransportResponse.fail(
             code='UNAUTHORIZED',
@@ -87,7 +88,6 @@ def _failure(result: dict, fallback: str) -> TransportResponse {
     return TransportResponse.fail(
         code=str(result.get('error_code') or 'EXECUTION_ERROR').upper(),
         message=result.get('error', fallback),
-        details=result.get('traceback') if 'traceback' in result else None,
         meta=Meta(extra={'http_status': int(result.get('http_status') or 500)})
     );
 }
@@ -328,7 +328,10 @@ def function_callback(
         }
         logger.debug(f"function {func_name}: {sorted(kwargs)}");
         result = await server.execution_manager.execute_function(
-            server.get_functions()[func_name], kwargs, caller
+            server.get_functions()[func_name],
+            kwargs,
+            caller,
+            serialize_result=not raw_body
         );
         if isgenerator(result) or isinstance(result, AsyncGenerator) {
             return _stream(result);
@@ -338,14 +341,16 @@ def function_callback(
         }
         if raw_body {
             payload = result.get('result') if isinstance(result, dict) else result;
-            if isinstance(payload, bytes) {
-                body = payload;
+            if isinstance(payload, (bytes, bytearray, memoryview)) {
+                body = bytes(payload);
             } elif isinstance(payload, str) {
                 body = payload.encode('utf-8');
             } elif payload is None {
                 body = b"";
             } else {
-                body = json.dumps(payload).encode('utf-8');
+                body = json.dumps(Serializer.serialize(payload, api_mode=True)).encode(
+                    'utf-8'
+                );
             }
             return Response(content=body, media_type=raw_media);
         }

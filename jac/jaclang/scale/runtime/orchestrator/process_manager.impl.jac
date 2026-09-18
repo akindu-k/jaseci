@@ -222,7 +222,7 @@ impl ServiceProcessManager.start_service(name: str) -> bool {
     try {
         import os;
         import from pathlib { Path }
-        child_env = dict(os.environ);
+        child_env: dict[str, str] = dict(os.environ);
 
         child_env["JAC_SV_SIBLING"] = "1";
         child_env["JAC_SV_NAME"] = name;
@@ -470,6 +470,13 @@ impl ServiceProcessManager.check_all_health -> dict[str, bool] {
                 _report_exit(name, exit_code, "and will not become healthy");
             }
             results[name] = False;
+            continue;
+        }
+
+        if `entry.host_override {
+            `entry.status = ServiceStatus.HEALTHY;
+            self._failure_counts[name] = 0;
+            results[name] = True;
             continue;
         }
 

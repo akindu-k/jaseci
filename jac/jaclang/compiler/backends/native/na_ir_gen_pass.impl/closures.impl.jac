@@ -24,7 +24,7 @@ impl NaIRGenPass._scan_closure_escapes(
     if not body {
         return;
     }
-    direct_names: list = [];
+    direct_names: list[uni.Name] = [];
     for nm in nd.get_all_sub_nodes(typ=uni.Name) {
         if nearest_scope(nm) is nd {
             direct_names.append(nm);
@@ -102,6 +102,19 @@ impl NaIRGenPass._closure_struct_of(val_type: ir.Type) -> (str | None) {
     return None;
 }
 
+impl NaIRGenPass._callable_signature_of(val_type: ir.Type) -> (ir.FunctionType | None) {
+    closure_name = self._closure_struct_of(val_type);
+    if closure_name is not None {
+        (_, signature) = self.closure_sig_registry[closure_name];
+        return ir.FunctionType(signature.return_type, list(signature.args)[:-1]);
+    }
+    if isinstance(val_type, ir.PointerType)
+        and isinstance(val_type.pointee, ir.FunctionType) {
+        return val_type.pointee;
+    }
+    return None;
+}
+
 impl NaIRGenPass._closure_cell_struct(slot_type: ir.Type) -> str {
     key = str(slot_type);
     _existing = self._closure_cell_structs.get(key);
@@ -168,14 +181,16 @@ impl NaIRGenPass._emit_closure_cell(var_name: str, slot_type: ir.Type) -> ir.Val
 }
 
 impl NaIRGenPass._emit_closure_thunk(
-    target_fn: ir.Function, declared_count: int, cap_info: list
+    target_fn: ir.Function,
+    declared_count: int,
+    cap_info: list[tuple[str, str, ir.Type]]
 ) -> ir.Function {
     i8p = ir.IntType(8).as_pointer();
     i32 = ir.IntType(32);
     self._closure_uid += 1;
     env_name = f"JacClosureEnv.{self._closure_uid}";
-    field_names: list = [];
-    field_types: list = [];
+    field_names: list[str] = [];
+    field_types: list[ir.Type] = [];
     for (cname, cmode, hidden_ty) in cap_info {
         _ht: any = hidden_ty;
         slot_ty = _ht.pointee if cmode == "ptr" else _ht;
@@ -226,7 +241,9 @@ impl NaIRGenPass._emit_closure_thunk(
 }
 
 impl NaIRGenPass._emit_closure_pair(
-    target_fn: ir.Function, declared_fnty: ir.FunctionType, cap_info: list
+    target_fn: ir.Function,
+    declared_fnty: ir.FunctionType,
+    cap_info: list[tuple[str, str, ir.Type]]
 ) -> (ir.Value | None) {
     for (cname, _cmode, _ht) in cap_info {
         if cname not in self.closure_cell_handles {
@@ -282,14 +299,14 @@ impl NaIRGenPass._emit_closure_value(
         return None;
     }
     fn: any = cap_entry[0];
-    caps: any = cap_entry[1];
+    caps: list[tuple[str, str]] = cap_entry[1];
     declared_count = len(fn.args) - len(caps);
     if declared_count < 0 {
         return None;
     }
     fnty = fn.function_type;
     declared_fnty = ir.FunctionType(fnty.return_type, list(fnty.args)[:declared_count]);
-    cap_info: list = [];
+    cap_info: list[tuple[str, str, ir.Type]] = [];
     for (i, (cname, cmode)) in enumerate(caps) {
         cap_info.append((cname, cmode, fnty.args[declared_count + i]));
     }
@@ -297,7 +314,7 @@ impl NaIRGenPass._emit_closure_value(
 }
 
 impl NaIRGenPass._emit_closure_escape_error(var_name: str, nd: uni.UniNode) -> None {
-    self.emit(
+    self.ctx.emit(
         E5092,
         node_override=nd,
         kind="expression",
@@ -312,14 +329,14 @@ impl NaIRGenPass._codegen_closure_call(
     (_st, fnty_env) = self.closure_sig_registry[struct_name];
     i32 = ir.IntType(32);
     declared = list(fnty_env.args)[:-1];
-    raw_args: list = [];
+    raw_args: list[ir.Value] = [];
     for p in (nd.params or []) {
         v = self._codegen_expr(p);
         if v is not None {
             raw_args.append(v);
         }
     }
-    coerced: list = [];
+    coerced: list[ir.Value] = [];
     for (i, a) in enumerate(raw_args) {
         if i < len(declared) {
             coerced.append(self._coerce_type(a, declared[i]));

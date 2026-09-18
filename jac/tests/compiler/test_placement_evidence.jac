@@ -12,10 +12,11 @@ import os;
 import shutil;
 import tempfile;
 import from jaclang.compiler.driver.program { JacProgram }
+import from jaclang.compiler.driver.compile_options { CompileOptions }
 
-def _proj(files: dict, pins: str = "") -> str {
+def _proj(files: dict[str, any], pins: str = "") -> str {
     d = tempfile.mkdtemp(prefix="jacplace_");
-    toml = "[project]\nname = \"t\"\nentry-point = \"main.jac\"\n";
+    toml = "[project]\nname = \"t\"\nentry-point = \"main\"\n";
     if pins != "" {
         toml += "\n[placement.pins]\n" + pins + "\n";
     }
@@ -30,6 +31,63 @@ def _proj(files: dict, pins: str = "") -> str {
         }
     }
     return d;
+}
+
+test "authenticated endpoints bridge within their app without placement pins" {
+    for access in ["priv", "protect"] {
+        d = _proj(
+            {
+                "api.jac": "def:"
+                    + access
+                    + " read_value -> int { ::py::\nvalue = 1\n::py::\nreturn 1; }\n",
+                "main.jac": "import from .api { read_value }\n"
+                    + "def:pub app -> JsxElement { return <div>{read_value()}</div>; }\n"
+            }
+        );
+        try {
+            prog = JacProgram();
+            mod = prog.compile(
+                os.path.join(d, "main.jac"), options=CompileOptions(no_ir_cache=True)
+            );
+            assert not prog.errors_had , [str(e) for e in prog.errors_had];
+            assert '__jacCallFunction("read_value"' in mod.gen.js , mod.gen.js;
+            binding = mod.gen.interop_manifest.bindings["read_value"];
+            assert binding.ast_node.access.tag.value == access;
+            provider = JacProgram().compile(
+                os.path.join(d, "api.jac"), options=CompileOptions(no_ir_cache=True)
+            );
+            assert provider.gen.interop_manifest.func_access["read_value"];
+        } finally {
+            shutil.rmtree(d, ignore_errors=True);
+        }
+    }
+}
+
+test "private functions remain unavailable across app boundaries" {
+    d = _proj(
+        {
+            "api.jac": "def:priv read_value -> int { ::py::\nvalue = 1\n::py::\nreturn 1; }\n",
+            "main.jac": "import from .api { read_value }\n"
+                + "def:pub app -> JsxElement { return <div>{read_value()}</div>; }\n"
+        }
+    );
+    try {
+        with open(os.path.join(d, "jac.toml"), "w") as config {
+            config.write(
+                '[project]\nname = "private-boundary"\ndefault-app = "web"\n[apps.web]\nkind = "web-app"\nentry-point = "main"\n[apps.api]\nkind = "service"\nentry-point = "api"\n'
+            );
+        }
+        prog = JacProgram();
+        mod = prog.compile(
+            os.path.join(d, "main.jac"), options=CompileOptions(no_ir_cache=True)
+        );
+        assert any(
+            e.code is not None and e.code.code in ("E5082", "E5106")
+            for e in prog.errors_had
+        ) , ([str(e) for e in prog.errors_had], mod.gen.js);
+    } finally {
+        shutil.rmtree(d, ignore_errors=True);
+    }
 }
 
 test "rootless graph archetypes follow a client pin" {
@@ -129,7 +187,7 @@ test "unpinned rootless archetypes pull into client closures" {
             "main.jac": (
                 "import from .model { Block, make_block }\n"
                 + "def:pub app -> JsxElement {\n"
-                + "    has items: list = [];\n"
+                + "    has items: list[any] = [];\n"
                 + "    <button onClick={lambda { items = items + [make_block(\"x\")]; }}>\n"
                 + "        add\n"
                 + "    </button>;\n"

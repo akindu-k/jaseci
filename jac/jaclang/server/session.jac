@@ -18,7 +18,9 @@ import from jaclang.data.store { AnchorRow, ConnInfo, PgStore, Store, TxnIsolati
 
 glob logger = logging.getLogger(__name__),
      MAX_RETRIES = 5,
+     EDGE_PAGE = 1000,
      SCRATCH_ENV = 'JAC_DB_SCRATCH',
+     SCRATCH_OWNER_ENV = 'JAC_DB_SCRATCH_OWNER',
      RETENTION_ENV = 'JAC_DB_RETENTION_DAYS',
      RO_UNITS_ENV = 'JAC_DB_RO_UNITS',
      RO_WRITER_TTL_ENV = 'JAC_DB_RO_WRITER_TTL_S',
@@ -33,6 +35,9 @@ glob logger = logging.getLogger(__name__),
          'mark_scratch_base',
          'scratch_requested',
          'scratch_lease',
+         'scratch_owner_pid',
+         'own_child_databases',
+         'drop_owned_databases',
          'drop_scratch_database',
          'retention_days_for',
          'runtime_for_base',
@@ -40,6 +45,7 @@ glob logger = logging.getLogger(__name__),
          'unit_writes_recorded',
          'record_unit_writes',
          'SCRATCH_ENV',
+         'SCRATCH_OWNER_ENV',
          'RETENTION_ENV',
          'RO_UNITS_ENV'
      ];
@@ -107,6 +113,9 @@ def takeover_project(base_path: str, target_path: (str | None) = None) -> int;
 def mark_scratch_base(base_path: str) -> None;
 def scratch_requested(base_path: (str | None)) -> bool;
 def scratch_lease(base_path: str) -> ScratchLease;
+def scratch_owner_pid -> int;
+def own_child_databases -> None;
+def drop_owned_databases(data_dir: str = '') -> int;
 def drop_scratch_database -> None;
 def retention_days_for(base_path: (str | None)) -> int;
 def runtime_for_base(base_path: str, target_path: (str | None) = None) -> RuntimeLease;
@@ -155,10 +164,8 @@ obj Session(Memory) {
     def _register_ro_writers -> str;
     def _raise_ro_retry -> None;
     def _drop_snapshot_reads -> None;
-    def _materialize(
-        row: AnchorRow, edge_ids: (list[UUID] | None) = None
-    ) -> (Anchor | None);
-
+    def _materialize(row: AnchorRow) -> (Anchor | None);
+    def _load_edges(nd: NodeAnchor) -> list[EdgeAnchor];
     def _serialize(anchor: Anchor) -> AnchorRow;
     def _evict_uncommitted -> None;
 }

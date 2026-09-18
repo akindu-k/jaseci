@@ -65,6 +65,136 @@ faster together. Total build ranges overlap (3.423–4.193 s baseline,
 3.340–4.145 s new), so the end-to-end figure is a local measurement rather than a
 guaranteed speedup. Both generated executables completed an automatic game.
 
+## Native hash containers
+
+Dictionaries and sets share `backends/native/na_ir_gen_pass.impl/hash_core.impl.jac`
+and `hash_order.impl.jac`. The order allocation contains `capacity` hash-slot
+indices, `capacity` inverse slot-to-position indices, then one extent word.
+Deletion marks its order position as -1 and trims trailing holes. Ordered reads
+compact holes once; insertion also compacts when the order allocation fills.
+Rehashing rebuilds both indices. This makes deletion amortized constant time,
+preserves insertion order, and bounds order storage during repeated mutations.
+
+Dictionary lookup exposes a borrowed value slot: a null slot means the key is
+absent, while a present slot can contain zero or `None`. Native `dict.get()`
+uses this shared lookup to search once and then apply its default-value rules.
+
+`jc_materialize` decodes this private order storage when copying native
+dictionaries. Keep its decoder synchronized with changes to this allocation;
+the container field offsets still come from the backend's ABI metadata.
+The native dictionary scaling, mutation, and materialization tests cover these
+contracts.
+
+## Native edge type values
+
+Graph operations accept edge classes passed as `type[Edge]` or a narrower
+bound. `backends/native/na_ir_gen_pass.impl/edge_types.impl.jac` resolves these
+values using the existing native class-name identity. The shared graph runtime
+in `runtime/osp_graph.jac` registers each edge's tag and default-constructor
+callback. Literal edge classes retain constant-tag lookup; dynamic filters use
+the same subtype matching as literal filters.
+Dynamic connections resolve one descriptor and reuse its tag and constructor;
+the registry lookup also validates that the class is a registered edge type.
+An unbounded class value uses `Edge` as its layout bound; its runtime class
+identity still determines the registered descriptor.
+
+Constructor callbacks use ordinary object construction, including inherited
+defaults, initialization, and region allocation. Types that require arguments
+remain usable for filtering; connecting through their bare class raises an
+error. A factory result of zero signals that construction without arguments
+is unavailable, rather than representing a graph handle. Generated calls
+propagate pending errors even when there is no source declaration for the callee. Predicate fields and edge-ref element types come from the declared class
+bound. Keep these semantics in the type evaluator, native lowering, and graph
+runtime so callers such as `UniNode` can use ordinary graph operations without
+maintaining lists of concrete edge classes.
+
+Factory callbacks use the ordinary Jac closure representation, including when
+stored in object fields. Callable parameters, fields, and calls must agree on
+that representation; raw function pointers belong to the explicit C interop
+path. Graph references restore their inferred list element type at the native
+runtime boundary, so indexing, iteration, and spreads share normal list lowering.
+
+`Kid` declares `UniNode` endpoints in `frontend/roles.jac`. This keeps direct
+child traversals typed without a wrapper property. Its endpoint annotations
+use a type-only import; the seed compiler erases these
+annotations, so they introduce no runtime import cycle.
+
+## Delete-target validation
+
+`DeleteStmt.invalid_target` classifies one target's invalid syntax using
+`DeleteTargetError`: literals, empty target lists, null-safe access, and
+unpacking. It unwraps parentheses; callers recurse into nonempty target lists.
+AST validation owns the corresponding diagnostic messages. Type checking uses
+the same classification to skip the graph-destruction check on invalid syntax,
+while continuing to check valid value targets. For example, `del *ints()` gets
+an unpacking error, while `del ints()` gets a graph-type error when `ints()`
+returns `list[int]`. Improving expression inference must not introduce a second,
+dependent diagnostic for an already-invalid delete target.
+
+## Packaged interfaces and compilation lifetimes
+
+Precompilation requests an analysis interface through the dependency registry
+before generating bytecode through the existing pipeline. Packaging explicitly
+initializes the existing interface codec: the separate bootstrap finalization
+process does not otherwise load it during symbol-only compilation. The registry's
+non-importing readiness check remains safe during compiler bootstrapping.
+The precompiler also activates the existing stub catalog before sealing
+symbol-only selfhost units, so cross-references to conditional stub classes
+resolve through the same authority used by application analysis.
+Payload assembly builds this catalog from staged sources before precompilation
+and bootstrap finalization. Its recursion guard belongs only to catalog
+construction; interface encoding must be able to open the completed catalog.
+Sealing preserves the interface, dependency hashes,
+diagnostic profiles, and placement facts, including for bootstrap modules
+whose executable bytecode is produced by jac0. A bytecode-only cache is
+upgraded through `IfaceRegistry` instead of introducing a second analyzer.
+Normal code generation keeps its existing interface policy.
+Bytecode loads establish their own compilation request, including when a
+type check lazily loads compiler code. The caller's analysis and full-tree
+requirements resume after the bytecode load and do not force interface
+encoding into that executable build.
+An application's analysis request also does not implicitly publish interfaces
+for symbol-only selfhost dependencies covered by the compiler fingerprint.
+Their types remain available on demand; packaging requests the interface
+product explicitly through the same registry. Other bundled libraries keep
+their dependency interfaces because their sources are outside that fingerprint.
+Interface preparation, replay, and persistence share one source eligibility
+rule. Typed Python packages and type stubs remain content-fingerprinted
+dependencies; explicitly requesting an interface does not force their lazy
+imports into a recursively encoded package closure.
+Loading a dependency-validated interface also seeds the registry's encoding
+memo. A consumer that needs the source tree can still run its requested
+passes without re-encoding that unchanged interface and its dependency closure.
+Include bindings own local declaration nodes and retain the original symbol's
+lazy provider. Already-local symbols keep their existing bindings: copying
+them during a self-include would append to the overload list being traversed.
+Foreign declarations are never rebound. Interface
+encoding takes an alias category from its resolved definition, keeping hashes
+stable when later imports refine that definition.
+
+Interface paths are encoded relative to their source module before hashing.
+JIR's `SEC_PATH_ROOT` records the local base directory; sealed packages store
+only its relative location inside the package. The dependency, interface,
+diagnostic, and placement readers relocate path fields to the installed root
+without changing interface hashes or literal text. Identical staged packages
+therefore produce identical artifacts. Reused bytes
+keep their path mapping through local cache writes and subsequent packaging. Diagnostic
+profile and dependency checks still govern reuse. Dependencies outside the
+package retain their existing validation and source fallback.
+
+Per-unit release keeps parsed stub trees while a compilation uses them.
+The runtime graph driver indexes anchors with non-owning handles, including
+inside an execution context. Node and edge references keep reachable topology
+alive, and the persistence store owns stored anchors. When the last owner
+releases a component, weak-handle callbacks retire its kernel rows and recycle
+its handles. Closing a context also retires its region, even for graph objects
+still held by callers. Handle metadata uses a slotted weak reference with a
+shared callback, avoiding a closure and captured cells for every anchor.
+At a completed compilation boundary, `release_compile_state` releases both
+source and stub roots. Activating the stub catalog also retires the private
+selfhost bootstrap closure before application compilation starts; it never
+changes the stub lens of an active application compilation.
+
 ## Rules
 
 **Backends consume facts, they do not compute them.** Types are read from

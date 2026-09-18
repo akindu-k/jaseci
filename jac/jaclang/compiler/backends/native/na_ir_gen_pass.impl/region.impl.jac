@@ -10,7 +10,7 @@ impl NaIRGenPass._register_region_kernel -> None {
         return;
     }
     self._region_kernel_registered = True;
-    _manifest = self.ir_in.gen.interop_manifest if (self.ir_in?.gen) else None;
+    _manifest = self.module.gen.interop_manifest if (self.module?.gen) else None;
     if (_manifest is not None)
         and ("region_kernel" not in _manifest.native_transitive_sources) {
         _manifest.native_transitive_sources.append("region_kernel");
@@ -263,10 +263,7 @@ impl NaIRGenPass._emit_struct_drop_fields_fn(type_name: str) -> (ir.Function | N
         (fname, ftype)
         for (fname, ftype) in field_types.items()
         if fname not in foreign_fields
-            and (
-                isinstance(ftype, ir.PointerType)
-                or self._opt_ptr_payload_of(ftype) is not None
-            )
+            and self._is_reference_type(ftype)
             and field_indices.get(fname, -1) >= 0
     ];
     if _hook is None and not _ptr_fields {
@@ -325,13 +322,7 @@ impl NaIRGenPass._emit_struct_drop_fields_fn(type_name: str) -> (ir.Function | N
             continue;
         }
         fv = b.load(fp, name=f"dropf.{fname}");
-        _fv_ty = fv.type;
-        if isinstance(_fv_ty, ir.PointerType)
-            and isinstance(_fv_ty.pointee, ir.FunctionType) {
-            continue;
-        }
-        fv_i8 = b.bitcast(fv, i8p, name=f"dropf.{fname}.i8");
-        b.call(self.rc_release_simple_fn, [fv_i8]);
+        self._emit_elem_release(b, ftype, fv);
     }
     b.branch(done_bb);
 

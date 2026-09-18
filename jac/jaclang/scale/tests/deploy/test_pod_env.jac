@@ -4,10 +4,10 @@ import unittest.mock as mock;
 import from pathlib { Path }
 import from jaclang.scale.deploy.target.kubernetes.manifest_builder {
     ManifestBuilder,
-    GATEWAY_NAME,
     CONFIG_REVISION_ANNOTATION,
     with_config_revision
 }
+import from jaclang.scale.runtime.context.util { GATEWAY_NAME }
 import from jaclang.scale.deploy.target.kubernetes.kubernetes_config {
     KubernetesConfig
 }
@@ -19,7 +19,8 @@ import from kubernetes.client.exceptions { ApiException }
 import from types { SimpleNamespace }
 import from jaclang.scale.deploy.target.kubernetes.runtime_resolver {
     build_k8s_registry,
-    K8sRuntimeServiceResolver
+    K8sRuntimeServiceResolver,
+    resolve_peer_route
 }
 import from jaclang.scale.runtime.gateway.service_registry {
     ServiceRegistry,
@@ -27,6 +28,12 @@ import from jaclang.scale.runtime.gateway.service_registry {
 }
 import from jaclang.server.sv_client { peer_url_env_key }
 import from jaclang.scale.runtime.fleet { FLEET_ENV, fleet_of }
+import from jaclang.scale.config.config_loader { reset_scale_config }
+import from jaclang.scale.deploy.target.kubernetes.target { KubernetesTarget }
+import from jaclang.scale.deploy.target.kubernetes.database_provisioner {
+    DatabaseProvisioner
+}
+import jaclang.scale.injector.binary as binary_mod;
 
 
 glob _K8S_E2E_FIXTURE: Path = Path(__file__).parents[1] / "fixtures" / "k8s_e2e",
@@ -268,7 +275,7 @@ def _entrypoint_run(
         broken.write_text("#!/bin/sh\nexit 1\n");
         broken.chmod(0o755);
     }
-    run_env = dict(os.environ);
+    run_env: dict[str, str] = dict(os.environ);
     run_env["PATH"] = f"{bin_dir}{os.pathsep}{run_env.get('PATH', '')}";
     run_env.pop("JAC_SV_FILE", None);
     run_env.update(env);
@@ -543,6 +550,129 @@ test "a routed service with no module fails manifest generation, dry run include
 }
 
 
+test "a shipped jac.toml value the pods cannot resolve stops the deploy before provisioning, dry run included" {
+    import tempfile;
+    host_only = (
+        "[scale.kubernetes]\n"
+        "image_registry = \"${ECR_REGISTRY}\"\n"
+        "service_account_name = \"${K8S_SERVICE_ACCOUNT_NAME}\"\n"
+        "[scale.sso.github]\npublic_link = \"${GITHUB_PUBLIC_LINK}\"\n"
+        "[[scale.gateway.shared_volumes]]\nname = \"${SHARED_DATA_PVC}\"\n"
+    );
+    pod_supplied = (
+        "[plugins.demo]\napp = \"${K8S_APP_NAME}\"\nkey = \"${DEMO_API_KEY}\"\n"
+        "region = \"${DEMO_REGION:-us-east-1}\"\nscript = \"sh -c 'echo ${1}'\"\n"
+        "database = \"${JAC_DB_URL}\"\n"
+    );
+    cases = [
+        (
+            "host-only values",
+            {"jac.toml": host_only},
+            [
+                "jac.toml: scale.kubernetes.image_registry: Environment variable ECR_REGISTRY is not set (every pod)",
+                "jac.toml: scale.kubernetes.service_account_name: Environment variable K8S_SERVICE_ACCOUNT_NAME is not set (every pod)",
+                "jac.toml: scale.sso.github.public_link: Environment variable GITHUB_PUBLIC_LINK is not set (every pod)",
+                "jac.toml: scale.gateway.shared_volumes[0].name: Environment variable SHARED_DATA_PVC is not set (every pod)"
+            ]
+        ),
+        ("values the pod env supplies", {"jac.toml": pod_supplied}, []),
+        (
+            "a nested app project",
+            {"lib/jac.toml": "[plugins.demo]\nroot = \"${LIB_ONLY}\"\n"},
+            [
+                "lib/jac.toml: plugins.demo.root: Environment variable LIB_ONLY is not set (svc)"
+            ]
+        ),
+        (
+            "the active profile overlay and jac.local.toml",
+            {
+                "jac.toml": "[environment]\ndefault_profile = \"prod\"\n",
+                "jac.prod.toml": "[plugins.demo]\nprod = \"${PROD_ONLY}\"\n",
+                "jac.local.toml": "[plugins.demo]\nlocal = \"${LOCAL_ONLY}\"\n"
+            },
+            [
+                "jac.prod.toml: plugins.demo.prod: Environment variable PROD_ONLY is not set (every pod)",
+                "jac.local.toml: plugins.demo.local: Environment variable LOCAL_ONLY is not set (every pod)"
+            ]
+        ),
+        (
+            "an inactive profile overlay",
+            {"jac.staging.toml": "[plugins.demo]\nstaging = \"${STAGING_ONLY}\"\n"},
+            []
+        )
+    ];
+    host_env = {
+        "ECR_REGISTRY": "123.dkr.ecr.example.com",
+        "K8S_SERVICE_ACCOUNT_NAME": "deployer",
+        "GITHUB_PUBLIC_LINK": "https://example.com",
+        "SHARED_DATA_PVC": "shared-data",
+        "LIB_ONLY": "host-value",
+        "PROD_ONLY": "host-value",
+        "LOCAL_ONLY": "host-value",
+        "STAGING_ONLY": "host-value"
+    };
+    for (label, tomls, expected) in cases {
+        with tempfile.TemporaryDirectory() as tmp {
+            project = _routed_project(tmp, ["lib/svc.jac", "main.jac"]);
+            for (rel, extra) in tomls.items() {
+                path = Path(project) / rel;
+                header = "";
+                if path.exists() {
+                    header = path.read_text();
+                } elif path.name == "jac.toml" {
+                    header = "[project]\nname = \"lib\"\n";
+                }
+                path.write_text(header + extra);
+            }
+            k8s_config = KubernetesConfig(
+                app_name="jac-shop", namespace="ns", bundle_storage_class="efs-sc"
+            );
+            fleet = fleet_of(
+                {"svc": "/svc"}, root_app="main", files={"svc": "./lib/svc.jac"}
+            );
+            app_config = AppConfig(code_folder=project, app_name="jac-shop");
+            builder = ManifestBuilder(
+                k8s_config=k8s_config,
+                project_dir=project,
+                secrets={"DEMO_API_KEY": "sk-test"},
+                fleet=fleet,
+                dry_run=True
+            );
+            target = KubernetesTarget(
+                config=k8s_config, secrets={"DEMO_API_KEY": "sk-test"}, fleet=fleet
+            );
+            caught = "";
+            with mock.patch.dict(os.environ, host_env) {
+                try {
+                    builder.generate_manifests(app_config, "img");
+                } except ValueError as e {
+                    caught = str(e);
+                }
+            }
+            with mock.patch.dict(os.environ, host_env), mock.patch.object(
+                target, "_load_cluster_config"
+            ), mock.patch.object(
+                binary_mod, "deploy_generation_refusal", return_value=""
+            ), mock.patch.object(
+                binary_mod, "preflight_pod_runtime", return_value="0.0.0"
+            ), mock.patch.object(binary_mod, "node_arch", return_value="x86_64"), mock.patch.object(
+                DatabaseProvisioner,
+                "provision",
+                side_effect=RuntimeError("provisioned")
+            ) {
+                deployed = target.deploy(app_config).message;
+            }
+            assert bool(caught) == bool(expected) , f"{label}: {caught!r}";
+            assert ("provisioned" in deployed) != bool(expected) , f"{label}: {deployed}";
+            for fragment in expected {
+                assert fragment in caught , f"{label}: {caught}";
+                assert fragment in deployed , f"{label}: {deployed}";
+            }
+        }
+    }
+}
+
+
 test "user env cannot point a pod at an arbitrary service file" {
     cfg = KubernetesConfig(app_name="jac-shop", namespace="ns");
     builder = ManifestBuilder(k8s_config=cfg);
@@ -552,6 +682,88 @@ test "user env cannot point a pod at an arbitrary service file" {
     values: dict[str, str] = {e["name"]: e["value"] for e in env};
     assert values["JAC_SV_NAME"] == "orders";
     assert "JAC_SV_FILE" not in values;
+}
+
+
+test "build_env bakes a direct peer URL only for peers that are not HTTP-activated" {
+    # A baked JAC_APP_<PEER>_URL would let sv_client.peer_url_from_env's
+    # env-var override (runtime_resolver.jac::resolve_peer_route) win over
+    # the interceptor route on every call, sending traffic straight at a
+    # Service with no live endpoints instead of through the KEDA HTTP
+    # interceptor that can wake it.
+    activated = {
+        "worker": {
+            "http_activation": {
+                "enabled": True,
+                "target_port": 8000,
+                "concurrency_target": 1,
+                "rules": [{"hosts": ["worker.ns.local"]}]
+            }
+        }
+    };
+    for (label, overrides, baked) in [
+        ("HTTP-activated peer", activated, False),
+        ("plain peer", {}, True)
+    ] {
+        builder = ManifestBuilder(
+            k8s_config=KubernetesConfig(app_name="jac-shop", namespace="ns"),
+            fleet=fleet_of(
+                {"worker": "/worker"},
+                root_app="app",
+                root_file="app.jac",
+                overrides=overrides
+            )
+        );
+        env = {e["name"]: e["value"] for e in builder._build_env("app", {})};
+        assert ("JAC_APP_WORKER_URL" in env) == baked , f"{label}: {env}";
+    }
+}
+
+
+test "resolve_peer_route warns once per service, then again after it recovers and fails again" {
+    # resolve_peer_route runs per fleet member on every sv-to-sv call and
+    # every get_sv_service_routes() lookup, so an unreachable or malformed
+    # scale config used to warn on every single one of those, per service.
+    import jaclang.scale.deploy.target.kubernetes.runtime_resolver as resolver_mod;
+    import jaclang.scale.config.config_loader as config_loader_mod;
+
+    original_warning = resolver_mod.logger.warning;
+    original_get_scale_config = config_loader_mod.get_scale_config;
+    warn_calls: list = [];
+
+    def failing_config(project_dir: object = None) -> object {
+        raise RuntimeError("config unreachable");
+    }
+
+    def healthy_config(project_dir: object = None) -> object {
+        return SimpleNamespace(
+            get_kubernetes_config=lambda { {}},
+            get_app_scale_config=lambda (app_name: str) { {}}
+        );
+    }
+
+    resolver_mod._config_load_warned.discard("k9_warn_once_svc");
+    setattr(
+        resolver_mod.logger, "warning", lambda (msg: str) { warn_calls.append(msg); }
+    );
+
+    try {
+        for (label, loader, expected) in [
+            ("three failing calls warn once", failing_config, 1),
+            ("a recovered call stays quiet", healthy_config, 1),
+            ("failing again after recovery warns again", failing_config, 2)
+        ] {
+            setattr(config_loader_mod, "get_scale_config", loader);
+            for _ in range(3) {
+                resolve_peer_route("k9_warn_once_svc", "ns", 8000);
+            }
+            assert len(warn_calls) == expected , label;
+        }
+    } finally {
+        setattr(config_loader_mod, "get_scale_config", original_get_scale_config);
+        setattr(resolver_mod.logger, "warning", original_warning);
+        resolver_mod._config_load_warned.discard("k9_warn_once_svc");
+    }
 }
 
 
@@ -598,6 +810,7 @@ def _peer_env_restore(saved: dict[str, str | None]) {
             os.environ[key] = value;
         }
     }
+    reset_scale_config();
 }
 
 
@@ -606,6 +819,10 @@ def _peer_env_isolate {
         os.environ.pop(peer_url_env_key(name), None);
     }
     os.environ["POD_NAMESPACE"] = _PEER_NS;
+    # build_k8s_registry now consults scale config (for http_activation
+    # awareness); reset so no earlier test's cached, possibly
+    # activation-enabled config leaks into these naming-convention checks.
+    reset_scale_config();
 }
 
 
@@ -782,7 +999,7 @@ test "url_for derives when no override is set" {
 # rollout, and a successful looking deploy: exactly the bug this fixes.
 
 obj _FakeSecrets {
-    has created: list = [],
+    has created: list[str] = [],
         version: str = "77";
 
     def create_namespaced_secret(namespace: str, body: any) -> any {
@@ -833,7 +1050,7 @@ test "an unusable revision is reported rather than silently skipped" {
 # would leave the suite green while every real redeploy failed on the missing
 # revision.
 obj _FakeSecretsExisting(_FakeSecrets) {
-    has replaced: list = [];
+    has replaced: list[str] = [];
 
     def create_namespaced_secret(namespace: str, body: any) -> any {
         raise ApiException(status=409);

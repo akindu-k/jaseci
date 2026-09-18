@@ -733,6 +733,18 @@ test "while else" {
     assert "Completed" in lines[2];
 }
 
+test "for else" {
+    output = run_jac(os.path.join(FIXTURES, "for_else.jac"));
+    lines = output.split("\n");
+    assert "Sum:  1006" in lines[0];
+    assert "Done" in lines[1];
+}
+
+test "break in loop else stays in its owning loop" {
+    output = run_jac(os.path.join(FIXTURES, "loop_else_break.jac"));
+    assert output.strip() == "1444";
+}
+
 test "forever loop" {
     output = run_jac(os.path.join(FIXTURES, "forever_loop.jac"));
     lines = output.split("\n");
@@ -1061,4 +1073,10 @@ test "as cast binds tighter than comparison" {
 test "deep walker chain does not hit recursion limit" {
     output = run_jac(os.path.join(FIXTURES, "deep_walker_chain.jac"));
     assert "1500" in output , f"Walker should visit all 1500 nodes: {output}";
+}
+
+
+test "plain walkers execute async abilities in sync and async callers" {
+    output = run_jac(os.path.join(FIXTURES, "inferred_async_walker.jac"));
+    assert "async abilities completed" in output;
 }

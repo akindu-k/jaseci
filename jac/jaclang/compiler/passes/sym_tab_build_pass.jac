@@ -1,4 +1,7 @@
 import from jaclang.compiler.frontend.unitree {
+    Module,
+    TreeWalker,
+    UniNode,
     Ability,
     ArchHas,
     Archetype,
@@ -26,7 +29,6 @@ import from jaclang.compiler.frontend.unitree {
     LambdaExpr,
     ListCompr,
     MatchCase,
-    Module,
     ModuleItem,
     ModulePath,
     Name,
@@ -35,13 +37,13 @@ import from jaclang.compiler.frontend.unitree {
     SemDef,
     SetCompr,
     SwitchCase,
+    Symbol,
     Test,
     Token,
     TryStmt,
     TypeAlias,
     TypeParam,
     TypedCtxBlock,
-    UniNode,
     UniScopeNode,
     WhileStmt,
     WithStmt,
@@ -51,8 +53,9 @@ import from jaclang.compiler.frontend.unitree {
     record_cross_scope_rebind,
     rebind_or_def_insert
 }
+import from jaclang.compiler.passes.context { CompileContext }
 import from jaclang.compiler.frontend.constant { SymbolAccess }
-import from jaclang.compiler.passes.uni_pass { UniPass }
+
 import from jaclang.compiler.frontend.diagnostics { E0064, E0077 }
 
 glob TEST_ASSERT_METHOD_NAMES: tuple[str, ...] = (
@@ -99,11 +102,20 @@ glob TEST_ASSERT_METHOD_NAMES: tuple[str, ...] = (
          'assertWarnsRegex'
      );
 
-walker SymTabBuildPass(UniPass) {
-    static has PROVIDES: tuple = ('SymOf', 'Defines', 'InScope', 'ScopeChild');
-    has cur_sym_tab: list[UniScopeNode] = [];
+walker SymTabBuildPass(TreeWalker) {
+    can enter_walk with UniNode entry {
+        self.ctx.enter_node(here);
+    }
 
-    def before_pass -> None;
+    can exit_walk with UniNode exit {
+        self.ctx.exit_node(here);
+    }
+
+    has ctx: CompileContext,
+        module: Module,
+        cur_sym_tab: list[UniScopeNode] = [];
+
+    can prepare with entry;
     def push_scope_and_link(key_node: UniScopeNode) -> None;
     def pop_scope -> UniScopeNode;
 
@@ -120,6 +132,7 @@ walker SymTabBuildPass(UniPass) {
     can exit_binary_expr with BinaryExpr exit;
     can enter_test with Test entry;
     can exit_test with Test exit;
+    def _import_absorbed_symbol(scope: UniScopeNode, symbol: Symbol) -> None;
     def _exit_import_absorb(nd: Import) -> None;
     can exit_import with Import exit;
     def import_binding_scope(nd: AstSymbolNode) -> UniScopeNode;

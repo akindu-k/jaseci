@@ -1,9 +1,23 @@
+import from jaclang.compiler.frontend.roles { Kid }
+import from jaclang.compiler.frontend.unitree { TreeWalker }
+import from jaclang.compiler.passes.context { CompileContext }
 import jaclang.compiler.frontend.unitree as uni;
-import from jaclang.compiler.passes { UniPass }
-import from jaclang.compiler.frontend.constant { OwnershipKind, is_mut_kind }
-import from jaclang.compiler.frontend.roles { BodyRole }
 
-walker UnparsePass(UniPass) {
+import from jaclang.compiler.frontend.constant { OwnershipKind, is_mut_kind }
+import from jaclang.compiler.frontend.roles { BodyRole, Role }
+
+walker UnparsePass(TreeWalker) {
+    can enter_walk with uni.UniNode entry {
+        self.ctx.enter_node(here);
+    }
+
+    can exit_walk with uni.UniNode exit {
+        self.ctx.exit_node(here);
+    }
+
+    has ctx: CompileContext,
+        module: uni.Module;
+
     def _comma_sep(nodes: Sequence[uni.UniNode]) -> str;
     can unparse_prepare_exit with uni.UniNode exit;
     can unparse_default_exit with uni.UniNode exit;
@@ -89,6 +103,7 @@ walker UnparsePass(UniPass) {
     can exit_dict_compr with uni.DictCompr exit;
     can exit_atom_trailer with uni.AtomTrailer exit;
     can exit_atom_unit with uni.AtomUnit exit;
+    can exit_graph_expr with uni.GraphExpr exit;
     can exit_yield_expr with uni.YieldExpr exit;
     can exit_func_call with uni.FuncCall exit;
     can exit_index_slice with uni.IndexSlice exit;
@@ -129,7 +144,7 @@ def unparse_node(nd: uni.UniNode) -> str {
     if isinstance(nd, uni.Token) {
         return nd.value;
     }
-    _kids = list(nd.kid);
+    _kids = list([nd->:Kid:->]);
     if not _kids {
         _v = nd?.value;
         if isinstance(_v, str) {
@@ -146,7 +161,7 @@ def unparse_module(mod: uni.Module, requires_format: bool = True) -> str {
 
     own_path = mod.loc.mod_path;
     saved_body = mod.body;
-    saved_kid = mod.kid;
+    saved_kid = [mod->:Kid:->];
     head_kid = [
         k
         for k in saved_kid
@@ -167,12 +182,12 @@ def unparse_module(mod: uni.Module, requires_format: bool = True) -> str {
             mod.set_kids(nodes=head_kid or [uni.EmptyToken()]);
         }
         try {
-            import from jaclang.compiler.driver.pass_driver { run_pass }
-            run_pass(NormalizePass, mod, JacProgram());
+            import from jaclang.compiler.driver.pipeline { run_utility, UtilityProduct }
+            run_utility(UtilityProduct.NORMALIZE, mod, JacProgram());
             if requires_format {
                 return format_module(mod);
             }
-            run_pass(UnparsePass, mod, JacProgram());
+            run_utility(UtilityProduct.UNPARSE, mod, JacProgram());
             return mod.gen.jac;
         } finally {
             if filtered {

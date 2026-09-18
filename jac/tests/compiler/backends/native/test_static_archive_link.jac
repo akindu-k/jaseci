@@ -16,6 +16,9 @@ unresolved libc import and the loader would abort, so a clean run proves the
 merge. Together the file covers the archive-merge path on both object formats.
 """
 
+import from tests.support { jac_command }
+import from jaclang.compiler.backends.native.entry_points { inject_main }
+
 import os;
 import from jaclang.compiler.driver.compile_options {
     push_native_target,
@@ -31,11 +34,7 @@ import from jaclang.compiler.driver.compile_options { CompileOptions }
 import from jaclang.compiler.backends.native.macho_linker { MachOLinker }
 import from jaclang.compiler.backends.native.elf_linker { ElfLinker }
 import from jaclang.compiler.backends.native.linker_common { select_ar_members }
-import from jaclang.cli.commands.native_build {
-    _inject_entry_elf_static,
-    _collect_musl_static,
-    _musl_lib_dir
-}
+import from jaclang.cli.commands.native_build { _collect_musl_static, _musl_lib_dir }
 import jaclang.compiler.backends.native.llvm.binding as llvm;
 
 glob FIXTURES = str(Path(__file__).resolve().parent / "fixtures");
@@ -98,14 +97,15 @@ def _inject_macho(ir_txt: str) -> str {
 `main` and `exit`, unlike Mach-O where dyld provides the entry stub."""
 def _inject_elf(ir_txt: str) -> str {
     # Static musl entry (crt1.o supplies `_start`); see test_exec_link.
-    return _inject_entry_elf_static(ir_txt);
+    return inject_main(ir_txt);
 }
 
 
 """Locate a bundled archive by name from any pbs build, or None."""
 def _find_bundled(libname: str) -> (str | None) {
     jac_dir = Path(__file__).resolve().parents[4];
-    hits = list(jac_dir.`glob(f".pbs-build/*/python/build/lib/{libname}"));
+    hits = sorted(jac_dir.`glob(f".python-build/*/*/python/build/lib/{libname}"));
+    hits += sorted(jac_dir.`glob(f".python-build/*/python/build/lib/{libname}"));
     return str(hits[0]) if hits else None;
 }
 
@@ -201,7 +201,7 @@ test "nacompile CLI: `import from lzma` static-links the floor, no dylib dep (#6
     d = tempfile.mkdtemp();
     out = os.path.join(d, "crc32_cli");
     comp = subprocess.run(
-        [sys.executable, "-m", "jaclang", "build", "--native", fixture, "-o", out],
+        jac_command("build", "--native", fixture, "-o", out),
         capture_output=True,
         text=True,
         timeout=180
@@ -240,7 +240,9 @@ def _emit_pic_object(ir_txt: str, triple: str) -> bytes {
 """Link a shared ELF .so from a main object plus archive members and return
 (image bytes, {symbol: vaddr}) for byte-level inspection on any host. In the
 ElfLinker shared layout BASE_VADDR is 0, so every vaddr is also a file offset."""
-def _link_elf_shared(main_ir: str, member_irs: list[str], triple: str) -> tuple {
+def _link_elf_shared(
+    main_ir: str, member_irs: list[str], triple: str
+) -> tuple[any, ...] {
     d = tempfile.mkdtemp();
     out = os.path.join(d, "libt.so");
     prev = os.environ.get("JAC_SYMMAP", None);
@@ -267,7 +269,7 @@ def _link_elf_shared(main_ir: str, member_irs: list[str], triple: str) -> tuple 
     }
     assert ok , "ElfLinker.link(shared) returned False";
     raw = Path(out).read_bytes();
-    symmap: dict = {};
+    symmap: dict[str, int] = {};
     for line in Path(out + ".symmap").read_text().splitlines() {
         (n, v) = line.rsplit(" ", 1);
         symmap[n] = int(v, 16);
@@ -277,16 +279,16 @@ def _link_elf_shared(main_ir: str, member_irs: list[str], triple: str) -> tuple 
 
 
 """Parse an ELF image's section headers into {name: (file_off, size)}."""
-def _elf_section_map(raw: bytes) -> dict {
+def _elf_section_map(raw: bytes) -> dict[str, any] {
     e_shoff = struct.unpack_from("<Q", raw, 40)[0];
     (e_shentsize, e_shnum, e_shstrndx) = struct.unpack_from("<HHH", raw, 58);
-    hdrs: list = [];
+    hdrs: list[any] = [];
     for i in range(e_shnum) {
         hdrs.append(struct.unpack_from("<IIQQQQIIQQ", raw, e_shoff + i * e_shentsize));
     }
     shstr = hdrs[e_shstrndx];
     sdata = raw[shstr[4]:shstr[4] + shstr[5]];
-    smap: dict = {};
+    smap: dict[str, any] = {};
     for h in hdrs {
         end = sdata.index(b"\x00", h[0]);
         smap[sdata[h[0]:end].decode()] = (h[4], h[5]);
@@ -376,7 +378,7 @@ test "ELF: RELA addends survive into RELATIVE dynamic relocs" {
     smap = _elf_section_map(raw);
     assert ".rela.dyn" in smap , f"no .rela.dyn emitted: {smap.keys()}";
     (rd_off, rd_size) = smap[".rela.dyn"];
-    rels: list = [];
+    rels: list[any] = [];
     for i in range(rd_size // 24) {
         rels.append(struct.unpack_from("<QQq", raw, rd_off + i * 24));
     }

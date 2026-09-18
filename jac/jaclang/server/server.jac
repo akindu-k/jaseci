@@ -72,15 +72,24 @@ obj ExecutionManager {
         metrics: any = None;
 
     async def execute_function(
-        func: Callable[(..., any)], args: dict[(str, any)], username: str
+        func: Callable[(..., any)],
+        args: dict[(str, any)],
+        username: str,
+        serialize_result: bool = True
     ) -> dict[str, JsonValue] | Generator | AsyncGenerator;
 
     async def execute_function_sync(
-        func: Callable[(..., any)], args: dict[(str, any)], username: str
+        func: Callable[(..., any)],
+        args: dict[(str, any)],
+        username: str,
+        serialize_result: bool = True
     ) -> dict[str, JsonValue] | Generator | AsyncGenerator;
 
     async def execute_function_async(
-        func: Callable[(..., any)], args: dict[(str, any)], username: str
+        func: Callable[(..., any)],
+        args: dict[(str, any)],
+        username: str,
+        serialize_result: bool = True
     ) -> dict[str, JsonValue] | Generator | AsyncGenerator;
 
     async def spawn_walker(
@@ -100,7 +109,7 @@ obj ExecutionManager {
     ) -> list[JsonValue] | Generator | AsyncGenerator;
 
     async def _finalize_call_response(
-        call_state: CallState, result: any
+        call_state: CallState, result: any, serialize_result: bool = True
     ) -> dict[str, JsonValue] | Generator | AsyncGenerator;
 }
 
@@ -116,7 +125,7 @@ obj ModuleIntrospector {
         _bundle: any = None,
         _bundle_error: (str | None) = None,
         _bundle_epoch: int = 0,
-        _bundle_builder: any postinit,
+        _bundle_builder: any = None,
         _bundle_lock: threading.Lock postinit,
         _function_access: dict[(str, bool)] = {},
         _walker_access: dict[(str, bool)] = {},
@@ -130,12 +139,13 @@ obj ModuleIntrospector {
     def _load_manifest -> None;
     def _extract_access_levels -> None;
     def _collect_cross_boundary_endpoints -> None;
-    def _register_sealed_bindings(sm: dict[str, any], img_root: str) -> None;
+    def _register_prepared_bindings(sm: dict[str, any], img_root: str) -> None;
     def _collect_functions -> dict[str, Callable[(..., any)]];
     def _collect_walkers -> dict[str, type[WalkerArchetype]];
     def _check_module_freshness -> None;
     def get_functions -> dict[str, Callable[(..., any)]];
     def get_walkers -> dict[str, type[WalkerArchetype]];
+    def find_target(name: str) -> any;
     def get_client_functions -> dict[str, Callable[(..., any)]];
     def resolve_root_app(configured: str = "") -> str;
     def introspect_callable(func: Callable[(..., any)]) -> dict[str, any];
@@ -188,7 +198,8 @@ obj JacAPIServer(EndpointHost) {
             protocol: APIProtocol = APIProtocol.HTTP,
             broadcast: bool = False,
             produces: str = "",
-            envelope: bool = True;
+            envelope: bool = True,
+            scheme: str = "";
     }
 
     def postinit -> None;
@@ -211,11 +222,13 @@ obj JacAPIServer(EndpointHost) {
 
     def get_functions -> dict[str, Callable[(..., any)]];
     def get_walkers -> dict[str, type[WalkerArchetype]];
+    def find_target(name: str) -> any;
     def print_endpoint_docs -> None;
     def _ensure_sv_siblings -> None;
     def _ensure_client_bundle -> None;
     def _ensure_internal_users -> None;
     def _register_scheduled_tasks -> None;
+    def _scheduled_targets -> list[tuple[str, any, bool]];
     def _validate_or_raise -> None;
     def _prepare_to_serve(dev: bool, no_client: bool) -> ServeSettings;
     def start(

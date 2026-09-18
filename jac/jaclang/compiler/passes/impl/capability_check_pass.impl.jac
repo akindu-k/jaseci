@@ -94,7 +94,6 @@ glob JS_GLOBALS: dict[str, str] = {
          "context."
      );
 
-
 impl classify_native_import(item: UniNode) -> tuple[((str | None), bool)] {
     import from jaclang.compiler.frontend.codeinfo { native_erased_import_names }
     mod_name: (str | None) = None;
@@ -176,12 +175,8 @@ impl base_expr_is_erased(base: UniNode) -> bool {
     return isinstance(_tail, Name) and _tail.value in NATIVE_ERASED_BASES;
 }
 
-impl name_in_type_position(name_nd: UniNode) -> bool {
-    if name_nd.find_parent_of_type(SubTag) is not None {
-        return True;
-    }
-    sig = name_nd.find_parent_of_type(FuncSignature);
-    if sig is not None and node_within(name_nd, sig.return_type) {
+impl name_erased_natively(name_nd: UniNode) -> bool {
+    if in_type_position(name_nd, include_subscripts=False) {
         return True;
     }
     for _decl in [
@@ -255,7 +250,6 @@ impl call_has_kwargs_sink(call: FuncCall) -> bool {
     return owner.signature.kwargs is not None;
 }
 
-
 impl native_capability_violations(
     mod: Module
 ) -> list[tuple[(UniNode, str, str, (str | None))]] {
@@ -283,7 +277,7 @@ impl native_capability_violations(
             if _nm.find_parent_of_type(Import) is not None {
                 continue;
             }
-            if name_in_type_position(_nm) {
+            if name_erased_natively(_nm) {
                 _type_used.add(_nm.value);
             } else {
                 _runtime_used.add(_nm.value);
@@ -650,7 +644,7 @@ impl native_capability_violations(
                     continue;
                 }
             }
-            for k in nd.kid {
+            for k in [nd->:Kid:->] {
                 work.append(k);
             }
         }
@@ -737,10 +731,6 @@ impl partition_native_capability_violations(
     return (_fatal, _demotable, );
 }
 
-impl NativeCapabilityCheckPass.postinit -> None {
-    super.postinit();
-}
-
 impl NativeCapabilityCheckPass._run_impl(ir_in: Module) -> Module {
     (_fatal_viols, _demotable) = partition_native_capability_violations(
         native_capability_violations(ir_in)
@@ -752,9 +742,9 @@ impl NativeCapabilityCheckPass._run_impl(ir_in: Module) -> Module {
         }
         for (_vnode, _vkind, _vname, _vhelp) in _report {
             if _vhelp is None {
-                self.emit(E5090, node_override=_vnode, kind=_vkind, name=_vname);
+                self.ctx.emit(E5090, node_override=_vnode, kind=_vkind, name=_vname);
             } else {
-                self.emit(
+                self.ctx.emit(
                     E5090,
                     node_override=_vnode,
                     kind=_vkind,
@@ -768,23 +758,14 @@ impl NativeCapabilityCheckPass._run_impl(ir_in: Module) -> Module {
     return ir_in;
 }
 
-impl ClientCapabilityCheckPass.postinit -> None {
-    super.postinit();
-}
-
 impl ClientCapabilityCheckPass._run_impl(ir_in: Module) -> Module {
     if not ir_in.client_viols_reported {
         for (_vnode, _vkind) in client_capability_violations(ir_in) {
-            self.emit(E5096, node_override=_vnode, kind=_vkind);
+            self.ctx.emit(E5096, node_override=_vnode, kind=_vkind);
         }
         ir_in.client_viols_reported = True;
     }
     return ir_in;
-}
-
-
-impl PortabilityWarnPass.postinit -> None {
-    super.postinit();
 }
 
 impl PortabilityWarnPass._run_impl(ir_in: Module) -> Module {
@@ -811,7 +792,7 @@ impl PortabilityWarnPass._check_js_globals(mod: Module) -> None {
             continue;
         }
         if name_nd.value in JS_GLOBALS {
-            self.emit(
+            self.ctx.emit(
                 W6001,
                 node_override=name_nd,
                 name=name_nd.value,
@@ -847,7 +828,7 @@ impl PortabilityWarnPass._check_js_methods(mod: Module) -> None {
         if method_name == "find" and not self._find_call_is_js_style(parent) {
             continue;
         }
-        self.emit(
+        self.ctx.emit(
             W6002,
             node_override=trailer.right,
             method=method_name,
@@ -894,7 +875,7 @@ impl PortabilityWarnPass._check_js_keywords(mod: Module) -> None {
             continue;
         }
         if name_nd.value in JS_KEYWORDS {
-            self.emit(
+            self.ctx.emit(
                 W6003,
                 node_override=name_nd,
                 name=name_nd.value,
@@ -925,7 +906,7 @@ impl PortabilityWarnPass._check_js_properties(mod: Module) -> None {
         parent = trailer.parent;
         is_call = isinstance(parent, FuncCall) and parent.target is trailer;
         if not is_call {
-            self.emit(
+            self.ctx.emit(
                 W6004,
                 node_override=trailer.right,
                 prop=prop_name,
@@ -935,38 +916,14 @@ impl PortabilityWarnPass._check_js_properties(mod: Module) -> None {
     }
 }
 
-impl PortabilityWarnPass.transform(ir_in: Module) -> Module {
-    self.ir_out = ir_in;
-    ir_in spawn self;
-    out = self.ir_out;
-    assert isinstance(out, Module);
-    return out;
-}
-
 impl PortabilityWarnPass.run_walk with Module entry {
-    self.ir_out = self._run_impl(here);
-}
-
-impl NativeCapabilityCheckPass.transform(ir_in: Module) -> Module {
-    self.ir_out = ir_in;
-    ir_in spawn self;
-    out = self.ir_out;
-    assert isinstance(out, Module);
-    return out;
+    self.module = self._run_impl(here);
 }
 
 impl NativeCapabilityCheckPass.run_walk with Module entry {
-    self.ir_out = self._run_impl(here);
-}
-
-impl ClientCapabilityCheckPass.transform(ir_in: Module) -> Module {
-    self.ir_out = ir_in;
-    ir_in spawn self;
-    out = self.ir_out;
-    assert isinstance(out, Module);
-    return out;
+    self.module = self._run_impl(here);
 }
 
 impl ClientCapabilityCheckPass.run_walk with Module entry {
-    self.ir_out = self._run_impl(here);
+    self.module = self._run_impl(here);
 }
