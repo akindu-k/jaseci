@@ -103,7 +103,7 @@ test "an app_name still carrying ${...} never reaches the URL" {
     prev_var = os.environ.pop("JAC_SVCURL_NONEXISTENT", None);
     prev_set = os.environ.get("JAC_SVCURL_SET");
     os.environ["JAC_SVCURL_SET"] = "svcurl";
-    # An unset name fails the config load; ${VAR:+alt} is not an env var
+    # An unset name keeps its ${...} text; ${VAR:+alt} is not an env var
     # reference at all, so it survives interpolation verbatim.
     cases = ["${JAC_SVCURL_NONEXISTENT}", "${JAC_SVCURL_SET:+alt}"];
     try {

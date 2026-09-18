@@ -1,9 +1,10 @@
 import os;
 import sys;
 import from jaclang.cli.command { Arg, ArgKind, CommandSpec, arg_consumes_value }
-import from jaclang.cli.config_errors { exit_on_config_error }
 
 def _discover_project_config(profile: str | None = None) {
+    import from jaclang.project.tomlio { MalformedJacTomlError }
+
     try {
         import from jaclang.project.config { get_config }
         import from jaclang.project.pyvenv { add_venv_to_path }
@@ -12,9 +13,27 @@ def _discover_project_config(profile: str | None = None) {
         if config is not None {
             add_venv_to_path(config);
         }
+    } except MalformedJacTomlError as exc {
+        _exit_on_malformed_jac_toml(exc);
     } except ValueError as exc {
-        exit_on_config_error(exc);
+        _exit_on_invalid_jac_toml(exc);
     } except Exception {}
+}
+
+def _exit_on_invalid_jac_toml(exc: any) {
+    import from jaclang.cli.console { console }
+
+    console.error(f"jac.toml is invalid: {exc}");
+    sys.`exit(2);
+}
+
+def _exit_on_malformed_jac_toml(exc: any) {
+    import from jaclang.cli.console { console }
+
+    console.error(
+        f"jac.toml is malformed: {exc.original}", hint=f"File: {exc.file_path}"
+    );
+    sys.`exit(2);
 }
 
 impl split_remainder_argv(
@@ -91,11 +110,7 @@ def _apply_profile(meta: CommandSpec, args_dict: dict[str, any]) {
         import from jaclang.project.config { get_config }
 
         profile = args_dict.pop('profile', None) or None;
-        try {
-            config = get_config(profile=profile);
-        } except ValueError as exc {
-            exit_on_config_error(exc);
-        }
+        config = get_config(profile=profile);
         if config is None {
             return;
         }

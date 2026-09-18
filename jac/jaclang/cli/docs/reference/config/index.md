@@ -927,13 +927,21 @@ base_url = "${BASE_URL:?Base URL is required}"      # Required with error
 
 | Syntax | Description |
 |--------|-------------|
-| `${VAR}` | Use variable (error if not set) |
+| `${VAR}` | Use variable (reported if not set) |
 | `${VAR:-default}` | Use default if not set |
 | `${VAR:?error}` | Custom error if not set |
 
-Interpolation happens when the config loads, so every command that reads `jac.toml` needs the variable set, not just the command that consumes the value. Use `${VAR:-default}` for values that only some commands need, such as deploy-time settings you do not want to export before running `jac check`. Errors name the setting that needs the variable, for example `scale.kubernetes.namespace: Environment variable K8S_NAMESPACE is not set`.
+An unset variable never stops a command that does not use the value. Each command decides for itself:
 
-This applies to inline `[environments.<name>]` sections too: they live in `jac.toml`, so their variables are resolved on every command even when that profile is never activated. A separate `jac.<profile>.toml` file is only read when the profile is active, so it is the better home for variables that only one profile needs.
+| Command | `${VAR}` not set | `${VAR:?error}` not set |
+|---|---|---|
+| `jac check`, `jac fmt`, `jac build` and other tooling | silent | silent |
+| `jac run`, including `--serve` | warning | error |
+| `jac scale deploy`, for `[scale.secrets]` and `[scale.kubernetes]` | error | error |
+
+`jac run` leaves `[scale.secrets]` and `[scale.kubernetes]` alone, since only the deploy reads them. The deploy reads the project `.env` before it resolves them, so a value kept there counts as set. Errors and warnings name the setting that needs the variable, for example `scale.kubernetes.namespace: Environment variable K8S_NAMESPACE is required: set K8S_NAMESPACE`.
+
+An unset value keeps its `${...}` text. Variables in an inline `[environments.<name>]` table only count when that profile is active.
 
 Only a `${...}` holding a variable name is resolved. Other shell expansions are left exactly as written, so a `[scripts]` command keeps its positionals and a value such as `${#ARR[@]}` reaches the shell intact:
 

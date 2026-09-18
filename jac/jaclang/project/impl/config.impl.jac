@@ -21,14 +21,84 @@ impl interpolate_env_vars(value: str, environ: dict[str, str] | None = None) -> 
         if operator == ":-" {
             return operand;
         } elif operator == ":?" {
-            raise ValueError(f"Environment variable {var_name} is required: {operand}");
+            raise UnresolvedEnvVar(
+                var_name,
+                True,
+                f"Environment variable {var_name} is required: {operand}"
+            );
         }
         if not var_name.isidentifier() {
             return `match.group(0);
         }
-        raise ValueError(f"Environment variable {var_name} is not set");
+        raise UnresolvedEnvVar(
+            var_name, False, f"Environment variable {var_name} is not set"
+        );
     }
     return re.sub(pattern, replace_env_var, value);
+}
+
+impl resolve_env_refs(
+    data: any, environ: dict[str, str] | None = None, path: str = ""
+) -> tuple[any, list[UnresolvedRef]] {
+    refs: list[UnresolvedRef] = [];
+    def walk(item: any, at: str) -> any {
+        if isinstance(item, str) {
+            try {
+                return interpolate_env_vars(item, environ);
+            } except UnresolvedEnvVar as e {
+                refs.append(
+                    UnresolvedRef(
+                        path=at,
+                        var=e.var,
+                        required=e.required,
+                        message=str(e),
+                        raw=item
+                    )
+                );
+                return item;
+            }
+        } elif isinstance(item, dict) {
+            return {k: walk(v, _child_config_path(at, k)) for (k, v) in item.items()};
+        } elif isinstance(item, list) {
+            return [walk(v, f"{at}[{i}]") for (i, v) in enumerate(item)];
+        }
+        return item;
+    }
+    return (walk(data, path), refs);
+}
+
+impl report_env_findings(
+    refs: list[UnresolvedRef], context: str, strict: bool, hint: str = ""
+) -> None {
+    if not refs {
+        return;
+    }
+    message = "\n".join(
+        [f"{context}:"]
+            + [f"  {ref.path}: {ref.message}" for ref in refs]
+            + ([hint] if hint else [])
+    );
+    if strict {
+        raise ValueError(message);
+    }
+    import from jaclang.cli.console { console }
+    console.warning(message);
+}
+
+impl UnresolvedRef.deploy_setting -> tuple[str, str] {
+    parts = self.path.split(".");
+    if parts[0] in ("apps", "environments") {
+        parts = parts[2:];
+    }
+    if parts and parts[0] == "plugins" {
+        parts = parts[1:];
+    }
+    if len(parts) < 3
+        or parts[0] != "scale"
+        or parts[1] not in ("secrets", "kubernetes") {
+        return ("", "");
+    }
+    return (parts[1], ".".join(parts[2:]));
 }
 
 impl find_project_root(start: Path | None = None) -> tuple[Path, Path] | None {
@@ -153,6 +223,7 @@ impl JacConfig.apply_profile(
             self.apply_profile(parent_name, _visited=_visited);
         }
     }
+    self._record_unresolved(profile, _profile_refs(self.unresolved, profile_name));
 
     section_map = self._section_map();
     for (section, obj) in section_map.items() {
@@ -249,9 +320,29 @@ impl JacConfig.merge_apps_table(apps_table: dict[str, any]) -> None {
     merged = _deep_merge(copy.deepcopy(base), copy.deepcopy(apps_table));
     self._base_data["apps"] = merged;
     self._raw_data["apps"] = copy.deepcopy(merged);
-    self.apps = parse_apps(
-        self._base_data.get("project", {}), _interpolate_recursive(merged)
-    );
+    (resolved, refs) = resolve_env_refs(merged, path="apps");
+    self._record_unresolved(merged, refs, "apps");
+    self.apps = parse_apps(self._base_data.get("project", {}), resolved);
+}
+
+impl JacConfig.live_unresolved -> list[UnresolvedRef] {
+    return [
+        ref
+        for ref in self.unresolved
+        if not ref.path.startswith(("apps.", "environments."))
+    ];
+}
+
+impl JacConfig._record_unresolved(
+    layer: any, refs: list[UnresolvedRef], prefix: str = ""
+) -> None {
+    redefined = set(_leaf_paths(layer, prefix));
+    self.unresolved = [
+        ref
+        for ref in self.unresolved
+        if ref.path not in redefined
+    ]
+        + refs;
 }
 
 impl JacConfig.apply_profile_overlay(profile_name: str | None = None) -> None {
@@ -276,8 +367,9 @@ impl JacConfig.merge_from_toml_file(toml_path: Path) -> None {
     if not toml_path.exists() {
         return;
     }
-    data: dict[str, any] = read_toml_with_encoding(str(toml_path));
-    data = _interpolate_recursive(data);
+    raw: dict[str, any] = read_toml_with_encoding(str(toml_path));
+    (data, refs) = resolve_env_refs(raw);
+    self._record_unresolved(raw, refs);
     section_map = self._section_map();
     for (section, obj) in section_map.items() {
         if section in data {
@@ -1037,8 +1129,9 @@ impl _parse_toml_data(
 ) -> JacConfig {
     import copy;
     raw = data;
-    data = _interpolate_recursive(raw);
+    (data, refs) = resolve_env_refs(raw);
     config = JacConfig();
+    config.unresolved = refs;
     config._raw_data = raw;
     config._base_data = copy.deepcopy(raw);
     if toml_path {
@@ -1359,28 +1452,36 @@ impl _parse_toml_data(
     return config;
 }
 
-impl _interpolate_recursive(`obj: any, path: str = "") -> any {
-    if isinstance(`obj, str) {
-        try {
-            return interpolate_env_vars(`obj);
-        } except ValueError as e {
-            if not path {
-                raise;
-            }
-            raise ValueError(f"{path}: {e}") from e;
-        }
-    } elif isinstance(`obj, dict) {
-        return {
-            k: _interpolate_recursive(v, _child_config_path(path, k))
-            for (k, v) in `obj.items()
-        };
-    } elif isinstance(`obj, list) {
+impl _profile_refs(
+    refs: list[UnresolvedRef], profile_name: str
+) -> list[UnresolvedRef] {
+    prefix = f"environments.{profile_name}.";
+    return [
+        UnresolvedRef(
+            path=ref.path.removeprefix(prefix),
+            var=ref.var,
+            required=ref.required,
+            message=ref.message,
+            raw=ref.raw
+        )
+        for ref in refs
+        if ref.path.startswith(prefix)
+    ];
+}
+
+impl _leaf_paths(item: any, path: str) -> list[str] {
+    if isinstance(item, dict) {
         return [
-            _interpolate_recursive(item, f"{path}[{i}]")
-            for (i, item) in enumerate(`obj)
+            leaf for (k, v) in item.items()
+            for leaf in _leaf_paths(v, _child_config_path(path, k))
+        ];
+    } elif isinstance(item, list) {
+        return [
+            leaf for (i, v) in enumerate(item)
+            for leaf in _leaf_paths(v, f"{path}[{i}]")
         ];
     }
-    return `obj;
+    return [path];
 }
 
 impl _child_config_path(parent: str, key: str) -> str {

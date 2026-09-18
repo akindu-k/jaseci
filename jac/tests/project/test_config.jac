@@ -44,20 +44,14 @@ def make_temp_project(temp_dir: Path) -> Path {
     return project_dir;
 }
 
-"""Load a secret value through jac.toml, optionally via a profile overlay."""
-def _load_secret_value(tmpdir: Path, value: str, through_overlay: bool) -> None {
-    section = f"[scale.secrets]\nSOME_API_KEY = \"{value}\"\n";
-    if through_overlay {
-        project_dir = make_temp_project(tmpdir);
-        config = JacConfig.load(project_dir / "jac.toml");
-        overlay_path = project_dir / "jac.prod.toml";
-        overlay_path.write_text(section);
-        config.merge_from_toml_file(overlay_path);
-        return;
+"""Resolve a project built from *files*, returning its unresolved refs."""
+def _unresolved_refs(tmpdir: Path, files: dict[str, str], profile: str) -> list[any] {
+    for (name, text) in files.items() {
+        (tmpdir / name).write_text(text);
     }
-    toml_path = tmpdir / "jac.toml";
-    toml_path.write_text("[project]\nname = \"test-project\"\n\n" + section);
-    JacConfig.load(toml_path);
+    config = JacConfig.resolve(start_path=tmpdir, profile=profile);
+    assert config is not None;
+    return config.live_unresolved();
 }
 
 """Write base, prod, and local TOML files into project_dir."""
@@ -186,37 +180,60 @@ test "interpolate non string passthrough" {
     assert interpolate_env_vars(_as_any(None)) is None;
 }
 
-test "config load rejects unset environment variables" {
+test "config load records unset environment variables instead of failing" {
     config_mod._config = None;
     var_name = "JAC_TEST_ENV_MISSING";
+    base = "[project]\nname = \"test-project\"\n\n";
+    bare = f"[scale.secrets]\nSOME_API_KEY = \"${{{var_name}}}\"\n";
+    required = f"[scale.secrets]\nSOME_API_KEY = \"${{{var_name}:?set it}}\"\n";
+    literal = "[scale.secrets]\nSOME_API_KEY = \"sk-literal\"\n";
+    inline = f"[environments.prod.scale.secrets]\nSOME_API_KEY = \"${{{var_name}}}\"\n";
     setting = "scale.secrets.SOME_API_KEY";
     cases = [
-        (f"${{{var_name}}}", False, [setting, "JAC_TEST_ENV_MISSING is not set"]),
+        ("bare in jac.toml", {"jac.toml": base + bare}, "", [(setting, False)]),
+        ("required in jac.toml", {"jac.toml": base + required}, "", [(setting, True)]),
         (
-            f"${{{var_name}:?set {var_name}}}",
-            False,
-            [setting, "JAC_TEST_ENV_MISSING", "set JAC_TEST_ENV_MISSING"]
+            "required in a profile file",
+            {"jac.toml": base, "jac.prod.toml": required},
+            "prod",
+            [(setting, True)]
         ),
         (
-            f"${{{var_name}:?set {var_name}}}",
-            True,
-            [setting, "JAC_TEST_ENV_MISSING", "set JAC_TEST_ENV_MISSING"]
+            "redefined by the active profile file",
+            {"jac.toml": base + bare, "jac.prod.toml": literal},
+            "prod",
+            []
+        ),
+        ("an inactive inline profile", {"jac.toml": base + inline}, "", []),
+        (
+            "the active inline profile",
+            {"jac.toml": base + inline},
+            "prod",
+            [(setting, False)]
+        ),
+        (
+            "a default",
+            {
+                "jac.toml": base
+                    + f"[scale.secrets]\nSOME_API_KEY = \"${{{var_name}:-x}}\"\n"
+            },
+            "",
+            []
         )
     ];
     previous = os.environ.pop(var_name, None);
     try {
-        for (value, through_overlay, expected) in cases {
+        for (label, files, profile, expected) in cases {
             with TemporaryDirectory() as tmpdir {
-                raised = False;
-                try {
-                    _load_secret_value(Path(tmpdir), value, through_overlay);
-                } except ValueError as e {
-                    raised = True;
-                    for fragment in expected {
-                        assert fragment in str(e);
-                    }
+                refs = _unresolved_refs(Path(tmpdir), files, profile);
+                assert [(ref.path, ref.required) for ref in refs] == expected , (
+                    f"{label}: {[(ref.path, ref.required) for ref in refs]}"
+                );
+                for ref in refs {
+                    assert ref.var == var_name , label;
+                    assert ref.raw.startswith(f"${{{var_name}") , label;
+                    assert ref.deploy_setting() == ("secrets", "SOME_API_KEY") , label;
                 }
-                assert raised , f"Expected {value} to reject the config";
             }
         }
     } finally {
