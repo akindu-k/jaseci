@@ -673,6 +673,84 @@ test "a shipped jac.toml value the pods cannot resolve stops the deploy before p
 }
 
 
+test "a deploy setting this machine cannot resolve stops the deploy, dry run included" {
+    import tempfile;
+    secret_toml = "[scale.secrets]\nOPENAI_API_KEY = \"${OPENAI_API_KEY}\"\n";
+    target_toml = "[scale.kubernetes]\nnamespace = \"${K8S_NS:?set K8S_NS}\"\n";
+    cases = [
+        (
+            "an unset secret",
+            secret_toml,
+            "ns",
+            {"OPENAI_API_KEY": "${OPENAI_API_KEY}"},
+            {},
+            ["scale.secrets.OPENAI_API_KEY", "OPENAI_API_KEY is not set"]
+        ),
+        (
+            "an unset target setting",
+            target_toml,
+            "${K8S_NS:?set K8S_NS}",
+            {},
+            {},
+            ["scale.kubernetes.namespace", "K8S_NS is not set", "set K8S_NS"]
+        ),
+        (
+            "the variable exported",
+            secret_toml,
+            "ns",
+            {"OPENAI_API_KEY": "sk-live"},
+            {"OPENAI_API_KEY": "sk-live"},
+            []
+        ),
+        (
+            "a default",
+            "[scale.secrets]\nREGION = \"${DEPLOY_REGION:-us-east-1}\"\n",
+            "ns",
+            {"REGION": "us-east-1"},
+            {},
+            []
+        )
+    ];
+    for (label, extra, namespace, secrets, host_env, expected) in cases {
+        with tempfile.TemporaryDirectory() as tmp {
+            project = _routed_project(tmp, ["main.jac"]);
+            toml_path = Path(project) / "jac.toml";
+            toml_path.write_text(toml_path.read_text() + extra);
+            builder = ManifestBuilder(
+                k8s_config=KubernetesConfig(
+                    app_name="jac-shop",
+                    namespace=namespace,
+                    bundle_storage_class="efs-sc"
+                ),
+                project_dir=project,
+                secrets=secrets,
+                fleet=fleet_of({}, root_app="main"),
+                dry_run=True
+            );
+            caught = "";
+            with mock.patch.dict(os.environ, host_env, clear=False) {
+                for name in ("OPENAI_API_KEY", "K8S_NS", "DEPLOY_REGION") {
+                    if name not in host_env {
+                        os.environ.pop(name, None);
+                    }
+                }
+                try {
+                    builder.generate_manifests(
+                        AppConfig(code_folder=project, app_name="jac-shop"), "img"
+                    );
+                } except ValueError as e {
+                    caught = str(e);
+                }
+            }
+            assert bool(caught) == bool(expected) , f"{label}: {caught!r}";
+            for fragment in expected {
+                assert fragment in caught , f"{label}: {caught}";
+            }
+        }
+    }
+}
+
+
 test "user env cannot point a pod at an arbitrary service file" {
     cfg = KubernetesConfig(app_name="jac-shop", namespace="ns");
     builder = ManifestBuilder(k8s_config=cfg);
