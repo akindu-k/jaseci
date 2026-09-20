@@ -202,23 +202,7 @@ impl StaticAnalysisPass._osp_shape_position(name_nd: Name) -> (str | None) {
 }
 
 impl StaticAnalysisPass._native_type_position(name_nd: Name) -> (str | None) {
-    cur: UniNode = name_nd;
-    parent = cur.parent;
-    in_type_pos = False;
-
-    for _ in range(8) {
-        if parent is None {
-            break;
-        }
-        if isinstance(parent, SubTag)
-            or (isinstance(parent, FuncSignature) and parent.return_type is cur) {
-            in_type_pos = True;
-            break;
-        }
-        cur = parent;
-        parent = cur.parent;
-    }
-    if not in_type_pos {
+    if not in_type_position(name_nd, include_subscripts=False) {
         return None;
     }
     imp = name_nd.find_parent_of_type(Import);
@@ -226,7 +210,7 @@ impl StaticAnalysisPass._native_type_position(name_nd: Name) -> (str | None) {
         return "C library declaration type position";
     }
     if name_nd.in_native_context() {
-        return "native type annotation position";
+        return "native type position";
     }
     return None;
 }
@@ -419,13 +403,17 @@ impl StaticAnalysisPass._check_semantic_patterns(mod: Module) -> None {
     }
 
     for nd in mod.get_all_sub_nodes(typ=Archetype) {
-        if nd.src_endpoint is not None and nd.arch_kind != "edge" {
-            self.ctx.emit(
-                E2027,
-                node_override=nd.src_endpoint,
-                arch_type=(nd.arch_kind or nd.arch_type.value),
-                name=nd.name.value
-            );
+        if nd.arch_kind != "edge" {
+            if nd.src_endpoint is not None {
+                self.ctx.emit(
+                    E2027,
+                    node_override=nd.src_endpoint,
+                    arch_type=(nd.arch_kind or nd.arch_type.value),
+                    name=nd.name.value
+                );
+            }
+        } elif not nd.declares_endpoints() {
+            self.ctx.emit(E2086, node_override=nd.name, name=nd.name.value);
         }
     }
 }

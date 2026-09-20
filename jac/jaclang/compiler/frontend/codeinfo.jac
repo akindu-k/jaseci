@@ -94,7 +94,7 @@ obj NativeFieldInfo {
         is_func_ptr: bool = False,
         func_param_types: (list[str] | None) = None,
         func_ret_type: (str | None) = None,
-        elem_keys: (list[str] | None) = None,
+        elem_keys: (list[str | None] | None) = None,
         foreign: bool = False;
 }
 
@@ -125,7 +125,7 @@ obj NativeFuncLayout {
         ret_struct_name: (str | None) = None,
         ret_tuple_layout: (NativeTupleLayout | None) = None,
         ret_enum_type: (str | None) = None,
-        ret_elem_keys: (list[str] | None) = None;
+        ret_elem_keys: (list[str | None] | None) = None;
 }
 
 obj NativeTestLayout {
@@ -526,6 +526,26 @@ def resolve_native_module(
     import os;
     clean = module_name.lstrip('.');
     path_name = clean.replace('.', os.sep);
+
+    level = len(module_name) - len(clean);
+    if level > 0 {
+        if not allow_inferred {
+            return (None, None);
+        }
+        search = os.path.abspath(base_dir);
+        for _ in range(level - 1) {
+            search = os.path.dirname(search);
+        }
+        candidate = os.path.join(search, path_name);
+        if os.path.isdir(candidate) {
+            candidate = os.path.join(candidate, '__init__');
+        }
+        local = _inferred_native_path(_native_variant_path(candidate));
+        if local is not None {
+            return (str(os.path.relpath(local, os.path.abspath(base_dir))), local);
+        }
+        return (None, None);
+    }
 
     if clean.startswith('jaclang.') {
         import from jaclang.project.modresolver { resolve_module }
