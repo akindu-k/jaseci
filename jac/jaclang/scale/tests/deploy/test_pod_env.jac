@@ -717,6 +717,22 @@ test "a deploy setting this machine cannot resolve stops the deploy, dry run inc
             {"REGION": "us-east-1"},
             {},
             []
+        ),
+        (
+            "an alternate-value form jac does not read, with the variable unset",
+            "[scale.secrets]\nSNEAKY = \"${MISSING_ALT:+on}\"\n",
+            "ns",
+            {"SNEAKY": "${MISSING_ALT:+on}"},
+            {},
+            ["scale.secrets.SNEAKY", "${MISSING_ALT:+on} is not a form jac reads"]
+        ),
+        (
+            "an alternate-value form jac does not read, with the variable exported",
+            "[scale.secrets]\nSNEAKY = \"${DEPLOY_REGION:+on}\"\n",
+            "ns",
+            {"SNEAKY": "${DEPLOY_REGION:+on}"},
+            {"DEPLOY_REGION": "us-east-1"},
+            ["scale.secrets.SNEAKY", "${DEPLOY_REGION:+on} is not a form jac reads"]
         )
     ];
     for (label, extra, namespace, secrets, host_env, expected) in cases {
@@ -737,7 +753,12 @@ test "a deploy setting this machine cannot resolve stops the deploy, dry run inc
             );
             caught = "";
             with mock.patch.dict(os.environ, host_env, clear=False) {
-                for name in ("OPENAI_API_KEY", "K8S_NS", "DEPLOY_REGION") {
+                for name in (
+                    "OPENAI_API_KEY",
+                    "K8S_NS",
+                    "DEPLOY_REGION",
+                    "MISSING_ALT"
+                ) {
                     if name not in host_env {
                         os.environ.pop(name, None);
                     }
