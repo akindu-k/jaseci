@@ -11,14 +11,15 @@ impl interpolate_env_vars(
     source = os.environ if environ is None else environ;
 
     pattern = r"\$\{([^}]*)\}";
-    supported = r"([^}:]+)(?:(:[-?])([^}]*))?";
+    supported = r"([A-Za-z_][A-Za-z0-9_]*)(?:(:[-?])([^}]*))?";
     def replace_env_var(`match: re.Match) -> str {
         body = `match.group(1);
         parts = re.fullmatch(supported, body);
-        var_name = body.split(":")[0] if parts is None else parts.group(1);
-        if not var_name.isidentifier() {
+        leading = re.match(r"[A-Za-z_][A-Za-z0-9_]*", body);
+        if leading is None {
             return `match.group(0);
         }
+        var_name = leading.group(0);
         record = None;
         if parts is None {
             record = UnresolvedRef(

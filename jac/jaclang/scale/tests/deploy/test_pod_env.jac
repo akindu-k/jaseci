@@ -577,6 +577,16 @@ test "a shipped jac.toml value the pods cannot resolve stops the deploy before p
         ),
         ("values the pod env supplies", {"jac.toml": pod_supplied}, []),
         (
+            "a shell form in a script, which the shell expands, not jac",
+            {"jac.toml": "[scripts]\nbuild = \"npm run build ${CI:+--ci}\"\n"},
+            []
+        ),
+        (
+            "a form jac does not read in a value the pods are handed",
+            {"jac.toml": "[plugins.demo]\nalt = \"${DEMO_ALT:+on}\"\n"},
+            ["jac.toml: plugins.demo.alt: Unsupported form ${DEMO_ALT:+on}"]
+        ),
+        (
             "two unset variables in one value",
             {"jac.toml": "[plugins.demo]\npair = \"${PAIR_ONE}/${PAIR_TWO}\"\n"},
             [

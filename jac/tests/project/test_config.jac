@@ -127,7 +127,10 @@ test "interpolate against a given environment instead of the process one" {
         ),
         ("${POD_VAR:+on}", "Unsupported form ${POD_VAR:+on}"),
         ("${POD_VAR:0:3}", "Unsupported form ${POD_VAR:0:3}"),
-        ("echo ${1:+on}", "echo ${1:+on}")
+        ("${POD_VAR-default}", "Unsupported form ${POD_VAR-default}"),
+        ("${POD_VAR?msg}", "Unsupported form ${POD_VAR?msg}"),
+        ("echo ${1:+on}", "echo ${1:+on}"),
+        ("echo ${#arr[@]}", "echo ${#arr[@]}")
     ];
     try {
         for (value, expected) in cases {
