@@ -3965,8 +3965,6 @@ impl TypeEvaluator._is_sv_async_call(expr: FuncCall) -> bool {
         import from jaclang.compiler.symbol_utils {
             ClientImportVerdict,
             classify_client_import_item,
-            decl_has_access,
-            import_target_pinned_server,
             resolve_import_source_module
         }
         for imp in mod.get_all_sub_nodes(Import) {
@@ -3984,7 +3982,6 @@ impl TypeEvaluator._is_sv_async_call(expr: FuncCall) -> bool {
             source_mod = (
                 resolve_import_source_module(self.program, imp) if is_boundary else None
             );
-            pinned_server = import_target_pinned_server(imp) if is_boundary else False;
             for item in imp.items {
                 if not (
                     isinstance(item, ModuleItem)
@@ -4019,15 +4016,7 @@ impl TypeEvaluator._is_sv_async_call(expr: FuncCall) -> bool {
                         continue;
                     }
                     verdict = classify_client_import_item(source_mod, item);
-                    is_stub = verdict == ClientImportVerdict.BRIDGED
-                        or (
-                            pinned_server
-                            and (
-                                verdict != ClientImportVerdict.DEAD
-                                or decl_has_access(source_mod, item)
-                            )
-                        );
-                    if not is_stub {
+                    if verdict != ClientImportVerdict.BRIDGED {
                         continue;
                     }
                 }
@@ -4990,6 +4979,40 @@ impl TypeEvaluator.classify_condition(condition: Expr) -> ConditionInfo | None {
                 );
             }
         }
+        container = condition.rights[0];
+        if left_key is not None
+            and op_name in (Tok.KW_IN, Tok.KW_NIN)
+            and isinstance(container, (TupleVal, ListVal))
+            and container.values {
+            elem_types: list[TypeBase] = [];
+            for elem in container.values {
+                elem_type = (
+                    self._extract_literal_operand_type(elem)
+                        if isinstance(elem, Expr)
+                        else None
+                );
+                if elem_type is None {
+                    elem_types = [];
+                    break;
+                }
+                elem_types.append(elem_type);
+            }
+            if elem_types {
+                return ConditionInfo(
+                    kind=(
+                        NarrowingKind.MEMBERSHIP_IN
+                            if op_name == Tok.KW_IN
+                            else NarrowingKind.MEMBERSHIP_NOT_IN
+                    ),
+                    key=left_key,
+                    narrow_type=(
+                        elem_types[0]
+                            if len(elem_types) == 1
+                            else UnionType(types=elem_types)
+                    )
+                );
+            }
+        }
     }
 
     if isinstance(condition, (Name, AtomTrailer)) {
@@ -5221,7 +5244,7 @@ impl TypeEvaluator._find_predicate_for(
                     );
                 }
 
-            case NarrowingKind.LITERAL_EQ:
+            case NarrowingKind.LITERAL_EQ | NarrowingKind.MEMBERSHIP_IN:
                 literal_type = info.narrow_type;
                 if literal_type is None {
                     return None;
@@ -5233,7 +5256,7 @@ impl TypeEvaluator._find_predicate_for(
                     narrows_on_false=False
                 );
 
-            case NarrowingKind.LITERAL_NE:
+            case NarrowingKind.LITERAL_NE | NarrowingKind.MEMBERSHIP_NOT_IN:
                 literal_type = info.narrow_type;
                 if literal_type is None {
                     return None;
