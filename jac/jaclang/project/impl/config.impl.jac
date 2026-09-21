@@ -60,7 +60,8 @@ impl UnresolvedRef.describe -> str {
 
 impl UnresolvedRef.reason -> str {
     if self.unsupported {
-        return f"{self.form} is not a form jac reads";
+        return f"{self.form} is not a form jac reads "
+        "(use ${VAR}, ${VAR:-default} or ${VAR:?message})";
     }
     return f"{self.var} is not set" + (f" ({self.message})" if self.message else "");
 }
