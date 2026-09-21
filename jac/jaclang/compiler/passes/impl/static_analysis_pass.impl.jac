@@ -403,13 +403,17 @@ impl StaticAnalysisPass._check_semantic_patterns(mod: Module) -> None {
     }
 
     for nd in mod.get_all_sub_nodes(typ=Archetype) {
-        if nd.src_endpoint is not None and nd.arch_kind != "edge" {
-            self.ctx.emit(
-                E2027,
-                node_override=nd.src_endpoint,
-                arch_type=(nd.arch_kind or nd.arch_type.value),
-                name=nd.name.value
-            );
+        if nd.arch_kind != "edge" {
+            if nd.src_endpoint is not None {
+                self.ctx.emit(
+                    E2027,
+                    node_override=nd.src_endpoint,
+                    arch_type=(nd.arch_kind or nd.arch_type.value),
+                    name=nd.name.value
+                );
+            }
+        } elif not nd.declares_endpoints() {
+            self.ctx.emit(E2086, node_override=nd.name, name=nd.name.value);
         }
     }
 }
@@ -422,8 +426,6 @@ impl StaticAnalysisPass._check_client_imports(mod: Module) -> None {
     import from jaclang.compiler.symbol_utils {
         ClientImportVerdict,
         classify_client_import_item,
-        decl_has_access,
-        import_target_pinned_server,
         is_client_boundary_import,
         report_dead_client_import,
         resolve_import_source_module
@@ -496,14 +498,12 @@ impl StaticAnalysisPass._check_client_imports(mod: Module) -> None {
         if source_mod is None {
             continue;
         }
-        pinned_server = import_target_pinned_server(nd);
         for item in nd.items {
             if not isinstance(item, ModuleItem) {
                 continue;
             }
             verdict = classify_client_import_item(source_mod, item);
-            if verdict == ClientImportVerdict.DEAD
-                and not (pinned_server and decl_has_access(source_mod, item)) {
+            if verdict == ClientImportVerdict.DEAD {
                 report_dead_client_import(self, nd, item);
             }
         }

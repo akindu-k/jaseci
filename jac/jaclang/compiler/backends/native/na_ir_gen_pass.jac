@@ -96,7 +96,8 @@ obj NativeFinalizer {
         function: ir.Function,
         loop_depth: int,
         handler_depth: int,
-        pop_handler: bool = False;
+        pop_handler: bool = False,
+        context_exit: tuple[ir.Value, ir.Function] | None = None;
 }
 
 obj NativeErrorHandler {
@@ -120,6 +121,15 @@ obj NativeSpreadArg {
         is_list: bool = False;
 }
 
+obj NativeComprehension {
+    has comprs: list[uni.InnerCompr],
+        kind: str,
+        acc: ir.Value,
+        key_expr: uni.UniNode,
+        val_expr: uni.UniNode | None = None,
+        spec: str = "";
+}
+
 obj NativeIterCallback {
     has function: ir.Value,
         function_type: ir.FunctionType,
@@ -141,7 +151,7 @@ obj NativeGeneratorState {
 obj NativeBindingState {
     has local_vars: dict[str, ir.Value],
         param_vars: set[str],
-        nogc_no_free_vars: set[str],
+        borrowed_vars: set[str],
         nogc_owned_str_vars: set[str],
         region_handle_vars: set[str],
         var_list_elem_struct: dict[str, ir.Type | None],
@@ -267,6 +277,8 @@ walker NaIRGenPass {
         _class_name_consts: dict[str, ir.Constant] = {},
         _isa_fn: (ir.Function | None) = None,
         _isa_seq_fn: (ir.Function | None) = None,
+        _isa_h_fn: (ir.Function | None) = None,
+        _cstr_hash_fn: (ir.Function | None) = None,
         _runtime_class_name_fn: (ir.Function | None) = None,
         _vtable_less_reach: (set[str] | None) = None,
         _short_mro_reach: (dict[str, list[str]] | None) = None,
@@ -374,7 +386,7 @@ walker NaIRGenPass {
         _region_kernel_registered: bool = False,
         _managed_ctor_node: int = 0,
         clib_declared_sigs: dict[str, tuple[ir.Type, list[ir.Type]]] = {},
-        nogc_no_free_vars: set[str] = set(),
+        borrowed_vars: set[str] = set(),
         nogc_owned_str_vars: set[str] = set(),
         list_release_fns: dict[str, ir.Function] = {},
         dict_release_fns: dict[str, ir.Function] = {},
@@ -447,6 +459,13 @@ walker NaIRGenPass {
         destructor: ir.Function | None = None
     ) -> tuple[ir.Function, ir.Function];
 
+    def _emit_tls_ready_key(
+        accessor: ir.Function,
+        state_gv: ir.GlobalVariable,
+        key_gv: ir.GlobalVariable,
+        init_fn: ir.Function
+    ) -> ir.Value;
+
     def _get_exception_context_fn -> ir.Function;
     def _exception_handler_slot(b: ir.IRBuilder) -> ir.Value;
     def _region_i64(val: ir.Value, name: str = "rgn.i64") -> ir.Value;
@@ -473,6 +492,10 @@ walker NaIRGenPass {
         name: str, ret_type: ir.Type, arg_types: list[ir.Type], var_arg: bool = False
     ) -> ir.Function;
 
+    def _extern_address_cast(
+        builder: ir.IRBuilder, value: ir.Value, target: ir.Type
+    ) -> ir.Value;
+
     def _get_printf -> ir.Function;
     def _emit_print(nd: uni.FuncCall) -> (ir.Value | None);
     def _get_fmt_string(fmt: str) -> ir.GlobalVariable;
@@ -482,6 +505,7 @@ walker NaIRGenPass {
     def _codegen_fstring(nd: uni.FString) -> (ir.Value | None);
     def _fstring_spec_text(spec: uni.Expr) -> (str | None);
     def _fstring_spec_to_printf(spec: str, kind: str) -> (tuple[str, str] | None);
+    def _bool_text(b: ir.IRBuilder, flag: ir.Value, name: str) -> ir.Value;
     def _emit_fstr_repr(val: ir.Value, part: uni.FormattedValue) -> (ir.Value | None);
     def _emit_dyn_spec_format(
         val: ir.Value, spec_val: ir.Value, part: uni.FormattedValue
@@ -501,6 +525,14 @@ walker NaIRGenPass {
     def _codegen_str_strip_chars(
         str_val: ir.Value, charset: (ir.Value | None), do_left: bool, do_right: bool
     ) -> (ir.Value | None);
+
+    def _emit_whitespace_width(
+        text: ir.Value, cursor: ir.Value, length: ir.Value, reverse: bool
+    ) -> ir.Value;
+
+    def _codegen_str_split_whitespace(
+        text: ir.Value, maxsplit: ir.Value | None = None, reverse: bool = False
+    ) -> ir.Value;
 
     def _codegen_str_split(
         str_val: ir.Value,
@@ -622,6 +654,10 @@ walker NaIRGenPass {
     ) -> (ir.Value | None);
 
     def _emit_intrinsic_call_dtor(
+        nd: uni.FuncCall, intr: IntrinsicEntry, args: list[uni.Expr]
+    ) -> (ir.Value | None);
+
+    def _emit_intrinsic_region_tls(
         nd: uni.FuncCall, intr: IntrinsicEntry, args: list[uni.Expr]
     ) -> (ir.Value | None);
 
@@ -779,46 +815,18 @@ walker NaIRGenPass {
     def _codegen_list_compr(nd: uni.ListCompr) -> (ir.Value | None);
     def _codegen_dict_compr(nd: uni.DictCompr) -> (ir.Value | None);
     def _codegen_set_compr(nd: uni.SetCompr) -> (ir.Value | None);
-    def _emit_compr_element(
-        kind: str,
-        acc: ir.Value,
-        key_expr: uni.UniNode,
-        val_expr: (uni.UniNode | None),
-        spec: str
+    def _emit_compr_element(compr: NativeComprehension) -> None;
+    def _codegen_compr_walk(compr: NativeComprehension, idx: int) -> None;
+    def _codegen_compr_step(
+        compr: NativeComprehension, idx: int, next_bb: ir.Block
     ) -> None;
 
-    def _codegen_compr_walk(
-        comprs: list[uni.InnerCompr],
-        idx: int,
-        kind: str,
-        acc: ir.Value,
-        key_expr: uni.UniNode,
-        val_expr: (uni.UniNode | None),
-        spec: str
+    def _codegen_compr_walk_body(compr: NativeComprehension, idx: int) -> None;
+    def _codegen_compr_iter_walk(
+        compr: NativeComprehension, idx: int, source: tuple[ir.Value, ir.Type, bool]
     ) -> None;
 
-    def _codegen_compr_walk_body(
-        comprs: list[uni.InnerCompr],
-        idx: int,
-        kind: str,
-        acc: ir.Value,
-        key_expr: uni.UniNode,
-        val_expr: (uni.UniNode | None),
-        spec: str
-    ) -> None;
-
-    def _codegen_compr_range_walk(
-        inner: uni.InnerCompr,
-        comprs: list[uni.InnerCompr],
-        idx: int,
-        kind: str,
-        acc: ir.Value,
-        key_expr: uni.UniNode,
-        val_expr: (uni.UniNode | None),
-        spec: str,
-        conditionals: list[uni.Expr]
-    ) -> None;
-
+    def _codegen_compr_range_walk(compr: NativeComprehension, idx: int) -> None;
     def _emit_key_comparison(
         b: ir.IRBuilder,
         key_type: ir.Type,
@@ -942,6 +950,7 @@ walker NaIRGenPass {
         trace_fn_name: str, container_ptr_type: ir.Type, layout: dict[str, any]
     ) -> ir.Function;
 
+    def _emit_context_exit(cm: ir.Value, exit_fn: ir.Function) -> ir.Value;
     def _codegen_with(nd: uni.WithStmt) -> None;
     def _codegen_with_recursive(
         exprs: Sequence[uni.ExprAsItem], idx: int, body: Sequence[uni.CodeBlockStmt]
@@ -1208,6 +1217,10 @@ walker NaIRGenPass {
     def _get_file_struct_type -> ir.Type;
     def _get_binary_file_struct_type -> ir.Type;
     def _register_file_like_struct(name: str) -> ir.Type;
+    def _emit_read_to_eof(
+        b: ir.IRBuilder, fn: ir.Function, handle: ir.Value
+    ) -> tuple[ir.Value, ir.Value];
+
     def _emit_file_helpers -> None;
     def _emit_binary_file_helpers -> None;
     def _emit_file_like_helpers(
@@ -1424,6 +1437,11 @@ walker NaIRGenPass {
 
     def _range_iter_next_fn -> ir.Function;
     def _make_range_iter(range_val: ir.Value) -> ir.Value;
+    def _list_from_iter(
+        iter_val: ir.Value, iter_elem_type: ir.Type, list_elem_type: ir.Type
+    ) -> (ir.Value | None);
+
+    def _emit_range_len(range_val: ir.Value) -> ir.Value;
     def _make_iter_from_value(
         val: ir.Value, expr: uni.UniNode
     ) -> (tuple[ir.Value, str, ir.Type] | None);
@@ -1464,6 +1482,7 @@ walker NaIRGenPass {
         obj_val: ir.Value, struct_name: str, expr: uni.UniNode
     ) -> (tuple[ir.Value, str, ir.Type] | None);
 
+    def _iter_source(coll: uni.Expr) -> (tuple[ir.Value, ir.Type, bool] | None);
     def _try_iter_protocol_for(nd: uni.InForStmt) -> bool;
     def _spec_from_list_slot_type(t: (ir.Type | None)) -> (str | None);
     def _reflavor_list(
@@ -1892,8 +1911,12 @@ walker NaIRGenPass {
 
     def _mark_owned(val: ir.Value) -> ir.Value;
     def _is_owned(val: ir.Value) -> bool;
+    def _is_null_ptr_const(val: ir.Value) -> bool;
+    def _print_stream_name(value: uni.Expr) -> (str | None);
+    def _emit_print_call(stream: str, fmt_ptr: ir.Value, args: list[ir.Value]) -> None;
     def _opt_result_owned(val: ir.Value, expr: object) -> bool;
     def _can_native_move_lower(nd: object) -> bool;
+    def _bind_borrowed(nd: uni.Assignment, var_name: str, slot_ty: ir.Type) -> bool;
     def _release_owned_operands(
         left_orig: ir.Value, right_orig: ir.Value, op: str = ""
     ) -> None;
@@ -2405,6 +2428,19 @@ walker NaIRGenPass {
     def _is_enum_arch(name: str) -> bool;
     def _emit_isa_fn -> ir.Function;
     def _emit_isa_seq_fn -> ir.Function;
+    def _folded_ord(nd: uni.FuncCall) -> (ir.Constant | None);
+    def _emit_isa_hashed_fn -> ir.Function;
+    def _emit_isa_name_match(
+        b: ir.IRBuilder,
+        gate: (ir.Value | None),
+        name: ir.Value,
+        other: ir.Value,
+        strcmp: ir.Function,
+        on_match: ir.Block,
+        on_miss: ir.Block
+    ) -> None;
+
+    def _emit_cstr_hash_fn -> ir.Function;
     def _is_runtime_class_tuple(t: any) -> bool;
     def _runtime_class_value(expr: (uni.UniNode | None)) -> (ir.Value | None);
     def _runtime_class_arms(

@@ -392,15 +392,10 @@ impl NaIRGenPass._declare_clib_ability(nd: uni.Ability) -> None {
 
     ret_type = self._resolve_clib_type(sig.return_type);
 
-    fnty = ir.FunctionType(ret_type, param_types, var_arg=is_variadic);
     self.clib_declared_sigs[name] = (ret_type, list(param_types));
-    if name in self.extern_funcs {
-        func = self.extern_funcs[name];
-    } elif name in self.func_symtab {
-        func = self.func_symtab[name];
-    } else {
-        func = ir.Function(self.llvm_module, fnty, name=name);
-    }
+    func = self._get_or_declare_extern(
+        name, ret_type, param_types, var_arg=is_variadic
+    );
 
     for (i, p) in enumerate(fixed_params) {
         func.args[i].name = p.name.value if p.name else f"arg{i}";
@@ -1109,7 +1104,7 @@ impl NaIRGenPass._codegen_generator(nd: uni.Ability, func: ir.Function) -> None 
         frame_bindings = {
             binding
             for binding in self.local_vars
-            if binding not in self.nogc_no_free_vars
+            if binding not in self.borrowed_vars
                 and binding not in self.closure_cell_handles
         };
         cell_inits = list(gc.cell_inits);

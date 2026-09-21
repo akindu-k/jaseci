@@ -401,6 +401,7 @@ node AstAccessNode(UniNode) {
     has access: (SubTag[Token] | None) { getter; }
     has access_type: SymbolAccess { getter; }
     has public_access: bool { getter; }
+    has exposure: SymbolAccess { getter; }
 
     def init(
         *, access: (SubTag[Token] | None) = None, kid: Sequence[UniNode] = []
@@ -412,6 +413,7 @@ node AstAccessNode(UniNode) {
 node ContextAwareNode(UniNode) {
     has codespace_dual: bool = False;
     has code_context: CodeContext { getter; setter(code_context: CodeContext); }
+    has placement_name: str { getter; }
 
     def init(*, codespace_dual: bool = False, kid: Sequence[UniNode] = []) -> None;
     def postinit -> None;
@@ -667,7 +669,8 @@ node Module(AstDocNode, UniScopeNode) {
         rc_last_use: dict[int, list[str]] postinit,
         rc_scope_cleanup: dict[int, list[str]] postinit,
         rc_move_in: set[int] postinit,
-        own_move_sites: set[int] postinit;
+        own_move_sites: set[int] postinit,
+        managed_borrow_binds: set[int] postinit;
 
     has body: Sequence[ElementStmt | String | EmptyToken] { getter; }
 
@@ -846,7 +849,6 @@ obj ImportBoundaryFacts {
     has native_from_path: (str | None) = None,
         from_loc_resolved: (str | None) = None,
         is_service: bool = False,
-        pinned_server: bool = False,
         client_native_edge: bool = False,
         sv_abilities: dict[(str, Ability)] = {},
         sv_walkers: dict[(str, Archetype)] = {},
@@ -981,9 +983,13 @@ node Archetype(ContextAwareNode, ArchSpec, AstAccessNode, ArchBlockStmt, AstImpl
 
     has is_abstract: bool { getter; }
     has arch_kind: (str | None) { getter; }
+    has surface_kind: str { getter; }
+    has served: bool { getter; }
 
     def get_has_vars -> list[HasVar];
     def get_methods -> list[Ability];
+    def base_archetypes -> list[Archetype];
+    def declares_endpoints -> bool;
     def __repr__ -> str;
 }
 
@@ -1092,13 +1098,16 @@ node Ability(ContextAwareNode, AstAccessNode, ElementStmt, AstAsyncNode, ArchBlo
     def postinit -> None;
 
     has receiver_mode: OwnershipKind = OwnershipKind.NONE,
-        raises: list[str] postinit;
+        raises: list[str] postinit,
+        writes: (list[str] | None) = None;
 
     has is_method: bool { getter; }
     has is_cls_method: bool { getter; }
     has is_def: bool { getter; }
     has method_owner: Archetype | Enum | None { getter; }
     has is_genai_ability: bool { getter; }
+    has surface_kind: str { getter; }
+    has served: bool { getter; }
 
     def py_resolve_name -> str;
     def event_trigger_type_names -> (list[str] | None);

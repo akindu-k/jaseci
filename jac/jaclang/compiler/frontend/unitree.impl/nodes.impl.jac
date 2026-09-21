@@ -1119,6 +1119,17 @@ impl AstAccessNode.public_access.getter -> bool {
     return (self.access_type == SymbolAccess.PUBLIC);
 }
 
+impl AstAccessNode.exposure.getter -> SymbolAccess {
+    tag = self.access.tag.name if self.access else None;
+    if tag == Tok.KW_PUB {
+        return SymbolAccess.PUBLIC;
+    }
+    if tag == Tok.KW_PROT {
+        return SymbolAccess.PROTECTED;
+    }
+    return SymbolAccess.PRIVATE;
+}
+
 impl ContextAwareNode.postinit -> None {}
 
 impl ContextAwareNode.code_context.getter -> CodeContext {
@@ -1134,6 +1145,20 @@ impl ContextAwareNode.code_context.getter -> CodeContext {
 impl ContextAwareNode.code_context.setter(code_context: CodeContext) {
     del [edge self->:PlacedIn:->];
     self +>:PlacedIn:+> codespace_node(code_context.value);
+}
+
+impl ContextAwareNode.placement_name.getter -> str {
+    if self.codespace_dual {
+        return "dual";
+    }
+    ctx = self.code_context;
+    if ctx == CodeContext.CLIENT {
+        return "client";
+    }
+    if ctx == CodeContext.NATIVE {
+        return "native";
+    }
+    return "server";
 }
 
 impl Module.decided_codespace.getter -> str {
@@ -1406,6 +1431,8 @@ impl Module.postinit -> None {
     self.rc_move_in = _rc_move_in;
     _own_move_sites: set[int] = set();
     self.own_move_sites = _own_move_sites;
+    _managed_borrow_binds: set[int] = set();
+    self.managed_borrow_binds = _managed_borrow_binds;
     UniNode.postinit(self);
     UniScopeNode._init_scope(self, name=self.name);
 }
@@ -1794,6 +1821,16 @@ impl Archetype.is_abstract.getter -> bool {
     return `any((isinstance(i, Ability) and i.is_abstract) for i in body);
 }
 
+impl Archetype.surface_kind.getter -> str {
+    return "walker" if self.arch_type.name == Tok.KW_WALKER else "";
+}
+
+impl Archetype.served.getter -> bool {
+    return bool(self.surface_kind)
+        and self.exposure != SymbolAccess.PRIVATE
+        and self.placement_name != "client";
+}
+
 impl Archetype.arch_kind.getter -> (str | None) {
     kind_map: dict[SymbolType, str] = {
         SymbolType.NODE_ARCH: "node",
@@ -1817,6 +1854,45 @@ impl Archetype.get_has_vars -> list[HasVar] {
         }
     }
     return has_vars;
+}
+
+impl Archetype.base_archetypes -> list[Archetype] {
+    bases: list[Archetype] = [];
+    for base in self.base_classes {
+        base_name: UniNode = base;
+        if isinstance(base, AtomTrailer) and isinstance(base.right, Name) {
+            base_name = base.right;
+        }
+        if not isinstance(base_name, AstSymbolNode) or not base_name.sym {
+            continue;
+        }
+        base_decl = base_name.sym.decl;
+        if not base_decl {
+            continue;
+        }
+        base_arch = base_decl.find_parent_of_type(Archetype);
+        if base_arch is not None {
+            bases.append(base_arch);
+        }
+    }
+    return bases;
+}
+
+impl Archetype.declares_endpoints -> bool {
+    seen: set[int] = set();
+    pending: list[Archetype] = [self];
+    while pending {
+        cur = pending.pop();
+        if id(cur) in seen {
+            continue;
+        }
+        seen.add(id(cur));
+        if cur.src_endpoint is not None {
+            return True;
+        }
+        pending.extend(cur.base_archetypes());
+    }
+    return False;
 }
 
 impl Archetype.get_methods -> list[Ability] {
@@ -1951,6 +2027,16 @@ impl Ability.postinit -> None {
 
 impl Ability.is_method.getter -> bool {
     return (self.method_owner is not None);
+}
+
+impl Ability.surface_kind.getter -> str {
+    return "" if self.is_method else "function";
+}
+
+impl Ability.served.getter -> bool {
+    return bool(self.surface_kind)
+        and self.exposure != SymbolAccess.PRIVATE
+        and self.placement_name != "client";
 }
 
 impl Ability.is_cls_method.getter -> bool {
