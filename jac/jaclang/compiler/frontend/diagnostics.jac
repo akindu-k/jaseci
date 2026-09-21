@@ -735,6 +735,43 @@ glob E0001 = _err("E0001", Category.SYNTAX, "Expected '{expected}', got '{got}'"
          " element types cannot be verified — use \"{type}[NodeType]\" or pass a"
          " concrete list of nodes instead"
      ),
+     E1136 = _err(
+         "E1136",
+         Category.TYPE,
+         "Connection {side} operand is \"{actual}\", but edge \"{edge_name}\" declares its"
+         " {side} endpoint as \"{declared}\"",
+         help="A declared endpoint is what lets a traversal through this edge infer"
+         " a node type instead of `any`, so a connection that contradicts it makes"
+         " that inference wrong. Connect nodes that match the declaration, or widen"
+         " the edge's endpoints."
+     ),
+     W2081 = _warn(
+         "W2081",
+         Category.TYPE,
+         "Connection {side} operand is \"{actual}\", which cannot be checked against"
+         " the {side} endpoint \"{declared}\" declared by edge \"{edge_name}\"",
+         help="Give the operand a concrete node type to have this verified, or"
+         " declare the edge's endpoints as `any --> any` if it is meant to accept"
+         " any node."
+     ),
+     E1137 = _err(
+         "E1137",
+         Category.TYPE,
+         "Traversal origin is \"{actual}\", but edge \"{edge_name}\" declares its {side}"
+         " endpoint as \"{declared}\", so this traversal can never match",
+         help="An edge only connects the node types it declares, so traversing it"
+         " from an unrelated node yields nothing. Start from a node that matches the"
+         " declaration, or widen the edge's endpoints."
+     ),
+     W2082 = _warn(
+         "W2082",
+         Category.TYPE,
+         "Traversal origin is \"{actual}\", which cannot be checked against the {side}"
+         " endpoint \"{declared}\" declared by edge \"{edge_name}\"",
+         help="Give the origin a concrete node type to have this verified, or declare"
+         " the edge's endpoints as `any --> any` if it is meant to start from any"
+         " node."
+     ),
      E1119 = _err(
          "E1119",
          Category.TYPE,
@@ -1092,6 +1129,40 @@ glob E0001 = _err("E0001", Category.SYNTAX, "Expected '{expected}', got '{got}'"
          " swap(&mut a, &mut b) requires two writable places of the same type."
          " Use pop() to move an owned container element out."
      ),
+     E1320 = _err(
+         "E1320",
+         Category.SEMANTIC,
+         "Cannot assign '{field}' through a shared borrow of '{name}'",
+         help="A `&` borrow is read-only. Take the borrow with `&mut`, or assign"
+         " through the owner directly."
+     ),
+     E1321 = _err(
+         "E1321",
+         Category.SEMANTIC,
+         "Cannot write '{field}' while the borrow '{name}' reads through it",
+         help="'{name}' was reached through a '{field}' field or element, and a"
+         " borrow does not keep its referent alive. Writing '{field}' on any"
+         " object while '{name}' is still used could release what it points at."
+         " Finish using '{name}' first, or hold it in an ordinary (owning) local."
+     ),
+     E1322 = _err(
+         "E1322",
+         Category.SEMANTIC,
+         "Call to '{callee}' may write '{field}' while the borrow '{name}' reads through it",
+         help="'{name}' was reached through '{field}', and '{callee}' may write"
+         " that field on some object (or the compiler cannot tell what it"
+         " writes), which could release what '{name}' points at. Finish using"
+         " '{name}' before the call, or hold it in an ordinary (owning) local."
+     ),
+     E1323 = _err(
+         "E1323",
+         Category.SEMANTIC,
+         "Borrow '{name}' must start at a parameter, `self`, an `own` value or another borrow",
+         help="A borrow does not keep its referent alive, so its starting point"
+         " must outlive it. An ordinary local or a module global can be released"
+         " while the borrow is still used. Borrow from the parameter the value"
+         " came from, or keep an ordinary (owning) local instead of a borrow."
+     ),
      W1310 = _warn(
          "W1310",
          Category.LINT,
@@ -1299,6 +1370,14 @@ glob E0001 = _err("E0001", Category.SYNTAX, "Expected '{expected}', got '{got}'"
          "E2027",
          Category.SEMANTIC,
          "Endpoint clause ': Src --> Tgt' is only valid on an 'edge' archetype, not on {arch_type} '{name}'"
+     ),
+     E2086 = _err(
+         "E2086",
+         Category.SEMANTIC,
+         "Edge '{name}' declares no endpoints, so every traversal through it widens to 'any'",
+         help="Name the node types this edge connects: `edge {name}: Src --> Tgt {{}}`."
+         " To keep accepting any node, say so -- `any --> any` preserves the gradual"
+         " behaviour exactly, and `Node --> Node` asks for a node without naming which."
      ),
      E2009 = _err(
          "E2009",
@@ -1525,6 +1604,15 @@ glob E0001 = _err("E0001", Category.SYNTAX, "Expected '{expected}', got '{got}'"
          Category.SEMANTIC,
          "'await' is only valid inside an 'async' function or ability",
          help="Mark the enclosing function or ability 'async' (e.g. `async def` or `async can`) so it compiles to a coroutine capable of `await`; otherwise remove the `await` and call it synchronously."
+     ),
+     E2087 = _err(
+         "E2087",
+         Category.SEMANTIC,
+         "'{name}' is declared but never implemented",
+         help="A declaration without a body needs an `impl {name} { ... }` in this"
+         " module or one of its annexes. Without one the call returns the return"
+         " type's default value. Write the implementation, mark the declaration"
+         " `abst` if a subclass is meant to supply it, or delete the declaration."
      ),
      W3001 = _warn(
          "W3001",

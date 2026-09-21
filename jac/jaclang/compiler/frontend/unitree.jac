@@ -667,7 +667,8 @@ node Module(AstDocNode, UniScopeNode) {
         rc_last_use: dict[int, list[str]] postinit,
         rc_scope_cleanup: dict[int, list[str]] postinit,
         rc_move_in: set[int] postinit,
-        own_move_sites: set[int] postinit;
+        own_move_sites: set[int] postinit,
+        managed_borrow_binds: set[int] postinit;
 
     has body: Sequence[ElementStmt | String | EmptyToken] { getter; }
 
@@ -984,6 +985,8 @@ node Archetype(ContextAwareNode, ArchSpec, AstAccessNode, ArchBlockStmt, AstImpl
 
     def get_has_vars -> list[HasVar];
     def get_methods -> list[Ability];
+    def base_archetypes -> list[Archetype];
+    def declares_endpoints -> bool;
     def __repr__ -> str;
 }
 
@@ -1092,7 +1095,8 @@ node Ability(ContextAwareNode, AstAccessNode, ElementStmt, AstAsyncNode, ArchBlo
     def postinit -> None;
 
     has receiver_mode: OwnershipKind = OwnershipKind.NONE,
-        raises: list[str] postinit;
+        raises: list[str] postinit,
+        writes: (list[str] | None) = None;
 
     has is_method: bool { getter; }
     has is_cls_method: bool { getter; }

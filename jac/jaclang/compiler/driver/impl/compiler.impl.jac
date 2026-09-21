@@ -346,6 +346,7 @@ impl JacCompiler._load_native_from_cache(
             install_native_static_init
         }
         gen = CodeGenTarget();
+        self._restore_native_clibs(gen, cached_interop);
         gen.native_engine = engine;
         py_func_table: dict[str, Callable[..., object]] = {};
         callbacks_list: list[object] = [];
@@ -419,6 +420,7 @@ impl JacCompiler._load_native_from_bitcode(
         install_native_static_init
     }
     gen = CodeGenTarget();
+    self._restore_native_clibs(gen, cached_interop);
     gen.native_engine = engine;
     py_func_table: dict[str, Callable[..., object]] = {};
     callbacks_list: list[object] = [];
@@ -556,7 +558,9 @@ impl JacCompiler._get_precompiled_jir_bytecode(
         PRECOMPILE_SENTINEL,
         SEC_CTDEPS,
         absolutize_ct_deps_section,
-        cache_mode
+        bundle_dir_allowed,
+        cache_mode,
+        precompile_required
     }
     import from jaclang.jac0core { sealed as _sealed }
     (rebuild_flag, no_precompile) = cache_mode();
@@ -569,6 +573,9 @@ impl JacCompiler._get_precompiled_jir_bytecode(
     while True {
         bundle_dir = os.path.join(d, '_precompiled');
         if os.path.isdir(bundle_dir) {
+            if not bundle_dir_allowed(bundle_dir) {
+                break;
+            }
             norm_root = os.path.normpath(d);
             if not norm_file.startswith(norm_root + os.sep) {
                 break;
@@ -582,6 +589,7 @@ impl JacCompiler._get_precompiled_jir_bytecode(
                 break;
             }
             if os.path.isfile(jir_path) {
+                served: (tuple[bytes, bytes] | None) = None;
                 try {
                     jir_data = _Path(jir_path).read_bytes();
                     trusted = (
@@ -596,7 +604,7 @@ impl JacCompiler._get_precompiled_jir_bytecode(
                         bc = read_bytecode_only(jir_data);
                         if bc is not None {
                             _ct_raw = read_section_bytes(jir_data, SEC_CTDEPS);
-                            return (
+                            served = (
                                 patch_co_filenames_bytes(bc, PRECOMPILE_SENTINEL, d),
                                 absolutize_ct_deps_section(_ct_raw, norm_root)
                                     if _ct_raw
@@ -606,6 +614,18 @@ impl JacCompiler._get_precompiled_jir_bytecode(
                         }
                     }
                 } except Exception {}
+                if served is not None {
+                    return served;
+                }
+                if precompile_required() {
+                    raise RuntimeError(
+                        f"JAC_PRECOMPILE_REQUIRED: {norm_file} has a bundled unit at "
+                        f"{jir_path} that this compiler will not reuse, so it would be "
+                        "recompiled from source. The bundle was built by a different "
+                        "compiler generation, jaclang version, Python minor or runtime "
+                        "variant than the one now running."
+                    );
+                }
             }
             break;
         }
@@ -623,7 +643,12 @@ impl JacCompiler._build_interop_dict(result: uni.Module) -> dict[str, any] {
     if manifest is None {
         return {};
     }
-    interop_data: dict[str, any] = {'bindings': {}};
+    interop_data: dict[str, any] = {
+        'bindings': {},
+        'clib_paths': list(result.gen._clib_paths),
+        'clib_symbol_lib': dict(result.gen._clib_symbol_lib),
+        'exported_symbols': list(result.gen._exported_symbols)
+    };
     for (name, binding) in manifest.bindings.items() {
         interop_data['bindings'][name] = {
             'name': binding.name,
@@ -647,6 +672,23 @@ impl JacCompiler._build_interop_dict(result: uni.Module) -> dict[str, any] {
     interop_data['app_edges'] = list(manifest.app_edges);
     interop_data['provider_routes'] = dict(manifest.provider_routes);
     return interop_data;
+}
+
+impl JacCompiler._restore_native_clibs(
+    gen: CodeGenTarget, cached_interop: (dict[str, any] | None)
+) -> None {
+    if cached_interop is None or 'clib_paths' not in cached_interop {
+        raise ValueError("Native cache lacks foreign-library metadata");
+    }
+    import from jaclang.compiler.backends.native.na_compile_pass { load_jit_clib }
+    for lib_path in cached_interop['clib_paths'] {
+        if not load_jit_clib(lib_path) {
+            raise ValueError(f"Cannot restore native library: {lib_path}");
+        }
+        gen._clib_paths.append(lib_path);
+    }
+    gen._clib_symbol_lib.update(cached_interop.get('clib_symbol_lib', {}));
+    gen._exported_symbols.extend(cached_interop.get('exported_symbols', []));
 }
 
 impl JacCompiler._deserialize_interop_table(

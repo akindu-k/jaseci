@@ -733,31 +733,6 @@ impl TypeEvaluator._report_rejected_method_call(
     }
 }
 
-impl TypeEvaluator._edge_endpoint_type(
-    edge_type: ClassType, edge_dir: EdgeDir
-) -> TypeBase | None {
-    for cls in edge_type.shared.mro {
-        arch = cls.shared.symbol_table;
-        if not isinstance(arch, Archetype) {
-            continue;
-        }
-        endpoint: Expr | None = None;
-        if edge_dir == EdgeDir.OUT {
-            endpoint = arch.tgt_endpoint;
-        } elif edge_dir == EdgeDir.IN {
-            endpoint = arch.src_endpoint;
-        }
-        if endpoint is not None {
-            ep_type = self.get_type_of_expression(endpoint);
-            if isinstance(ep_type, ClassType) {
-                return ep_type;
-            }
-            return None;
-        }
-    }
-    return None;
-}
-
 impl TypeEvaluator._type_in_list(ty: TypeBase, type_list: list[TypeBase]) -> bool {
     import from jaclang.compiler.types.type_utils { types_equivalent }
     for existing in type_list {
