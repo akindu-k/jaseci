@@ -1,4 +1,5 @@
 import hashlib;
+import from jaclang.runtime.surface { SurfaceEntry }
 import from collections.abc { Sequence }
 import from contextvars { ContextVar }
 import from jaclang.compiler.frontend.constant {
@@ -246,6 +247,8 @@ def install_native_static_init(
     engine.static_init_chained = {"jac_entry"};
 }
 
+glob NATIVE_STDLIB_EXTENSIONS: dict[str, str] = {"os": "_os_native"};
+
 glob NATIVE_SUPPORTED_STDLIB: set[str] = {
          "sys",
          "math",
@@ -449,7 +452,8 @@ def is_bundled_native_module(module_name: str) -> bool {
     if stdlib_dir is None or not module_name {
         return False;
     }
-    path_name = module_name.lstrip('.').replace('.', os.sep);
+    clean = module_name.lstrip('.');
+    path_name = NATIVE_STDLIB_EXTENSIONS.get(clean, clean).replace('.', os.sep);
     return _native_variant_path(os.path.join(stdlib_dir, path_name)) is not None;
 }
 
@@ -608,7 +612,8 @@ def resolve_native_module(
 
     bundled_root = native_stdlib_root();
     if bundled_root is not None {
-        bundled = _native_variant_path(os.path.join(bundled_root, path_name));
+        bundled_name = NATIVE_STDLIB_EXTENSIONS.get(clean, path_name);
+        bundled = _native_variant_path(os.path.join(bundled_root, bundled_name));
         if bundled is not None {
             return (path_name, bundled);
         }
@@ -729,64 +734,6 @@ obj BoundaryTypeInfo {
         nested_types: list[str] = [];
 }
 
-obj SurfaceEntry {
-    has name: str,
-        kind: str,
-        exposure: str = "private",
-        placement: str = "server",
-        module: str = "",
-        src: str = "";
-
-    def is_exposed -> bool {
-        return self.exposure != "private";
-    }
-
-    def requires_auth -> bool {
-        return self.exposure != "public";
-    }
-
-    def is_served -> bool {
-        return self.is_exposed() and self.placement != "client";
-    }
-
-    def to_dict -> dict[str, str] {
-        return {
-            "kind": self.kind,
-            "exposure": self.exposure,
-            "placement": self.placement,
-            "module": self.module,
-            "src": self.src
-        };
-    }
-
-    static def from_dict(name: str, rec: dict[str, any]) -> SurfaceEntry {
-        return SurfaceEntry(
-            name=str(name),
-            kind=str(rec.get("kind") or ""),
-            exposure=str(rec.get("exposure") or "private"),
-            placement=str(rec.get("placement") or "server"),
-            module=str(rec.get("module") or ""),
-            src=str(rec.get("src") or "")
-        );
-    }
-
-    static def from_node(decl: any, module: any = None) -> (SurfaceEntry | None) {
-        kind = getattr(decl, "surface_kind", "") or "";
-        name = getattr(decl, "sym_name", "") or "";
-        if not kind or not name {
-            return None;
-        }
-        loc = module.loc if module is not None else None;
-        mod_path = getattr(loc, "mod_path", "") if loc is not None else "";
-        return SurfaceEntry(
-            name=str(name),
-            kind=str(kind),
-            exposure=str(decl.exposure.value),
-            placement=str(decl.placement_name),
-            module=str(mod_path or "")
-        );
-    }
-}
 
 obj InteropBinding {
     has name: str,
