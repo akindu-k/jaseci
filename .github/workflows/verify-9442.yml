@@ -1,0 +1,75 @@
+name: Verify 9442 built kit
+
+# Builds the jac binary at main and at the PR head, then runs the reviewer's
+# minimal workspace fixture through each shipped binary (JAC_NO_DEV_SOURCE=1).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [verify/9442-built-kit]
+
+permissions:
+  contents: read
+
+jobs:
+  fixture:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: before (main)
+            ref: 231662664f1e1bf2d1ee0e1fa6abbd4cf5d73b8b
+            expect: broken
+          - label: after (PR head)
+            ref: 1beb6ade3b8d3fccc61ad4bde08f30bd5f747ddc
+            expect: fixed
+    name: ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ matrix.ref }}
+
+      - name: Build the jac binary
+        uses: ./.github/actions/setup-jac
+
+      - name: Run the reviewer fixture
+        env:
+          JAC_NO_DEV_SOURCE: "1"
+          EXPECT: ${{ matrix.expect }}
+        run: |
+          set -uo pipefail
+          BIN="$GITHUB_WORKSPACE/jac/zig-out/bin/jac"
+          "$BIN" --version
+          WS="$RUNNER_TEMP/minws"
+          mkdir -p "$WS/web" "$WS/core"
+          cat > "$WS/jac.toml" <<'TOML'
+          [project]
+          name = "minws"
+          default-app = "web"
+
+          [apps.web]
+          kind = "web-app"
+          entry-point = "web.main"
+
+          [apps.svc]
+          kind = "service"
+          entry-point = "core.svc"
+          route = "/api/svc"
+          TOML
+          printf 'with entry {\n    print("web");\n}\n' > "$WS/web/main.jac"
+          printf 'def:pub ping() -> str {\n    return "pong";\n}\n' > "$WS/core/svc.jac"
+          cd "$WS"
+          out="$("$BIN" scale deploy web/main.jac --target kubernetes --dry-run 2>&1)"
+          code=$?
+          echo "$out"
+          echo "exit=$code"
+          if [ "$EXPECT" = broken ]; then
+            echo "$out" | grep -q "outside the deployed tree" \
+              || { echo "::error::main did not reproduce the bug"; exit 1; }
+          else
+            if echo "$out" | grep -q "outside the deployed tree"; then
+              echo "::error::PR head still reports the containment error"; exit 1
+            fi
+            [ "$code" -eq 0 ] || { echo "::error::dry-run exited $code"; exit 1; }
+          fi
