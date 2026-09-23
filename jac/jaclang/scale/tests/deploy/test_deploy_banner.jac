@@ -5,6 +5,7 @@ import unittest.mock;
 import from contextlib { redirect_stderr, redirect_stdout }
 import from pathlib { Path }
 import from jaclang.project.config { JacConfig }
+import from jaclang.scale.config.app_config { deployed_tree }
 import from jaclang.scale.deploy.target.factory { DeploymentTargetFactory }
 import from jaclang.scale.runtime.fleet { fleet_of }
 import from jaclang.scale.runtime.realizer.kubernetes_realizer { KubernetesRealizer }
@@ -150,6 +151,37 @@ test "a workspace deploys from the project root, not the served app's folder (is
             assert plans[0].file_name == "web/main.jac" , (
                 f"served_app={served_app!r}: the entry must stay addressable "
                 f"inside the tree, got {plans[0].file_name!r}"
+            );
+        }
+    }
+}
+
+
+test "the deployed tree is the project root only for a workspace (issue 9256)" {
+    with tempfile.TemporaryDirectory() as tmpdir {
+        base = Path(tmpdir);
+        workspace = base / "ws";
+        workspace.mkdir();
+        _write_workspace(str(workspace));
+        solo = base / "solo";
+        solo.mkdir();
+        (solo / "jac.toml").write_text('[project]\nname = "solo"\n', encoding="utf-8");
+        (solo / "main.jac").write_text("with entry {}\n", encoding="utf-8");
+        loose = base / "loose";
+        loose.mkdir();
+        (loose / "main.jac").write_text("with entry {}\n", encoding="utf-8");
+        cases = [
+            (str(workspace / "web" / "main.jac"), str(workspace), "web/main.jac"),
+            (str(solo / "main.jac"), str(solo), "main.jac"),
+            (str(loose / "main.jac"), str(loose), "main.jac")
+        ];
+        for (entry_file, want_folder, want_name) in cases {
+            (folder, name) = deployed_tree(entry_file);
+            assert os.path.realpath(folder) == os.path.realpath(want_folder) , (
+                f"{entry_file}: expected tree {want_folder!r}, got {folder!r}"
+            );
+            assert name == want_name , (
+                f"{entry_file}: expected entry {want_name!r}, got {name!r}"
             );
         }
     }
