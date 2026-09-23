@@ -18,7 +18,7 @@ jobs:
       matrix:
         include:
           - label: before (main)
-            ref: 231662664f1e1bf2d1ee0e1fa6abbd4cf5d73b8b
+            ref: 2316626645bd835426cbd33d4348ae4967dd5df5
             expect: broken
           - label: after (PR head)
             ref: 1beb6ade3b8d3fccc61ad4bde08f30bd5f747ddc
