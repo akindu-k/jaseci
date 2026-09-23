@@ -4,6 +4,7 @@ import from jaclang.scale.deploy.target.kubernetes.manifest_builder {
     ScalingMode
 }
 import from jaclang.scale.runtime.context.util { GATEWAY_NAME }
+import from jaclang.scale.models.resource_status { REPLICA_FLOOR_ANNOTATION }
 import from jaclang.scale.deploy.target.kubernetes.target {
     KubernetesTarget,
     apply_http_activations_for_bundle,
@@ -173,6 +174,8 @@ test "_resolve_scaling: an http_activation service is HTTP_ACTIVATION, carries t
     # Mutual exclusion: activation replaces the metric autoscaler, never coexists
     # (KEDA rejects a second ScaledObject on an HPA-managed target).
     assert plan["autoscaler"] == {};
+    # Scale-to-zero is legal here, so the plan's replica floor is 0.
+    assert plan["replica_floor"] == 0;
 }
 
 test "_resolve_scaling: the gateway never inherits http_activation even when the top-level default enables it" {
@@ -228,6 +231,15 @@ test "generate_manifests never activates the gateway, even though every microser
         bundle = b.generate_manifests(AppConfig(code_folder=project, app_name="t"), "");
         # The microservice picks up the shared default unchanged...
         assert bundle["scaling"]["billing_ops"]["mode"] == ScalingMode.HTTP_ACTIVATION;
+        # ...and its Deployment carries that intent for every status reader.
+        assert bundle["deployments"]["billing_ops"]["metadata"]["annotations"][
+            REPLICA_FLOOR_ANNOTATION
+        ]
+            == "0";
+        assert bundle["deployments"][GATEWAY_NAME]["metadata"]["annotations"][
+            REPLICA_FLOOR_ANNOTATION
+        ]
+            == "1";
         # ...but the gateway, present in every bundle regardless of the routes
         # table, never does - it is the ingress entry point and must stay warm.
         assert bundle["scaling"][GATEWAY_NAME]["mode"] != ScalingMode.HTTP_ACTIVATION;
@@ -244,6 +256,47 @@ test "_resolve_scaling: a plain service with the default hpa is METRIC, not acti
     assert plan["autoscaler"] != {};
     assert plan["http_activation"] == {};
     assert plan["scale_target_name"] == "worker-deployment";
+    assert plan["replica_floor"] == plan["autoscaler"]["min"];
+
+    # KEDA's idle_replicas is the floor that matters for scale-to-zero; under
+    # the HPA engine it is inert, so the floor stays at min.
+    keda = _builder(
+        {"worker": {}},
+        k8s_config=KubernetesConfig(
+            app_name="t", namespace="t-ns", autoscaler_engine="keda", idle_replicas=0
+        )
+    );
+    assert keda._resolve_scaling(
+        "worker", _dep("worker-deployment"), _svc("worker-service")
+    )["replica_floor"]
+        == 0;
+    hpa = _builder(
+        {"worker": {}},
+        k8s_config=KubernetesConfig(app_name="t", namespace="t-ns", idle_replicas=0)
+    );
+    assert hpa._resolve_scaling(
+        "worker", _dep("worker-deployment"), _svc("worker-service")
+    )["replica_floor"]
+        == 1;
+
+    # The resolved idle_replicas rides on the plan, so the ScaledObject KEDA
+    # gets and the floor every status reader trusts cannot drift apart.
+    worker_plan = keda._resolve_scaling(
+        "worker", _dep("worker-deployment"), _svc("worker-service")
+    );
+    assert worker_plan["idle_replicas"] == 0;
+    assert hpa._resolve_scaling(
+        "worker", _dep("worker-deployment"), _svc("worker-service")
+    )["idle_replicas"]
+        is None;
+
+    # ...and the gateway is exempt from idle_replicas=0 for the same reason it
+    # is exempt from http_activation: nothing wakes the ingress entry point.
+    gw_plan = keda._resolve_scaling(
+        GATEWAY_NAME, _dep("gateway-deployment"), _svc("gateway-service")
+    );
+    assert gw_plan["replica_floor"] == gw_plan["autoscaler"]["min"] , gw_plan;
+    assert gw_plan["idle_replicas"] is None , gw_plan;
 }
 
 
@@ -466,13 +519,32 @@ test "generate_manifests raises when two services inherit the shared catch-all r
 # HTTP activation's "a redeploy doesn't reset a scaled-to-zero target" guarantee
 # depends entirely on _apply_or_replace sending patch_body (with replicas
 # stripped) to `update` instead of the full manifest, while a fresh `create`
-# still gets the full manifest. Pin that contract directly so a future change
-# to _apply_or_replace can't silently break it.
+# still gets the full manifest. Pin that contract directly, and the decision
+# that produces the patch_body with it, so neither can go back to being keyed to
+# HTTP activation alone.
 
 def _target -> KubernetesTarget {
     return KubernetesTarget(config=KubernetesConfig(app_name="t", namespace="t-ns"));
 }
 
+
+test "every autoscaled mode gives up spec.replicas, not just HTTP activation" {
+    manifest = {
+        "metadata": {"name": "svc-deployment"},
+        "spec": {"replicas": 3, "template": {}}
+    };
+    for mode in [ScalingMode.METRIC, ScalingMode.HTTP_ACTIVATION] {
+        body = _target()._deployment_patch_body(manifest, {"mode": mode});
+        assert body is not None , mode;
+        assert "replicas" not in body["spec"] , mode;
+        assert body["spec"]["template"] == {} , mode;
+    }
+    # No autoscaler, or no plan at all: the manifest still owns the field.
+    assert _target()._deployment_patch_body(manifest, {"mode": ScalingMode.NONE})
+        is None;
+    assert _target()._deployment_patch_body(manifest, {}) is None;
+    assert "replicas" in manifest["spec"] , "the source manifest must not be mutated";
+}
 
 test "_apply_or_replace sends patch_body, not the full manifest, to update when the target exists" {
     mock_api = unittest.mock.MagicMock();
