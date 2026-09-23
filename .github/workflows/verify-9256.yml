@@ -1,0 +1,72 @@
+name: Verify 9256 workspace deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ci/verify-9256-fixture
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build the jac binary from this branch
+        uses: ./.github/actions/setup-jac
+
+      - name: Build the minimal workspace fixture
+        run: |
+          set -euo pipefail
+          WS="$RUNNER_TEMP/minws"
+          mkdir -p "$WS/web" "$WS/core"
+          cat > "$WS/jac.toml" <<'TOML'
+          [project]
+          name = "minws"
+          default-app = "web"
+          dependencies = [
+            "python-dotenv>=1.2.1,<2.0.0",
+            "kubernetes>=34.1.0,<35.0.0",
+            "docker>=7.1.0,<8.0.0",
+            "requests>=2.32.0,<3.0.0",
+          ]
+
+          [apps.web]
+          kind = "web-app"
+          entry-point = "web.main"
+
+          [apps.svc]
+          kind = "service"
+          entry-point = "core.svc"
+          route = "/api/svc"
+          TOML
+          echo 'with entry {}' > "$WS/web/main.jac"
+          echo 'with entry {}' > "$WS/core/svc.jac"
+          find "$WS" -type f | sort
+
+      - name: Install the fixture's deploy tooling
+        working-directory: ${{ runner.temp }}/minws
+        run: |
+          "$GITHUB_WORKSPACE/jac/zig-out/bin/jac" install
+
+      - name: Deploy dry-run against the fixture
+        working-directory: ${{ runner.temp }}/minws
+        env:
+          JAC_SCALE_PINNED_DEPLOY: "1"
+          JAC_NO_DEV_SOURCE: "1"
+        run: |
+          set -euo pipefail
+          BIN="$GITHUB_WORKSPACE/jac/zig-out/bin/jac"
+          "$BIN" --version
+          bash "$GITHUB_WORKSPACE/.github/scripts/assert_9256.sh" \
+            "$BIN" named web/main.jac
+
+      - name: Deploy dry-run with no argument
+        working-directory: ${{ runner.temp }}/minws
+        env:
+          JAC_SCALE_PINNED_DEPLOY: "1"
+          JAC_NO_DEV_SOURCE: "1"
+        run: |
+          set -euo pipefail
+          BIN="$GITHUB_WORKSPACE/jac/zig-out/bin/jac"
+          bash "$GITHUB_WORKSPACE/.github/scripts/assert_9256.sh" "$BIN" noarg
