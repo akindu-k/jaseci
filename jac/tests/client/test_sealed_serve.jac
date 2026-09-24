@@ -235,8 +235,10 @@ test "sealed static endpoints use the image even with an unrelated runtime base"
             os.utime(index, (0, 0));
             old_etag = routes["/"](request).headers.get("ETag");
             redeployed = html.replace("HOSTHASH", "NEWHASH1");
-            index.write_text(redeployed);
-            os.utime(index, (0, 0));
+            staged = dist / "index.html.new";
+            staged.write_text(redeployed);
+            os.utime(staged, (0, 0));
+            os.replace(staged, index);
             new_etag = routes["/"](request).headers.get("ETag");
             assert new_etag != old_etag;
             for (route, args) in [("/", []), ("/{file_path:path}", ["wait-wuuut"])] {

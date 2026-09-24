@@ -5,7 +5,7 @@ import from email.utils { formatdate, parsedate_to_datetime }
 import from jaclang.server.serving.datatypes { JSONResponse, Request, Response }
 
 glob DEFAULT_CACHE_CONTROL: str = 'public, max-age=3600',
-     _DIGESTS: dict[str, tuple[tuple[int, int, int, int], str]] = {};
+     _DIGESTS: dict[str, tuple[tuple[int, int, int], str]] = {};
 
 
 def guess_media_type(name: str) -> str {
@@ -27,7 +27,7 @@ def guess_media_type(name: str) -> str {
 
 
 def _etag(path: str, stat: os.stat_result) -> str {
-    key = (stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns);
+    key = (stat.st_ino, stat.st_size, stat.st_mtime_ns);
     cached = _DIGESTS.get(path);
     if cached is not None and cached[0] == key {
         return cached[1];
