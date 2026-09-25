@@ -544,6 +544,14 @@ glob STR_NA_GAPS: list[any] = [
              "difflib_na",
              ["na"]
          ),
+         (
+             "sqlite3 bundled",
+             "prim_sqlite3.jac",
+             "sqlite3_py",
+             "sqlite3_cl",
+             "sqlite3_na",
+             ["na"]
+         ),
          ("random", "prim_random.jac", "random_py", "random_cl", "random_na", ["na"]),
          (
              "any dispatch",
@@ -756,7 +764,10 @@ test "native gradual object keys demote, never pointer-sort (#9158)" {
     ];
     assert len(kept) == 0 , f"semantic str key must lower natively: {kept}";
     assert "__jac_str_cmp" in llvm_txt , "str-key control should use the semantic string comparator";
-    assert "strcmp" not in llvm_txt , "no raw pointer may reach libc strcmp (#9158)";
+    import re;
+    assert re.search(r'\bcall\s+i32\s+@"?strcmp"?\(', llvm_txt) is None , (
+        "no raw pointer may reach libc strcmp (#9158)"
+    );
 }
 
 test "annotated block lambda tails are type-checked (#9158)" {

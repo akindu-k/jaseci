@@ -102,9 +102,7 @@ impl NaIRGenPass._codegen_expr(nd: (uni.UniNode | None)) -> (ir.Value | None) {
         or isinstance(nd, uni.InnerCompr)
         or isinstance(nd, uni.FormattedValue)
     ) {} else {
-        self.ctx.emit(
-            E5092, node_override=nd, kind="expression", name=type(nd).__name__
-        );
+        self.emit(E5092, node_override=nd, kind="expression", name=type(nd).__name__);
     }
 
     if _result is not None and isinstance(nd, uni.Expr) and nd.coerce_to is not None {
@@ -164,9 +162,7 @@ impl NaIRGenPass._codegen_required(nd: (uni.UniNode | None)) -> (ir.Value | None
     if val is None
         and len(self.ctx.errors_had) == _errs_before
         and not self._reads_unlowered_local(nd) {
-        self.ctx.emit(
-            E5092, node_override=nd, kind="expression", name=type(nd).__name__
-        );
+        self.emit(E5092, node_override=nd, kind="expression", name=type(nd).__name__);
     }
     return val;
 }
@@ -229,7 +225,7 @@ impl NaIRGenPass._codegen_yield(nd: uni.YieldExpr) -> (ir.Value | None) {
     gc = self._gen_ctx;
     i64 = ir.IntType(64);
     if gc is None or self.builder.function is not gc.resume_fn {
-        self.ctx.emit(
+        self.emit(
             E5092,
             node_override=nd,
             kind="expression",
@@ -249,7 +245,7 @@ impl NaIRGenPass._codegen_yield(nd: uni.YieldExpr) -> (ir.Value | None) {
         } elif isinstance(elem_t, (ir.IntType, ir.DoubleType, ir.FloatType)) {
             v = ir.Constant(elem_t, 0);
         } else {
-            self.ctx.emit(
+            self.emit(
                 E5092,
                 node_override=nd,
                 kind="expression",
@@ -321,7 +317,7 @@ impl NaIRGenPass._codegen_yield_from(nd: uni.YieldExpr) -> (ir.Value | None) {
     built = self._build_iter_from_expr(nd.expr) if nd.expr is not None else None;
     if built is None {
         if len(self.ctx.errors_had) == _errs0 {
-            self.ctx.emit(
+            self.emit(
                 E5092,
                 node_override=nd,
                 kind="expression",
@@ -443,7 +439,7 @@ impl NaIRGenPass._codegen_lambda(nd: uni.LambdaExpr) -> (ir.Value | None) {
                     self.builder.ret(self._coerce_type(body_value, ret_type));
                 } else {
                     if len(self.ctx.errors_had) == _lam_errs0 {
-                        self.ctx.emit(
+                        self.emit(
                             E5092,
                             node_override=nd,
                             kind="expression",
@@ -462,7 +458,7 @@ impl NaIRGenPass._codegen_lambda(nd: uni.LambdaExpr) -> (ir.Value | None) {
                 self.builder.ret(self._coerce_type(body_value, ret_type));
             } else {
                 if len(self.ctx.errors_had) == _lam_errs0 {
-                    self.ctx.emit(
+                    self.emit(
                         E5092,
                         node_override=nd,
                         kind="expression",
@@ -596,9 +592,7 @@ impl NaIRGenPass._codegen_walrus(nd: uni.BinaryExpr) -> (ir.Value | None) {
     }
     var_name = self._get_name(nd.left);
     if var_name is None {
-        self.ctx.emit(
-            E5092, node_override=nd, kind="binary operator", name="WALRUS_EQ"
-        );
+        self.emit(E5092, node_override=nd, kind="binary operator", name="WALRUS_EQ");
         return None;
     }
     value = self._codegen_expr(nd.right);
@@ -728,7 +722,7 @@ impl NaIRGenPass._codegen_spawn(nd: uni.BinaryExpr) -> (ir.Value | None) {
     } elif right_name is not None and right_is_walker {
         (walker_name, walker_val, loc_val) = (right_name, right_val, left_val);
     } else {
-        self.ctx.emit(
+        self.emit(
             E5092,
             node_override=nd,
             kind="binary operator",
@@ -741,7 +735,7 @@ impl NaIRGenPass._codegen_spawn(nd: uni.BinaryExpr) -> (ir.Value | None) {
     _loc_name = right_name if left_is_walker else left_name;
     _xhelp = self._xmod_osp_help([_loc_name]);
     if _xhelp is not None {
-        self.ctx.emit(
+        self.emit(
             E5092,
             node_override=nd,
             kind="binary operator",
@@ -751,7 +745,7 @@ impl NaIRGenPass._codegen_spawn(nd: uni.BinaryExpr) -> (ir.Value | None) {
         return walker_val;
     }
 
-    _spawn_model = self.module.gen.osp_model;
+    _spawn_model = self.module.gen.native_osp_model;
     if (_spawn_model is not None)
         and (walker_name in _spawn_model.tags)
         and (self._osp_rt_global is not None)
@@ -759,7 +753,7 @@ impl NaIRGenPass._codegen_spawn(nd: uni.BinaryExpr) -> (ir.Value | None) {
         return self._codegen_kernel_spawn(walker_name, walker_val, loc_val);
     }
 
-    self.ctx.emit(E5092, node_override=nd, kind="binary operator", name="KW_SPAWN");
+    self.emit(E5092, node_override=nd, kind="binary operator", name="KW_SPAWN");
     return walker_val;
 }
 
@@ -834,7 +828,7 @@ impl NaIRGenPass._codegen_kernel_spawn(
 
 impl NaIRGenPass._spawn_operand_name(nd: uni.UniNode) -> (str | None) {
     if isinstance(nd, uni.FuncCall) {
-        return self._get_name(nd.target);
+        return self._arch_ref_key(nd.target) or self._get_name(nd.target);
     }
     if isinstance(nd, uni.Name) {
         return self._struct_name_of(nd);
@@ -843,7 +837,7 @@ impl NaIRGenPass._spawn_operand_name(nd: uni.UniNode) -> (str | None) {
 }
 
 impl NaIRGenPass._is_walker_arch(name: str) -> bool {
-    _model = self.module.gen.osp_model;
+    _model = self.module.gen.native_osp_model;
     return (_model is not None) and (_model.arch_kind.get(name) == "walker");
 }
 
@@ -1426,7 +1420,7 @@ impl NaIRGenPass._codegen_compare_link(
                     "cmp_in_str"
                 );
             }
-            self.ctx.emit(
+            self.emit(
                 E5092,
                 node_override=_in_hay_nd,
                 kind="expression",
@@ -1637,7 +1631,7 @@ impl NaIRGenPass._codegen_compare_chain(
         );
         if link is None {
             if len(self.ctx.errors_had) == _errs_before {
-                self.ctx.emit(
+                self.emit(
                     E5092,
                     node_override=nd,
                     kind="chained comparison operator",
@@ -1966,6 +1960,10 @@ impl NaIRGenPass._codegen_atom_trailer(nd: uni.AtomTrailer) -> (ir.Value | None)
     if isinstance(nd.right, uni.FilterCompr) {
         return self._codegen_chained_filter(nd);
     }
+    (_c_handled, _c_val) = self._codegen_c_interop_trailer(nd);
+    if _c_handled {
+        return _c_val;
+    }
     if nd.is_attr {
         target_name = self._get_name(nd.target);
         right_name = self._get_name(nd.right);
@@ -2200,10 +2198,9 @@ impl NaIRGenPass._codegen_atom_trailer(nd: uni.AtomTrailer) -> (ir.Value | None)
                 }
             }
 
-            if (
-                target_name in self.struct_types and target_name not in self.local_vars
-            ) {
-                for _cn in self._mro_of(target_name) {
+            _sf_cls = self._arch_ref_key(nd.target) or target_name;
+            if (_sf_cls in self.struct_types and target_name not in self.local_vars) {
+                for _cn in self._mro_of(_sf_cls) {
                     _sf = f"{_cn}.{right_name}";
                     if _sf in self.static_fields {
                         return self.builder.load(
@@ -2487,7 +2484,7 @@ impl NaIRGenPass._codegen_atom_trailer(nd: uni.AtomTrailer) -> (ir.Value | None)
                             }
                             if idx_val is not None {
                                 _sub_tk = self._type_key_of(nd.target) or "unknown";
-                                self.ctx.emit(
+                                self.emit(
                                     E5092,
                                     node_override=nd.target,
                                     kind="expression",
@@ -2627,7 +2624,7 @@ impl NaIRGenPass._codegen_atom_trailer(nd: uni.AtomTrailer) -> (ir.Value | None)
         }
     }
 
-    self.ctx.emit(
+    self.emit(
         E5092,
         node_override=nd,
         kind="attribute access" if nd.is_attr else "subscript/index access",
@@ -2664,5 +2661,5 @@ impl NaIRGenPass._ct_type_param_owner(nd: uni.Name) -> (str | None) {
         return None;
     }
     arch = owner.find_parent_of_type(uni.Archetype);
-    return arch.name.value if arch is not None else None;
+    return self._arch_key(arch) if arch is not None else None;
 }

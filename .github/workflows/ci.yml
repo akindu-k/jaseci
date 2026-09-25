@@ -180,7 +180,7 @@ jobs:
           env -i HOME="$WORK" PATH=/usr/bin:/bin JAC_NO_DEV_SOURCE=1 "$BIN" --version
           env -i HOME="$WORK" PATH=/usr/bin:/bin JAC_NO_DEV_SOURCE=1 "$BIN" -c 'import os, ssl; assert os.path.isfile(os.environ["SSL_CERT_FILE"]); assert ssl.create_default_context().cert_store_stats()["x509_ca"] > 0'
           out="$(env -i HOME="$WORK" PATH=/usr/bin:/bin JAC_NO_DEV_SOURCE=1 "$BIN" run "$WORK/obj.jac")"
-          echo "$out" | grep -q 49
+          grep -q 49 <<<"$out"
 
       - name: Run real jac programs (end-to-end execution)
         working-directory: jac
@@ -197,8 +197,8 @@ jobs:
           }
           JAC
           out="$(env -i HOME="$WORK" PATH=/usr/bin:/bin JAC_NO_DEV_SOURCE=1 "$BIN" run "$WORK/a.jac")"
-          echo "$out" | grep -q "dist 5.0"
-          echo "$out" | grep -q "0, 1, 4, 9, 16"
+          grep -q "dist 5.0" <<<"$out"
+          grep -q "0, 1, 4, 9, 16" <<<"$out"
 
       - name: jac test runner (self-contained test file)
         working-directory: jac
@@ -1523,6 +1523,10 @@ jobs:
           echo 'deb [signed-by=/usr/share/keyrings/llvm.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main' | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
           sudo apt-get install -y llvm-22-dev cmake
+      # This step carries test_c_backend.jac's coverage: test-runtime also
+      # discovers it but skips it there, having no LLVM 22 toolchain.
+      - name: Verify C backend comparisons and executable startup
+        run: jac test jac/tests/toolchains/test_c_backend.jac
       - name: Scaffold and export the jaclang.org site
         run: |
           jac create site --awesome

@@ -830,12 +830,18 @@ impl NaIRGenPass._lower_class_type(t: ClassType) -> (ir.Type | None) {
         return self._ensure_bytearray_type();
     }
 
+    _c_ty = self._lower_c_interop_type(t);
+    if _c_ty is not None {
+        return _c_ty;
+    }
     _enum_ty = self._ensure_enum_lowered(t);
     if _enum_ty is not None {
         return _enum_ty;
     }
-    if cname in self.struct_types {
-        return self.struct_types[cname].as_pointer();
+    import from jaclang.compiler.passes.layout_pass { class_type_native_name }
+    _native_cn = class_type_native_name(t) or cname;
+    if _native_cn in self.struct_types {
+        return self.struct_types[_native_cn].as_pointer();
     }
     type_args: list[TypeBase] = t.private.type_args or [];
 
@@ -1020,8 +1026,9 @@ impl NaIRGenPass._aos_elem_name(t: any) -> (str | None) {
     if not isinstance(t, _AeClassType) or t._shared is None {
         return None;
     }
-    _tn = t.shared.class_name;
-    if _tn not in self.struct_types {
+    import from jaclang.compiler.passes.layout_pass { class_type_native_name }
+    _tn = class_type_native_name(t);
+    if _tn is None or _tn not in self.struct_types {
         return None;
     }
     _lay = self._arch_layout(_tn);
@@ -1080,7 +1087,7 @@ impl NaIRGenPass._program_has_subclasses(arch_name: str) -> bool {
         for _mod in _mods {
             for _arch in _mod.get_all_sub_nodes(uni.Archetype) {
                 for _base in (_arch.base_classes or []) {
-                    _bn = self._get_name(_base);
+                    _bn = self._arch_ref_key(_base) or self._get_name(_base);
                     if _bn is not None {
                         _names.add(_bn);
                     }
@@ -1454,7 +1461,7 @@ impl NaIRGenPass._emit_unlowerable_type(type_expr: uni.UniNode, tb: any) -> ir.T
         _tag = type_expr?.type_tag;
         _label = self._get_name(_tag?.tag) or str(tb);
     }
-    self.ctx.emit(
+    self.emit(
         E5092, node_override=type_expr, kind=self._sig_decl_kind or "type", name=_label
     );
 
@@ -2393,7 +2400,7 @@ impl NaIRGenPass._coerce_type_inner(val: ir.Value, target_type: ir.Type) -> ir.V
         if _src_is_fn {
             if self._pending_lambda_captures is not None {
                 self._pending_lambda_captures = None;
-                self.ctx.emit(
+                self.emit(
                     E5092,
                     kind="expression",
                     name="capturing lambda used as a value",
@@ -2447,7 +2454,7 @@ impl NaIRGenPass._coerce_type_inner(val: ir.Value, target_type: ir.Type) -> ir.V
             if _lc_re is not None {
                 return _lc_re;
             }
-            self.ctx.emit(
+            self.emit(
                 E5092,
                 node_override=self.module,
                 kind="coercion",
@@ -2597,7 +2604,7 @@ impl NaIRGenPass._coerce_type_inner(val: ir.Value, target_type: ir.Type) -> ir.V
                     return ir.Constant(target_type, val.constant);
                 }
             }
-            self.ctx.emit(
+            self.emit(
                 E5092,
                 node_override=self.ctx.current_node,
                 kind="silent narrowing",
@@ -3015,7 +3022,7 @@ impl NaIRGenPass._emit_binary_op(
 
     if self?.jacval_type
         and (left.type == self.jacval_type or right.type == self.jacval_type) {
-        self.ctx.emit(
+        self.emit(
             E5092,
             node_override=self.ctx.current_node,
             kind="binary operator",
@@ -3068,7 +3075,7 @@ impl NaIRGenPass._emit_binary_op(
     } else {
         if not isinstance(left.type, ir.IntType)
             or not isinstance(right.type, ir.IntType) {
-            self.ctx.emit(
+            self.emit(
                 E5092,
                 node_override=self.ctx.current_node,
                 kind="integer operator layout",
@@ -3094,7 +3101,7 @@ impl NaIRGenPass._emit_binary_op(
             return self.builder.ashr(left, right, name="ashr");
         }
         if left.type != right.type {
-            self.ctx.emit(
+            self.emit(
                 E5092,
                 node_override=self.ctx.current_node,
                 kind="integer operator layout",
@@ -3141,7 +3148,7 @@ impl NaIRGenPass._emit_binary_op(
         return self.builder.or_(left, right, name="or");
     }
 
-    self.ctx.emit(
+    self.emit(
         E5092, node_override=self.ctx.current_node, kind="binary operator", name=op
     );
     return None;
@@ -3466,7 +3473,7 @@ impl NaIRGenPass._emit_mixed_jacval_comparison(
             _left_boxed
         );
     }
-    self.ctx.emit(
+    self.emit(
         E5090,
         kind="comparison",
         name=f"tagged `any` value against {_peer}",
@@ -3593,7 +3600,7 @@ impl NaIRGenPass._emit_comparison(
                             key_ret=_tup_eq_args[i] if i < len(_tup_eq_args) else None
                         );
                         if _sub_eq is None {
-                            self.ctx.emit(
+                            self.emit(
                                 E5090,
                                 kind="comparison",
                                 name=f"tuple element {i}",
@@ -3801,7 +3808,7 @@ impl NaIRGenPass._emit_comparison(
                             key_ret=_leq_args[0] if _leq_args else None
                         );
                         if _lsub_eq is None {
-                            self.ctx.emit(
+                            self.emit(
                                 E5090,
                                 kind="comparison",
                                 name="list element",
@@ -3834,7 +3841,7 @@ impl NaIRGenPass._emit_comparison(
 
                 if op in (Tok.LT, Tok.GT, Tok.LTE, Tok.GTE) {
                     if self?.jacval_type and lcmp_et == self.jacval_type {
-                        self.ctx.emit(
+                        self.emit(
                             E5092,
                             kind="comparison",
                             name="ordering on tagged-element lists"
@@ -4188,7 +4195,7 @@ impl NaIRGenPass._emit_comparison(
         if op in icmp_map {
             if not isinstance(left.type, ir.IntType)
                 or not isinstance(right.type, ir.IntType) {
-                self.ctx.emit(
+                self.emit(
                     E5090,
                     kind="comparison",
                     name=f"{left.type} against {right.type}",
@@ -4198,7 +4205,7 @@ impl NaIRGenPass._emit_comparison(
             }
             (left, right) = self._unify_int_widths(left, right);
             if left.type != right.type {
-                self.ctx.emit(
+                self.emit(
                     E5090,
                     kind="comparison",
                     name=f"{left.type} against {right.type}",
@@ -4757,7 +4764,7 @@ impl NaIRGenPass._emit_order_pair(
         Tok.LT, left, right, is_float, unsigned=unsigned, key_ret=key_ret
     );
     if _lt is None {
-        self.ctx.emit(
+        self.emit(
             E5090,
             kind="comparison",
             name=name,
@@ -4769,7 +4776,7 @@ impl NaIRGenPass._emit_order_pair(
         Tok.GT, left, right, is_float, unsigned=unsigned, key_ret=key_ret
     );
     if _gt is None {
-        self.ctx.emit(
+        self.emit(
             E5090,
             kind="comparison",
             name=name,
@@ -5220,16 +5227,14 @@ impl NaIRGenPass._lower_untyped_annotation(nd: uni.UniNode) -> (ir.Type | None) 
     }
     _nm = self._get_name(nd);
 
+    _ref_key = self._arch_ref_key(nd);
+    if _ref_key is not None and _ref_key in self.struct_types {
+        return self.struct_types[_ref_key].as_pointer();
+    }
     if isinstance(nd, uni.Name) and nd.sym is not None and nd.sym.decl is not None {
         _decl_of = nd.sym.decl.name_of;
         if isinstance(_decl_of, uni.Enum) {
             return ir.IntType(64);
-        }
-        if isinstance(_decl_of, uni.Archetype) {
-            _decl_anm = _decl_of.name.value if _decl_of.name else None;
-            if _decl_anm is not None and _decl_anm in self.struct_types {
-                return self.struct_types[_decl_anm].as_pointer();
-            }
         }
         if isinstance(_decl_of, uni.TypeParam)
             or (_decl_of is not None and isinstance(_decl_of.parent, uni.TypeParam)) {
@@ -5259,12 +5264,6 @@ impl NaIRGenPass._lower_untyped_annotation(nd: uni.UniNode) -> (ir.Type | None) 
                 if _imp_tail is not None {
                     if self._enum_source_name.get(_orig) == _imp_tail {
                         return ir.IntType(64);
-                    }
-                    if self._struct_source_name.get(_orig) == _imp_tail {
-                        _osrc_st = self.struct_types.get(_orig);
-                        if _osrc_st is not None {
-                            return _osrc_st.as_pointer();
-                        }
                     }
                 }
                 if _orig in self.struct_types {
