@@ -774,10 +774,12 @@ jobs:
         run: |
           curl -fsSL -o "$RUNNER_TEMP/jac-released" https://github.com/jaseci-labs/jac/releases/download/v0.37.21/jac-0.37.21-linux-x86_64
           chmod +x "$RUNNER_TEMP/jac-released"
+          set -o pipefail
           rc=0; bash .github/verify_9195.sh "$RUNNER_TEMP/jac-released" "before: released 0.37.21" | tee "$RUNNER_TEMP/before.txt" || rc=$?
           [ "$rc" = 1 ] || { echo "expected the released binary to show the stale shell (rc=1), got rc=$rc"; exit 1; }
       - name: After the fix (this PR's binary)
         run: |
+          set -o pipefail
           bash .github/verify_9195.sh "$GITHUB_WORKSPACE/jac/zig-out/bin/jac" "after: this PR" | tee "$RUNNER_TEMP/after.txt"
       - name: Summary
         if: always()
