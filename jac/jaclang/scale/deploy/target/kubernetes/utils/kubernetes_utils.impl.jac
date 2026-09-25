@@ -501,6 +501,36 @@ impl create_k8s_secret(
     return str(applied.metadata.resource_version or "") if applied else "";
 }
 
+impl resolve_signing_secret(
+    core_v1: client.CoreV1Api,
+    namespace: str,
+    secret_name: str,
+    secret_data: dict[str, str]
+) -> bool {
+    import base64;
+    import secrets;
+    import from jaclang.server.serving.authcrypt { PLACEHOLDER_JWT_SECRET }
+    key = "JAC_SERVE_AUTH_SECRET";
+    if secret_data.get(key) != PLACEHOLDER_JWT_SECRET {
+        return False;
+    }
+    live: dict[str, str] = {};
+    try {
+        found = core_v1.read_namespaced_secret(name=secret_name, namespace=namespace);
+        live = found.data or {};
+    } except ApiException as e {
+        if e.status != 404 {
+            raise;
+        }
+    }
+    if live.get(key) {
+        secret_data[key] = base64.b64decode(live[key]).decode("utf-8");
+        return False;
+    }
+    secret_data[key] = secrets.token_urlsafe(48);
+    return True;
+}
+
 impl delete_k8s_secret(
     core_v1: client.CoreV1Api, namespace: str, secret_name: str
 ) -> None {
