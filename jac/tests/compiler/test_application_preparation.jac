@@ -241,8 +241,10 @@ test "sealed preparation consumes baked artifacts without compiling retained sou
     images_before = list(sealed._images);
     import from jaclang.compiler.driver.jir { get_module_cache_path }
     import from jaclang.server.sealed_serve { client_dist_for }
+    import from jaclang.cli.console { console }
     for package_name in ['prepared_sealed_test', 'site'] {
-        with tempfile.TemporaryDirectory(prefix='jac-prepared-sealed-') as tmp {
+        with tempfile.TemporaryDirectory(prefix='jac-prepared-sealed-') as raw_tmp {
+            tmp = os.path.realpath(raw_tmp);
             base = Path(tmp);
             path = base / f'{package_name}.jac';
             package_init = base / '__init__.jac';
@@ -306,6 +308,20 @@ test "sealed preparation consumes baked artifacts without compiling retained sou
                 dist = base / '.jac' / 'client' / 'dist';
                 dist.mkdir(parents=True);
                 (dist / 'arena.wasm').write_bytes(b'baked wasm');
+                unlisted = base / 'unlisted.jac';
+                unlisted.write_text("def:pub other -> str { return 'source'; }\n");
+                with patch.object(console, 'print') as printed {
+                    prepare_application(str(unlisted), JacProgram(), tmp);
+                }
+                lines = [
+                    str(call.args[0])
+                    for call in printed.call_args_list
+                    if call.args
+                ];
+                assert f'  Sealed image at {tmp} does not list unlisted.jac; preparing from source'
+                    in lines , lines;
+                assert '  Loading sealed application artifacts' not in lines , lines;
+                forget(str(unlisted));
                 path.write_text('retained source must never be analyzed');
                 package_init.write_text('retained initializer must never be analyzed');
                 with patch.object(
@@ -331,6 +347,14 @@ test "sealed preparation consumes baked artifacts without compiling retained sou
                 assert prepared.client_compiler is None;
                 assert client_dist_for(str(path)) == dist;
                 assert (dist / 'arena.wasm').read_bytes() == b'baked wasm';
+                (base / '.jac' / 'serve_manifest.json').unlink();
+                caught = '';
+                try {
+                    prepare_application(str(path), JacProgram(), tmp, dev=False);
+                } except RuntimeError as e {
+                    caught = str(e);
+                }
+                assert 'Sealed application has no serving manifest' in caught , caught;
             } finally {
                 for (name, loaded) in list(sys.modules.items()) {
                     if str(getattr(loaded, '__file__', '') or '').startswith(
@@ -443,6 +467,62 @@ test "prepare warns about unmarked endpoints on cold and cached applications" {
                     assert len(warning.call_args_list) == 1 , messages;
                     assert 'plain' not in prepared.manifests[str(path)]['surface'];
                 }
+            }
+        } finally {
+            forget(str(path));
+        }
+    }
+}
+
+test "preparation does not load native libraries used only by the client" {
+    import jaclang.compiler.backends.native.link_plan as linking;
+    with tempfile.TemporaryDirectory(prefix='jac-client-native-') as tmp {
+        base = Path(tmp);
+        path = base / 'main.jac';
+        path.write_text(
+            'import from graphics { draw }\n'
+                + 'def app -> JsxElement { return <p>{draw()}</p>; }\n'
+                + 'def:pub ping -> int { return 7; }\n'
+        );
+        (base / 'graphics.jac').write_text(
+            'import from "lib_unavailable_on_server.so" { def render -> i64; }\n'
+                + 'def draw -> int { return render(); }\n'
+        );
+        try {
+            with patch.object(
+                linking,
+                'load_jit_clib',
+                side_effect=AssertionError('client library loaded on the server')
+            ) {
+                for iteration in range(2) {
+                    prepared = prepare_application(str(path), JacProgram(), tmp);
+                    module: any = initialize_application(prepared);
+                    assert module.ping() == 7;
+                    forget(str(path));
+                }
+            }
+        } finally {
+            forget(str(path));
+        }
+    }
+}
+
+test "preparation loads native engines for executable server calls" {
+    with tempfile.TemporaryDirectory(prefix='jac-server-native-') as tmp {
+        base = Path(tmp);
+        path = base / 'main.jac';
+        (base / 'jac.toml').write_text('[placement.pins]\n"main.positive"="native"\n');
+        path.write_text(
+            'def positive(value: int) -> int { return -value; }\n'
+                + 'def:pub answer -> int { return positive(-5); }\n'
+        );
+        try {
+            for iteration in range(2) {
+                prepared = prepare_application(str(path), JacProgram(), tmp);
+                assert prepared.native[str(path)][0] is not None;
+                module: any = initialize_application(prepared);
+                assert module.answer() == 5;
+                forget(str(path));
             }
         } finally {
             forget(str(path));
