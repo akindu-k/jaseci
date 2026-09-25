@@ -1170,20 +1170,40 @@ obj _FakeSecretsExisting(_FakeSecrets) {
 
 test "a redeploy keeps the signing secret and takes its revision from the replace" {
     cases = [
-        ("redeploy reuses live", {}, {"JAC_SERVE_AUTH_SECRET": "kept"}, "kept", 1),
-        ("configured wins", {"JAC_SERVE_AUTH_SECRET": "mine"}, {}, "mine", 0)
+        (
+            "redeploy reuses live",
+            {},
+            {"JAC_SERVE_AUTH_SECRET": "kept"},
+            "kept",
+            1,
+            False
+        ),
+        ("configured wins", {"JAC_SERVE_AUTH_SECRET": "mine"}, {}, "mine", 0, False),
+        (
+            "live placeholder is replaced",
+            {},
+            {"JAC_SERVE_AUTH_SECRET": PLACEHOLDER_JWT_SECRET},
+            None,
+            1,
+            True
+        )
     ];
-    for (label, configured, live, expected, reads) in cases {
+    for (label, configured, live, expected, reads, minted) in cases {
         api = _FakeSecretsExisting(version="88", live=live);
         data = ManifestBuilder(
             k8s_config=KubernetesConfig(app_name="app", namespace="ns"),
             secrets=configured
         )._build_user_secret_manifest()["stringData"];
 
-        assert not resolve_signing_secret(api, "ns", "app-secrets", data) , label;
+        assert resolve_signing_secret(api, "ns", "app-secrets", data) == minted , label;
         revision = create_k8s_secret(api, "ns", "app-secrets", data);
 
-        assert data["JAC_SERVE_AUTH_SECRET"] == expected , label;
+        if expected is None {
+            assert data["JAC_SERVE_AUTH_SECRET"]
+                not in ("", PLACEHOLDER_JWT_SECRET) , label;
+        } else {
+            assert data["JAC_SERVE_AUTH_SECRET"] == expected , label;
+        }
         assert api.reads == reads , label;
         assert revision == "88" , (
             "the 409 path has to return the replace response's revision, or a "

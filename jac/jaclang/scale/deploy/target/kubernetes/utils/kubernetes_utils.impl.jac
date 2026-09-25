@@ -523,8 +523,9 @@ impl resolve_signing_secret(
             raise;
         }
     }
-    if live.get(key) {
-        secret_data[key] = base64.b64decode(live[key]).decode("utf-8");
+    kept = base64.b64decode(live.get(key) or "").decode("utf-8");
+    if kept and kept != PLACEHOLDER_JWT_SECRET {
+        secret_data[key] = kept;
         return False;
     }
     secret_data[key] = secrets.token_urlsafe(48);
