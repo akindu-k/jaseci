@@ -523,7 +523,14 @@ impl resolve_signing_secret(
             raise;
         }
     }
-    kept = base64.b64decode(live.get(key) or "").decode("utf-8");
+    try {
+        kept = base64.b64decode(live.get(key) or "").decode("utf-8");
+    } except UnicodeDecodeError {
+        raise RuntimeError(
+            f"The live Secret '{secret_name}' in namespace '{namespace}' holds a "
+            f"{key} that is not valid UTF-8. Fix or delete that key, then redeploy."
+        ) from None;
+    }
     if kept and kept != PLACEHOLDER_JWT_SECRET {
         secret_data[key] = kept;
         return False;
