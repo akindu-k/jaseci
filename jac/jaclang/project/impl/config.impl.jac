@@ -492,7 +492,7 @@ impl JacConfig.save -> None {
     old_doc: dict[str, any] = {};
     if self.toml_path.exists() {
         import tomllib;
-        import from jaclang.project.source { read_file_with_encoding }
+        import from jaclang.project.textio { read_file_with_encoding }
         import from jaclang.project.tomlio { MalformedJacTomlError }
         text = read_file_with_encoding(str(self.toml_path));
         try {
@@ -1292,7 +1292,8 @@ impl _parse_toml_data(
             suppress=check_data.get("suppress", []),
             suppress_categories=check_data.get("suppress_categories", []),
             enforce_access=check_data.get("enforce_access", False),
-            warn_native_seams=check_data.get("warn_native_seams", True)
+            warn_native_seams=check_data.get("warn_native_seams", True),
+            untyped_external=str(check_data.get("untyped-external", "warning"))
         );
     }
     if "dot" in data {
@@ -1394,6 +1395,10 @@ impl _parse_toml_data(
         app = implicit_app(config);
         config.apps = {app.name: app};
     }
+    import from jaclang.project.persistence { parse_persistence }
+    config.persistence = parse_persistence(
+        data.get("persistence", {}), config.project.name
+    );
     return config;
 }
 
@@ -1722,6 +1727,11 @@ def _apply_memory_native_placement(cfg: JacConfig, data: dict[str, any]) {
     }
     if "native" in data and isinstance(data["native"], dict) {
         nat = data["native"];
+        _link_mode = str(nat.get("link_mode", cfg.native.link_mode));
+        if _link_mode not in ("objects", "bitcode") {
+            raise ValueError("[native] link_mode must be objects or bitcode");
+        }
+        cfg.native.link_mode = _link_mode;
         if "require" in nat {
             if not isinstance(nat["require"], list)
                 or not all(isinstance(pattern, str) for pattern in nat["require"]) {
@@ -1748,6 +1758,18 @@ def _apply_memory_native_placement(cfg: JacConfig, data: dict[str, any]) {
                 )}' must be an integer; defaulting to 4."
             );
             cfg.native.threads = 4;
+        }
+    }
+    if "arch" in data and isinstance(data["arch"], dict) {
+        arch_data = data["arch"];
+        if "closed" in arch_data {
+            if not isinstance(arch_data["closed"], list)
+                or not all(
+                    isinstance(pattern, str) for pattern in arch_data["closed"]
+                ) {
+                raise ValueError("[arch] closed must be a list of module patterns");
+            }
+            cfg.arch.closed = list(arch_data["closed"]);
         }
     }
     if "placement" in data

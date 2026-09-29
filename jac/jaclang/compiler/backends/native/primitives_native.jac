@@ -14,6 +14,7 @@ import from jaclang.compiler.backends.common.primitives {
     BuiltinEmitter
 }
 import type from jaclang.compiler.backends.native.na_ir_gen_pass { NaIRGenPass }
+import type from jaclang.compiler.types.types { TypeBase }
 import from jaclang.compiler.frontend.constant { Tokens as Tok }
 import from jaclang.compiler.frontend.unitree { Expr, UniNode }
 
@@ -641,6 +642,14 @@ class NativeBytesEmitter(BytesEmitter[(ir.Value, NativeEmitCtx)]) {
         args: list[ir.Value]
     ) -> (ir.Value | None);
 
+    def _emit_affix(
+        self: NativeBytesEmitter,
+        ctx: NativeEmitCtx,
+        target: ir.Value,
+        args: list[ir.Value],
+        suffix: bool
+    ) -> (ir.Value | None);
+
     def emit_replace(
         self: NativeBytesEmitter,
         ctx: NativeEmitCtx,
@@ -950,14 +959,9 @@ class NativeListEmitter(ListEmitter[(ir.Value, NativeEmitCtx)]) {
             );
         }
 
-        if isinstance(helpers["elem_type"], ir.PointerType) {
-            if p.rc_release_simple_fn is None {
-                p._emit_rc_helpers();
-            }
-            _i8p_da = ir.IntType(8).as_pointer();
+        if p._elem_kind(helpers["elem_type"]) != "raw" and not p._nogc_headerless() {
             _da_elem = b.call(helpers["get"], [target, del_idx], name="delat_rel_elem");
-            _da_cast = b.bitcast(_da_elem, _i8p_da, name="delat_rel_cast");
-            b.call(p.rc_release_simple_fn, [_da_cast]);
+            p._emit_elem_release(b, helpers["elem_type"], _da_elem);
         }
         len_ptr = b.gep(
             target, [ir.Constant(i32, 0), ir.Constant(i32, 0)], name="delat.len.ptr"
@@ -1033,7 +1037,7 @@ class NativeListEmitter(ListEmitter[(ir.Value, NativeEmitCtx)]) {
         ctx: NativeEmitCtx,
         target: ir.Value,
         reverse: (ir.Value | None)
-    ) -> ir.Value;
+    ) -> (ir.Value | None);
 
     def emit_reverse(
         self: NativeListEmitter,
@@ -1502,6 +1506,14 @@ class NativeBuiltinEmitter(BuiltinEmitter[(ir.Value, NativeEmitCtx)]) {
         self: NativeBuiltinEmitter, ctx: NativeEmitCtx, args: list[ir.Value]
     ) -> (ir.Value | None);
 
+    def _emit_extreme(
+        self: NativeBuiltinEmitter,
+        ctx: NativeEmitCtx,
+        args: list[ir.Value],
+        op: str,
+        name: str
+    ) -> (ir.Value | None);
+
     def emit_sum(
         self: NativeBuiltinEmitter, ctx: NativeEmitCtx, args: list[ir.Value]
     ) -> (ir.Value | None);
@@ -1666,6 +1678,12 @@ class NativeBuiltinEmitter(BuiltinEmitter[(ir.Value, NativeEmitCtx)]) {
         if isinstance(arg_val.type, ir.PointerType) and arg_val.type == i8p {
             str_repr = b.call(p._repr_str_fn(), [arg_val], name="repr.str");
             return p._mark_owned(str_repr);
+        }
+        if p?.jacval_type and arg_val.type == p.jacval_type {
+            _jv_fn = p._repr_jacval_fn();
+            if _jv_fn is not None {
+                return p._mark_owned(b.call(_jv_fn, [arg_val], name="repr.jacval"));
+            }
         }
         if isinstance(arg_val.type, (ir.PointerType, ir.LiteralStructType)) {
             cont_s = p._emit_container_repr(arg_val, ctx.type_key or None);
@@ -2222,6 +2240,17 @@ class NativeBuiltinEmitter(BuiltinEmitter[(ir.Value, NativeEmitCtx)]) {
     def emit_int(
         self: NativeBuiltinEmitter, ctx: NativeEmitCtx, args: list[ir.Value]
     ) -> (ir.Value | None);
+
+    def _int_from_c_string(
+        self: NativeBuiltinEmitter,
+        ctx: NativeEmitCtx,
+        text: ir.Value,
+        base: (ir.Value | None) = None
+    ) -> ir.Value;
+
+    def _int_from_boxed(
+        self: NativeBuiltinEmitter, ctx: NativeEmitCtx, boxed: ir.Value
+    ) -> ir.Value;
 
     def emit_float(
         self: NativeBuiltinEmitter, ctx: NativeEmitCtx, args: list[ir.Value]
