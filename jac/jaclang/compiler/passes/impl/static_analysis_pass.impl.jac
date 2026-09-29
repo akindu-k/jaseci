@@ -140,6 +140,10 @@ impl StaticAnalysisPass._check_undefined_names(mod: Module) -> None {
             continue;
         }
 
+        if name_nd.find_parent_of_type(ImplImport) is not None {
+            continue;
+        }
+
         if not name_nd.is_kwesc {
             position = self._osp_shape_position(name_nd);
             if position is not None {
@@ -270,8 +274,8 @@ impl StaticAnalysisPass._check_unreachable_code(mod: Module) -> None {
     }
 
     for container in containers {
-        body = container?.body;
-        if not body or not isinstance(body, Sequence) {
+        body: list[UniNode] = [container->:BodyRole:->];
+        if not body {
             continue;
         }
         found_terminator = False;
@@ -514,7 +518,7 @@ impl StaticAnalysisPass._check_client_imports(mod: Module) -> None {
             }
             import os;
             import from jaclang.compiler.frontend.diagnostics { W1106 }
-            import from jaclang.project.modresolver { is_path_alias_import }
+            import from jaclang.compiler.frontend.host { active_host }
             import from jaclang.compiler.placement.placement_pins {
                 in_client_npm_world
             }
@@ -522,7 +526,7 @@ impl StaticAnalysisPass._check_client_imports(mod: Module) -> None {
             sibling_file = os.path.join(os.path.dirname(mod_path), spv);
             if (
                 not in_client_npm_world(spv, mod_path)
-                and not is_path_alias_import(spv, mod_path)
+                and not active_host().is_path_alias(spv, mod_path)
                 and not os.path.isfile(sibling_file)
             ) {
                 self.ctx.emit(W1106, node_override=spv_node, name=spv);

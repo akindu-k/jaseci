@@ -41,7 +41,8 @@ glob RETIRED: tuple[str, ...] = (
          "bytecode",
          "bootstrap",
          "toolchains/llvm-cbe",
-         "toolchains/cocoapods"
+         "toolchains/cocoapods",
+         "jir/kernel_units"
      ),
      GENERATION_PATTERN: str = "[0-9a-f]" * 16,
      BUCKETS: list[Bucket] = [
@@ -74,16 +75,24 @@ glob RETIRED: tuple[str, ...] = (
              summary="pre-resolved typeshed catalogs"
          ),
          Bucket(
-             name="jir-kernel-units",
-             relpath="jir/kernel_units",
-             policy=Policy(ttl_days=14.0, keep_match=KeepMatch.FRAGMENT),
-             summary="native kernel unit sources and their compiled artifacts"
+             name="jir-jit",
+             relpath="jir/jit",
+             policy=Policy(ttl_days=14.0, pattern="*.bc"),
+             summary="optimized whole-program images for the in-process JIT, one per link plan"
          ),
          Bucket(
              name="jir-digests",
              relpath="jir",
              policy=Policy(ttl_days=14.0, pattern="compiler_digest.*.json"),
              summary="compiler source digests, one per checkout"
+         ),
+         Bucket(
+             name="stage0",
+             relpath="stage0",
+             policy=Policy(
+                 ttl_days=30.0, pattern="[0-9a-f]" * 40, markers=[".stage0.json"]
+             ),
+             summary="pinned stage-0 compiler snapshots that build the kernel, one per commit"
          ),
          Bucket(
              name="apps",

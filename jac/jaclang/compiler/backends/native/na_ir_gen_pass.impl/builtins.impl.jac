@@ -150,15 +150,8 @@ impl NaIRGenPass._emit_print(nd: uni.FuncCall) -> (ir.Value | None) {
                 args.append(self._bool_text(self.builder, val, "print.bool"));
             } else {
                 _unsigned = self._is_unsigned_node(param);
-                if val.type.width < 64 {
-                    val = (
-                        self.builder.zext(val, ir.IntType(64))
-                            if _unsigned
-                            else self.builder.sext(val, ir.IntType(64))
-                    );
-                }
                 fmt_parts.append("%llu" if _unsigned else "%lld");
-                args.append(val);
+                args.append(self._int_text_arg(val, _unsigned));
             }
         } elif isinstance(val.type, ir.DoubleType) {
             fmt_parts.append("%s");
@@ -183,7 +176,7 @@ impl NaIRGenPass._emit_print(nd: uni.FuncCall) -> (ir.Value | None) {
                 _pointee = val.type?.pointee;
                 _is_char_ptr = isinstance(_pointee, ir.IntType) and _pointee.width == 8;
                 if not _is_char_ptr {
-                    self.ctx.emit(
+                    self.emit(
                         E5092,
                         node_override=param,
                         kind="print argument",
@@ -195,9 +188,12 @@ impl NaIRGenPass._emit_print(nd: uni.FuncCall) -> (ir.Value | None) {
             fmt_parts.append("%s");
             args.append(val);
         } elif self._opt_payload_of(val.type) is not None {
-            _opt_s = self._emit_opt_repr(val);
+            _opt_s = self._emit_optional_str(val, param);
+            if _opt_s is not None {
+                self._release_owned_args([val], op="print_opt_src");
+            }
             if _opt_s is None {
-                self.ctx.emit(
+                self.emit(
                     E5092,
                     node_override=param,
                     kind="print argument",
@@ -210,7 +206,7 @@ impl NaIRGenPass._emit_print(nd: uni.FuncCall) -> (ir.Value | None) {
         } elif self?.jacval_type is not None and val.type == self.jacval_type {
             _jv_s = self._str_jacval_fn();
             if _jv_s is None {
-                self.ctx.emit(
+                self.emit(
                     E5092,
                     node_override=param,
                     kind="print argument",
@@ -223,7 +219,7 @@ impl NaIRGenPass._emit_print(nd: uni.FuncCall) -> (ir.Value | None) {
         } elif isinstance(val.type, ir.LiteralStructType) {
             _tup_s = self._emit_container_repr(val, self._type_key_of(param));
             if _tup_s is None {
-                self.ctx.emit(
+                self.emit(
                     E5092,
                     node_override=param,
                     kind="print argument",
@@ -234,7 +230,7 @@ impl NaIRGenPass._emit_print(nd: uni.FuncCall) -> (ir.Value | None) {
             fmt_parts.append("%s");
             args.append(_tup_s);
         } else {
-            self.ctx.emit(
+            self.emit(
                 E5092,
                 node_override=param,
                 kind="print argument",
@@ -545,7 +541,7 @@ impl NaIRGenPass._fstring_spec_to_printf(
 }
 
 impl NaIRGenPass._emit_optional_str(
-    val: ir.Value, part: (uni.UniNode | None)
+    val: ir.Value, part: (uni.UniNode | None), repr_mode: bool = False
 ) -> (ir.Value | None) {
     _pt = self._opt_payload_of(val.type);
     if _pt is None {
@@ -553,6 +549,10 @@ impl NaIRGenPass._emit_optional_str(
     }
     i8p = ir.IntType(8).as_pointer();
     if not isinstance(_pt, ir.PointerType) {
+        _scalar_s = self._emit_opt_repr(val);
+        if _scalar_s is not None {
+            return _scalar_s;
+        }
         if not self?.jacval_type {
             return None;
         }
@@ -565,9 +565,13 @@ impl NaIRGenPass._emit_optional_str(
         self._mark_owned(boxed_text);
         return boxed_text;
     }
+    _headerless = self._nogc_headerless();
     _none_s = self.builder.bitcast(
         self._make_global_string("None"), i8p, name="opt.str.none"
     );
+    if _headerless {
+        _none_s = self._call_str_dup(self.builder, _none_s, name="opt.str.none.dup");
+    }
     _tag = self.builder.extract_value(val, 0, name="opt.str.tag");
     _set = self.builder.icmp_signed(
         "!=", _tag, ir.Constant(ir.IntType(8), 0), name="opt.str.set"
@@ -580,12 +584,28 @@ impl NaIRGenPass._emit_optional_str(
     self.builder.position_at_start(_some_bb);
     _pv = self.builder.extract_value(val, 1, name="opt.str.pv");
     _s: ir.Value = _pv;
-    if _pt != i8p {
-        _built = self._emit_obj_str(_pv);
+    if repr_mode or _pt != i8p {
+        _built = self._emit_value_repr(_pv, part)
+            if repr_mode
+            else self._emit_obj_str(_pv);
+        if _built is None and not repr_mode {
+            _built = self._emit_container_repr(_pv, self._type_key_of(part));
+        }
         if _built is None {
             return None;
         }
-        _s = _built;
+        _s = self._coerce_type(_built, i8p);
+        if not self._is_owned(_built) {
+            if _headerless {
+                _s = self._call_str_dup(self.builder, _s, name="opt.str.own");
+            } else {
+                self._emit_rc_retain(_s, op="opt_str", loc="");
+            }
+        }
+    } elif _headerless {
+        _s = self._call_str_dup(self.builder, _pv, name="opt.str.own");
+    } else {
+        self._emit_rc_retain(_pv, op="opt_str", loc="");
     }
     _some_end = self.builder.basic_block;
     self.builder.branch(_merge_bb);
@@ -593,6 +613,7 @@ impl NaIRGenPass._emit_optional_str(
     _phi = self.builder.phi(i8p, name="opt.str");
     _phi.add_incoming(_none_s, _entry);
     _phi.add_incoming(_s, _some_end);
+    self._mark_owned(_phi);
     return _phi;
 }
 
@@ -612,10 +633,13 @@ impl NaIRGenPass._codegen_fstring(nd: uni.FString) -> (ir.Value | None) {
             if val is None {
                 continue;
             }
+            _conv = part.conversion if part.conversion is not None else -1;
             if self._opt_payload_of(val.type) is not None {
-                _opt_s = self._emit_optional_str(val, part);
+                _opt_s = self._emit_optional_str(
+                    val, part.format_part, repr_mode=(_conv == 114)
+                );
                 if _opt_s is None {
-                    self.ctx.emit(
+                    self.emit(
                         E5092,
                         node_override=part,
                         kind="f-string value",
@@ -623,14 +647,15 @@ impl NaIRGenPass._codegen_fstring(nd: uni.FString) -> (ir.Value | None) {
                     );
                     return None;
                 }
+                self._release_owned_args([val], op="fstr_opt_src");
                 val = _opt_s;
-                if self._is_owned(_opt_s) {
-                    obj_strs.append(_opt_s);
+                obj_strs.append(_opt_s);
+                if _conv == 114 {
+                    _conv = -1;
                 }
             }
-            _conv = part.conversion if part.conversion is not None else -1;
             if _conv == 114 {
-                val = self._emit_fstr_repr(val, part);
+                val = self._emit_value_repr(val, part.format_part);
                 if val is None {
                     return None;
                 }
@@ -638,7 +663,7 @@ impl NaIRGenPass._codegen_fstring(nd: uni.FString) -> (ir.Value | None) {
                     obj_strs.append(val);
                 }
             } elif _conv not in (-1, 115) {
-                self.ctx.emit(
+                self.emit(
                     E5092, node_override=part, kind="f-string conversion", name="!a"
                 );
                 return None;
@@ -649,7 +674,7 @@ impl NaIRGenPass._codegen_fstring(nd: uni.FString) -> (ir.Value | None) {
                 _spec_txt = self._fstring_spec_text(part.format_spec);
                 if _spec_txt is None {
                     if not isinstance(part.format_spec, uni.FString) {
-                        self.ctx.emit(
+                        self.emit(
                             E5092,
                             node_override=part,
                             kind="f-string format spec",
@@ -680,9 +705,10 @@ impl NaIRGenPass._codegen_fstring(nd: uni.FString) -> (ir.Value | None) {
                 args.append(_dyn);
                 continue;
             }
+            _unsigned = self._is_unsigned_node(part.format_part);
             if _spec_txt {
-                if isinstance(val.type, ir.IntType) and val.type.width == 1 {
-                    val = self.builder.zext(val, ir.IntType(64));
+                if isinstance(val.type, ir.IntType) {
+                    val = self._int_text_arg(val, _unsigned);
                 }
                 _fs_kind: (str | None) = None;
                 if isinstance(val.type, ir.IntType) {
@@ -711,12 +737,17 @@ impl NaIRGenPass._codegen_fstring(nd: uni.FString) -> (ir.Value | None) {
                     continue;
                 }
                 (directive, want) = _tr;
+                if _unsigned and directive.endswith("lld") {
+                    directive = directive[:-1] + "u";
+                }
                 if want == "float" {
                     fmt_parts.append(directive);
                     args.append(self._coerce_type(val, ir.DoubleType()));
                 } elif want == "repr" {
+                    _spec_repr = self._emit_float_repr(val);
+                    obj_strs.append(_spec_repr);
                     fmt_parts.append(directive);
-                    args.append(self._emit_float_repr(val));
+                    args.append(_spec_repr);
                 } elif want == "str" {
                     if val.type != ir.IntType(8).as_pointer() {
                         obj_s = self._emit_obj_str(val);
@@ -734,7 +765,7 @@ impl NaIRGenPass._codegen_fstring(nd: uni.FString) -> (ir.Value | None) {
                             val = obj_s;
                             obj_strs.append(obj_s);
                         } else {
-                            self.ctx.emit(
+                            self.emit(
                                 E5092,
                                 node_override=part,
                                 kind="f-string value",
@@ -751,15 +782,17 @@ impl NaIRGenPass._codegen_fstring(nd: uni.FString) -> (ir.Value | None) {
                 }
                 continue;
             }
-            if isinstance(val.type, ir.IntType) and val.type.width == 64 {
-                fmt_parts.append("%lld");
-                args.append(val);
-            } elif isinstance(val.type, ir.IntType) and val.type.width == 1 {
+            if isinstance(val.type, ir.IntType) and val.type.width == 1 {
                 fmt_parts.append("%s");
                 args.append(self._bool_text(self.builder, val, "fstr.bool"));
+            } elif isinstance(val.type, ir.IntType) {
+                fmt_parts.append("%llu" if _unsigned else "%lld");
+                args.append(self._int_text_arg(val, _unsigned));
             } elif isinstance(val.type, ir.DoubleType) {
+                _float_repr = self._emit_float_repr(val);
+                obj_strs.append(_float_repr);
                 fmt_parts.append("%s");
-                args.append(self._emit_float_repr(val));
+                args.append(_float_repr);
             } elif isinstance(val.type, ir.PointerType) {
                 obj_s = self._emit_obj_str(val);
                 if obj_s is None {
@@ -774,7 +807,7 @@ impl NaIRGenPass._codegen_fstring(nd: uni.FString) -> (ir.Value | None) {
                     val = obj_s;
                     obj_strs.append(obj_s);
                 } elif val.type != ir.IntType(8).as_pointer() {
-                    self.ctx.emit(
+                    self.emit(
                         E5092,
                         node_override=part,
                         kind="f-string value",
@@ -784,12 +817,29 @@ impl NaIRGenPass._codegen_fstring(nd: uni.FString) -> (ir.Value | None) {
                 }
                 fmt_parts.append("%s");
                 args.append(val);
+            } elif self?.jacval_type is not None and val.type == self.jacval_type {
+                _jv_fn = self._str_jacval_fn();
+                if _jv_fn is None {
+                    self.emit(
+                        E5092,
+                        node_override=part,
+                        kind="f-string value",
+                        name=type(part.format_part).__name__
+                    );
+                    return None;
+                }
+                _jv_s = self._mark_owned(
+                    self.builder.call(_jv_fn, [val], name="fstr.jv")
+                );
+                obj_strs.append(_jv_s);
+                fmt_parts.append("%s");
+                args.append(_jv_s);
             } elif isinstance(val.type, ir.LiteralStructType) {
                 _tup_s = self._emit_container_repr(
                     val, self._type_key_of(part.format_part)
                 );
                 if _tup_s is None {
-                    self.ctx.emit(
+                    self.emit(
                         E5092,
                         node_override=part,
                         kind="f-string value",
@@ -1442,12 +1492,14 @@ impl NaIRGenPass._emit_sys_argv -> (ir.Value | None) {
     if "__jac_argc" not in self.llvm_module.globals {
         _argc_gv = ir.GlobalVariable(self.llvm_module, i32, name="__jac_argc");
         _argc_gv.initializer = ir.Constant(i32, 0);
+        _argc_gv.linkage = "weak";
     }
     if "__jac_argv" not in self.llvm_module.globals {
         _argv_gv = ir.GlobalVariable(
             self.llvm_module, i8p.as_pointer(), name="__jac_argv"
         );
         _argv_gv.initializer = ir.Constant(i8p.as_pointer(), None);
+        _argv_gv.linkage = "weak";
     }
 
     argc_global = self.llvm_module.get_global("__jac_argc");
@@ -1597,8 +1649,19 @@ impl NaIRGenPass._bool_text(b: ir.IRBuilder, flag: ir.Value, name: str) -> ir.Va
     );
 }
 
-impl NaIRGenPass._emit_fstr_repr(
-    val: ir.Value, part: uni.FormattedValue
+impl NaIRGenPass._int_text_arg(val: ir.Value, unsigned: bool) -> ir.Value {
+    i64 = ir.IntType(64);
+    if val.type == i64 {
+        return val;
+    }
+    if unsigned or val.type == ir.IntType(1) {
+        return self.builder.zext(val, i64, name="text.int");
+    }
+    return self.builder.sext(val, i64, name="text.int");
+}
+
+impl NaIRGenPass._emit_value_repr(
+    val: ir.Value, type_node: (uni.UniNode | None)
 ) -> (ir.Value | None) {
     i8p = ir.IntType(8).as_pointer();
     i64 = ir.IntType(64);
@@ -1620,11 +1683,17 @@ impl NaIRGenPass._emit_fstr_repr(
     } elif isinstance(val.type, ir.PointerType) and val.type == i8p {
         res = self.builder.call(self._repr_str_fn(), [val], name="fstr.repr.str");
         return self._mark_owned(res);
+    } elif self?.jacval_type is not None and val.type == self.jacval_type {
+        fn = self._repr_jacval_fn();
+        if fn is not None {
+            res = self.builder.call(fn, [val], name="fstr.repr.jv");
+            return self._mark_owned(res);
+        }
     } elif isinstance(val.type, (ir.PointerType, ir.LiteralStructType)) {
-        _r = self._emit_container_repr(val, self._type_key_of(part.format_part));
+        _r = self._emit_container_repr(val, self._type_key_of(type_node));
         if _r is None and isinstance(val.type, ir.PointerType) {
             _r = self._dispatch_builtin(
-                "repr", [val], type_key=(self._type_key_of(part.format_part) or "")
+                "repr", [val], type_key=(self._type_key_of(type_node) or "")
             );
         }
         if _r is not None {
@@ -1636,7 +1705,7 @@ impl NaIRGenPass._emit_fstr_repr(
             return _r;
         }
     }
-    self.ctx.emit(E5092, node_override=part, kind="f-string conversion", name="!r");
+    self.emit(E5092, node_override=type_node, kind="f-string conversion", name="!r");
     return None;
 }
 
@@ -1654,9 +1723,7 @@ impl NaIRGenPass._emit_dyn_spec_format(
         kname = "jac_fmt_bool";
     } elif isinstance(val.type, ir.IntType) {
         kname = "jac_fmt_int";
-        if val.type.width != 64 {
-            sval = self.builder.sext(val, ir.IntType(64), name="fstr.dyn.sext");
-        }
+        sval = self._int_text_arg(val, self._is_unsigned_node(part.format_part));
     } elif isinstance(val.type, (ir.FloatType, ir.DoubleType)) {
         kname = "jac_fmt_float";
         if isinstance(val.type, ir.FloatType) {
@@ -1673,7 +1740,7 @@ impl NaIRGenPass._emit_dyn_spec_format(
             _s = self._emit_container_repr(val, self._type_key_of(part.format_part));
         }
         if _s is None {
-            self.ctx.emit(
+            self.emit(
                 E5092,
                 node_override=part,
                 kind="f-string value",
@@ -1684,7 +1751,7 @@ impl NaIRGenPass._emit_dyn_spec_format(
         sval = _s;
         kname = "jac_fmt_str";
     } else {
-        self.ctx.emit(
+        self.emit(
             E5092,
             node_override=part,
             kind="f-string format spec",
@@ -1694,7 +1761,7 @@ impl NaIRGenPass._emit_dyn_spec_format(
     }
     fn = self._get_fmt_kernel_fn(kname);
     if fn is None {
-        self.ctx.emit(
+        self.emit(
             E5092,
             node_override=part,
             kind="f-string format spec",
@@ -1717,30 +1784,55 @@ impl NaIRGenPass._emit_opt_repr(opt_val: ir.Value) -> (ir.Value | None) {
     b = self.builder;
     i8 = ir.IntType(8);
     i64 = ir.IntType(64);
-    tag = b.extract_value(opt_val, 0, name="opt.repr.tag");
-    present = b.icmp_signed("!=", tag, ir.Constant(i8, 0), name="opt.repr.has");
-    payload = b.extract_value(opt_val, 1, name="opt.repr.pl");
-    some_str: (ir.Value | None) = None;
-    if isinstance(payload.type, ir.IntType) and payload.type.width == 1 {
-        some_str = self._bool_text(b, payload, "opt.repr.bool");
-    } elif isinstance(payload.type, ir.IntType) {
-        fn = self._repr_leaf_fn("int");
-        if fn is not None {
-            some_str = b.call(
-                fn, [self._coerce_type(payload, i64)], name="opt.repr.int"
-            );
-        }
-    } elif isinstance(payload.type, (ir.FloatType, ir.DoubleType)) {
-        some_str = self._emit_float_repr(self._coerce_type(payload, ir.DoubleType()));
-    }
-    if some_str is None {
+    payload_ty = self._opt_payload_of(opt_val.type);
+    if not (
+        isinstance(payload_ty, ir.IntType)
+        or isinstance(payload_ty, (ir.FloatType, ir.DoubleType))
+    ) {
         return None;
     }
+    if isinstance(payload_ty, ir.IntType)
+        and payload_ty.width != 1
+        and self._repr_leaf_fn("int") is None {
+        return None;
+    }
+    tag = b.extract_value(opt_val, 0, name="opt.repr.tag");
+    present = b.icmp_signed("!=", tag, ir.Constant(i8, 0), name="opt.repr.has");
+    fn = b.basic_block.function;
+    some_bb = fn.append_basic_block(name="opt.repr.some");
+    none_bb = fn.append_basic_block(name="opt.repr.absent");
+    done_bb = fn.append_basic_block(name="opt.repr.done");
+    b.cbranch(present, some_bb, none_bb);
+    b.position_at_end(some_bb);
+    payload = b.extract_value(opt_val, 1, name="opt.repr.pl");
+    some_str: ir.Value;
+    if isinstance(payload.type, ir.IntType) and payload.type.width == 1 {
+        some_str = self._bool_text(b, payload, "opt.repr.bool");
+        if self._nogc_headerless() {
+            some_str = self._call_str_dup(b, some_str, name="opt.repr.bool.dup");
+        }
+    } elif isinstance(payload.type, ir.IntType) {
+        some_str = b.call(
+            self._repr_leaf_fn("int"),
+            [self._coerce_type(payload, i64)],
+            name="opt.repr.int"
+        );
+    } else {
+        some_str = self._emit_float_repr(self._coerce_type(payload, ir.DoubleType()));
+    }
+    some_end = b.basic_block;
+    b.branch(done_bb);
+    b.position_at_end(none_bb);
     none_str = self._make_global_string("None", name_prefix=".repr.none");
     if self._nogc_headerless() {
         none_str = self._call_str_dup(b, none_str, name="opt.repr.none.dup");
     }
-    sel = b.select(present, some_str, none_str, name="opt.repr");
+    none_end = b.basic_block;
+    b.branch(done_bb);
+    b.position_at_end(done_bb);
+    sel = b.phi(some_str.type, name="opt.repr");
+    sel.add_incoming(some_str, some_end);
+    sel.add_incoming(self._coerce_type(none_str, some_str.type), none_end);
     self._mark_owned(sel);
     return sel;
 }
@@ -1862,11 +1954,7 @@ impl NaIRGenPass._float_repr_fn -> ir.Function {
     fr0 = b.sub(ndig, decpt, name="fr.frac0");
     is_neg = b.icmp_signed("<", fr0, ir.Constant(i64, 0), name="fr.fracneg");
     frac = b.select(is_neg, ir.Constant(i64, 0), fr0, name="fr.frac");
-    if self._nogc_headerless() {
-        _free_hl = self._get_or_declare_extern("free", ir.VoidType(), [i8p]);
-        b.call(_free_hl, [tmp]);
-    }
-    fbuf = self._str_alloc(b, cap, name="fr.fbuf");
+    fbuf = tmp;
     frac32 = b.trunc(frac, i32, name="fr.frac32");
     flen32 = b.call(snprintf, [fbuf, cap, fmt_f, frac32, d], name="fr.flen32");
     self._str_finish(b, fbuf, b.sext(flen32, i64, name="fr.flen0"));
@@ -2088,5 +2176,98 @@ impl NaIRGenPass._codegen_str_split_whitespace(
         self.builder.branch(check);
         self.builder.position_at_end(end);
     }
+    return result;
+}
+
+impl NaIRGenPass._codegen_str_splitlines(
+    text: ir.Value, keepends: ir.Value | None = None
+) -> ir.Value {
+    i8 = ir.IntType(8);
+    i8p = i8.as_pointer();
+    i64 = ir.IntType(64);
+    zero = ir.Constant(i64, 0);
+    one = ir.Constant(i64, 1);
+    b = self.builder;
+    length = self._call_str_len(b, text);
+    keep = self._coerce_type(keepends, ir.IntType(1))
+        if keepends is not None
+        else ir.Constant(ir.IntType(1), 0);
+    self._emit_list_helpers("ptr", i8p);
+    helpers = self.list_helpers["ptr"];
+    result = b.call(helpers["new"], []);
+    self._nogc_stamp_elem_drops(result, ["str"]);
+    cursor = self._entry_alloca(i64, "lines.cursor");
+    start = self._entry_alloca(i64, "lines.start");
+    width_slot = self._entry_alloca(i64, "lines.width");
+    b.store(zero, cursor);
+    b.store(zero, start);
+    func = b.function;
+    scan = func.append_basic_block("lines.scan");
+    inspect = func.append_basic_block("lines.inspect");
+    advance = func.append_basic_block("lines.advance");
+    emit = func.append_basic_block("lines.emit");
+    tail = func.append_basic_block("lines.tail");
+    done = func.append_basic_block("lines.done");
+    b.branch(scan);
+    b.position_at_end(scan);
+    pos = b.load(cursor);
+    b.cbranch(b.icmp_unsigned("<", pos, length), inspect, tail);
+    b.position_at_end(inspect);
+    byte = b.load(b.gep(text, [pos]));
+    ascii_break: ir.Value = b.icmp_unsigned("==", byte, ir.Constant(i8, 10));
+    for code in [11, 12, 13, 28, 29, 30] {
+        ascii_break = b.or_(
+            ascii_break, b.icmp_unsigned("==", byte, ir.Constant(i8, code))
+        );
+    }
+    b.store(b.select(ascii_break, one, zero), width_slot);
+
+    for sequence in [[13, 10], [194, 133], [226, 128, 168], [226, 128, 169]] {
+        check = func.append_basic_block("lines.sequence");
+        next_check = func.append_basic_block("lines.next");
+        sequence_size = ir.Constant(i64, len(sequence));
+        b.cbranch(
+            b.and_(
+                b.icmp_unsigned("==", byte, ir.Constant(i8, sequence[0])),
+                b.icmp_unsigned("<=", sequence_size, b.sub(length, pos))
+            ),
+            check,
+            next_check
+        );
+        b.position_at_end(check);
+        matches: ir.Value = ir.Constant(ir.IntType(1), 1);
+        for offset in range(1, len(sequence)) {
+            part = b.load(b.gep(text, [b.add(pos, ir.Constant(i64, offset))]));
+            matches = b.and_(
+                matches, b.icmp_unsigned("==", part, ir.Constant(i8, sequence[offset]))
+            );
+        }
+        b.store(b.select(matches, sequence_size, b.load(width_slot)), width_slot);
+        b.branch(next_check);
+        b.position_at_end(next_check);
+    }
+    b.cbranch(b.icmp_unsigned("!=", b.load(width_slot), zero), emit, advance);
+    b.position_at_end(advance);
+    b.store(b.add(pos, one), cursor);
+    b.branch(scan);
+    b.position_at_end(tail);
+    b.store(zero, width_slot);
+    b.cbranch(b.icmp_unsigned("<", b.load(start), length), emit, done);
+    b.position_at_end(emit);
+    finish = b.load(cursor);
+    width = b.load(width_slot);
+    begin = b.load(start);
+    end = b.add(finish, width);
+    size = b.sub(b.select(keep, end, finish), begin);
+    copy = self._str_alloc(b, b.add(size, one), name="lines.copy");
+    memcpy = self._get_or_declare_extern("memcpy", i8p, [i8p, i8p, i64]);
+    b.call(memcpy, [copy, b.gep(text, [begin]), size]);
+    self._str_finish(b, copy, size);
+    self._rc_call_with_ctx(helpers["append"], [result, copy], op="str_splitlines");
+    self._emit_rc_release_simple(copy, op="str_splitlines");
+    b.store(end, start);
+    b.store(end, cursor);
+    b.branch(scan);
+    b.position_at_end(done);
     return result;
 }

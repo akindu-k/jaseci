@@ -35,11 +35,12 @@ impl ExecutionManager.report_collector(
     }
 }
 
-async def _begin_request_context(user_root_id: str) -> tuple[(ExecutionContext, any)] {
+async def _begin_request_context(
+    user_root_id: str, target: object | None = None
+) -> tuple[(ExecutionContext, any)] {
     import from jaclang.runtime.osp_kernel_sv { isolate_request_walk_stack }
     parent = Jac.get_context();
-    req_ctx = ExecutionContext(_parent=parent);
-    await req_ctx.aset_user_root(user_root_id);
+    req_ctx = await ExecutionContext.for_target(target, parent, user_root_id);
     token = Jac.push_request_context(req_ctx);
 
     isolate_request_walk_stack();
@@ -47,7 +48,7 @@ async def _begin_request_context(user_root_id: str) -> tuple[(ExecutionContext, 
 }
 
 async def _abegin_user_request_context(
-    user_manager: UserManager, username: str
+    user_manager: UserManager, username: str, target: object | None = None
 ) -> tuple[(ExecutionContext, any, str)] | dict[str, JsonValue] {
     import from jaclang.runtime.exceptions { MissingAnchorError }
     root_id = await user_manager.aget_root_id(username);
@@ -64,7 +65,7 @@ async def _abegin_user_request_context(
         }
     }
     try {
-        (ctx, token) = await _begin_request_context(root_id);
+        (ctx, token) = await _begin_request_context(root_id, target);
         return (ctx, token, root_id);
     } except MissingAnchorError {
         if username != Con.GUEST.value {
@@ -84,7 +85,7 @@ async def _abegin_user_request_context(
         if not healed_id {
             return {'error': 'User not found'};
         }
-        (ctx, token) = await _begin_request_context(healed_id);
+        (ctx, token) = await _begin_request_context(healed_id, target);
         return (ctx, token, healed_id);
     }
 }
@@ -186,15 +187,17 @@ async def _run_function_with_occ(
     username: str,
     run_attempt: Callable,
     deserialize_args: bool = True,
-    unit_key: (str | None) = None
+    unit_key: (str | None) = None,
+    target: object | None = None
 ) -> dict[str, JsonValue] | Generator | AsyncGenerator {
-    resolved = await _abegin_user_request_context(mgr.user_manager, username);
+    resolved = await _abegin_user_request_context(mgr.user_manager, username, target);
     if isinstance(resolved, dict) {
         return resolved;
     }
     (ctx, req_token, root_id) = resolved;
     ctx.mem.unit_enter(unit_key);
     settled = False;
+    streaming = False;
     try {
         if deserialize_args {
             _deserialize_wire_args(args);
@@ -211,7 +214,8 @@ async def _run_function_with_occ(
                 outcome = await run_attempt(call_state, ctx);
                 ctx.mem.unit_exit();
                 settled = True;
-                return outcome;
+                streaming = isgenerator(outcome) or isinstance(outcome, AsyncGenerator);
+                return await ctx.bind_stream(outcome) if streaming else outcome;
             } except ReadOnlyRetry as rr {
                 settled = False;
                 if ctx.mem.unit_depth() == 0 {
@@ -275,7 +279,13 @@ async def _run_function_with_occ(
                 f"unit exit failed: {type(ue).__name__}: {ue}"
             );
         }
-        Jac.reset_request_context(req_token);
+        try {
+            if not streaming {
+                ctx.close();
+            }
+        } finally {
+            Jac.reset_request_context(req_token);
+        }
     }
 }
 
@@ -312,7 +322,7 @@ impl ExecutionManager.execute_function_sync(
         return await self._finalize_call_response(call_state, result, serialize_result);
     }
     return await _run_function_with_occ(
-        self, args, username, run_attempt, unit_key=_unit_key_for(func)
+        self, args, username, run_attempt, unit_key=_unit_key_for(func), target=func
     );
 }
 
@@ -329,7 +339,7 @@ impl ExecutionManager.execute_function_async(
         return await self._finalize_call_response(call_state, result, serialize_result);
     }
     return await _run_function_with_occ(
-        self, args, username, run_attempt, unit_key=_unit_key_for(func)
+        self, args, username, run_attempt, unit_key=_unit_key_for(func), target=func
     );
 }
 
@@ -374,7 +384,8 @@ impl ExecutionManager.spawn_walker_sync(
         username,
         run_attempt,
         deserialize_args=False,
-        unit_key=_unit_key_for(walker_cls)
+        unit_key=_unit_key_for(walker_cls),
+        target=walker_cls
     );
 }
 
@@ -411,7 +422,8 @@ impl ExecutionManager.spawn_walker_async(
         username,
         run_attempt,
         deserialize_args=False,
-        unit_key=_unit_key_for(walker_cls)
+        unit_key=_unit_key_for(walker_cls),
+        target=walker_cls
     );
 }
 
@@ -523,6 +535,10 @@ impl ModuleIntrospector._resolve_declared(rel: str, name: str) -> any {
     if own_file and os.path.abspath(src_path) == os.path.abspath(own_file) {
         return getattr(self._module, name, None);
     }
+    import from jaclang.runtime.prepared { load_prepared_module }
+    if application is not None and os.path.realpath(src_path) in application.code {
+        return getattr(load_prepared_module(src_path, application), name, None);
+    }
     for loaded in list(Jac.loaded_modules.values()) {
         f = loaded?.__file__;
         if f and os.path.abspath(f) == os.path.abspath(src_path) {
@@ -532,7 +548,6 @@ impl ModuleIntrospector._resolve_declared(rel: str, name: str) -> any {
             }
         }
     }
-    import from jaclang.runtime.prepared { load_prepared_module }
     module = load_prepared_module(src_path);
     return getattr(module, name, None);
 }
@@ -1134,7 +1149,13 @@ impl JacAPIServer.add_shutdown_hook(fn: Callable[..., any]) -> None {
 
 impl JacAPIServer._install_middleware -> None {
     import from jaclang.server.middleware { jwt_middleware, request_context_middleware }
-    self.add_middleware(request_context_middleware());
+
+    self.add_middleware(
+        request_context_middleware(
+            base_path_dir=Jac.get_base_path_dir() or self.base_path or None,
+            full_target_path=Jac.get_full_target_path() or self.module_file
+        )
+    );
     self.add_middleware(jwt_middleware(self.user_manager));
 }
 
@@ -1444,6 +1465,11 @@ impl JacAPIServer._register_scheduled_tasks -> None {
             registry: dict[str, any] = (
                 dict(intro._walkers) if is_walker else dict(intro._functions)
             );
+            for (member_name, member, member_is_walker) in intro.scheduled_members() {
+                if member_is_walker == is_walker {
+                    registry[member_name] = member;
+                }
+            }
             if name not in registry {
                 return {'error': f"'{name}' is no longer registered"};
             }
@@ -1619,7 +1645,10 @@ impl JacAPIServer.start(
     port_retries = 0 if settings.strict_port else PORT_RETRY_LIMIT;
     if settings.workers.multi_process() {
         supervisor = WorkerSupervisor(
-            settings=settings, worker_main=self._worker_main, on_ready=_announce
+            settings=settings,
+            worker_main=self._worker_main,
+            on_ready=_announce,
+            on_worker_exit=self._on_worker_exit
         );
         return supervisor.run(port_retries=port_retries);
     }
@@ -1663,6 +1692,18 @@ impl JacAPIServer._worker_main(
     } finally {
         self.scheduler.stop();
         stop_worker();
+    }
+}
+
+impl JacAPIServer._on_worker_exit(pid: int) -> None {
+    for ext in (self.extensions or []) {
+        try {
+            ext.on_worker_exit(self, pid);
+        } except Exception {
+            logger.exception(
+                f"{type(ext).__name__}.on_worker_exit failed for worker pid {pid}"
+            );
+        }
     }
 }
 

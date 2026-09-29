@@ -16,7 +16,8 @@ impl NaIRGenPass._codegen_list_compr(nd: uni.ListCompr) -> (ir.Value | None) {
         if _out_low is not None {
             if isinstance(_out_low, ir.DoubleType) {
                 _own_spec = "f64";
-            } elif isinstance(_out_low, ir.PointerType) {
+            } elif isinstance(_out_low, ir.PointerType)
+                or (self._str_desc_ty is not None and _out_low == self._str_desc_ty) {
                 _own_spec = "ptr";
             } elif self?.jacval_type and _out_low == self.jacval_type {
                 _own_spec = "jacval";
@@ -24,6 +25,10 @@ impl NaIRGenPass._codegen_list_compr(nd: uni.ListCompr) -> (ir.Value | None) {
                 _own_spec = "i64";
             }
         }
+    }
+
+    if _own_spec is None and self._is_boolean_result_expr(nd.out_expr) {
+        _own_spec = "i64";
     }
     if _own_spec is not None {
         elem_type_name = _own_spec;
@@ -37,7 +42,8 @@ impl NaIRGenPass._codegen_list_compr(nd: uni.ListCompr) -> (ir.Value | None) {
             elem_type_name = "ptr";
         }
         if elem_type_name == "i64" and isinstance(nd.out_expr, uni.FuncCall) {
-            call_name = self._get_name(nd.out_expr.target);
+            call_name = self._arch_ref_key(nd.out_expr.target)
+                or self._get_name(nd.out_expr.target);
             if call_name is not None and call_name in self.struct_types {
                 elem_type_name = "ptr";
             }
@@ -103,6 +109,34 @@ impl NaIRGenPass._codegen_list_compr(nd: uni.ListCompr) -> (ir.Value | None) {
     return list_val;
 }
 
+impl NaIRGenPass._is_boolean_result_expr(nd: (uni.UniNode | None)) -> bool {
+    import from jaclang.compiler.types.type_utils { primitive_type_name_of }
+    while isinstance(nd, (uni.CfgExpr, uni.AtomUnit)) {
+        nd = nd.expr if isinstance(nd, uni.CfgExpr) else nd.value;
+    }
+    if isinstance(nd, (uni.CompareExpr, uni.Bool)) {
+        return True;
+    }
+    if isinstance(nd, uni.UnaryExpr) {
+        return nd.op.name == Tok.NOT;
+    }
+    if isinstance(nd, uni.BoolExpr) {
+        if not nd.values {
+            return False;
+        }
+        for _operand in nd.values {
+            if not self._is_boolean_result_expr(_operand) {
+                return False;
+            }
+        }
+        return True;
+    }
+    if isinstance(nd, uni.Expr) {
+        return primitive_type_name_of(nd.type) == "bool";
+    }
+    return False;
+}
+
 impl NaIRGenPass._codegen_dict_compr(nd: uni.DictCompr) -> (ir.Value | None) {
     if not nd.compr {
         return None;
@@ -144,7 +178,8 @@ impl NaIRGenPass._codegen_dict_compr(nd: uni.DictCompr) -> (ir.Value | None) {
         val_type_name = "ptr";
         val_type = ir.IntType(8).as_pointer();
     } elif isinstance(val_expr, uni.FuncCall) {
-        call_name = self._get_name(val_expr.target);
+        call_name = self._arch_ref_key(val_expr.target)
+            or self._get_name(val_expr.target);
         if call_name is not None and call_name in self.struct_types {
             val_type_name = "ptr";
             val_type = ir.IntType(8).as_pointer();
@@ -228,7 +263,8 @@ impl NaIRGenPass._codegen_set_compr(nd: uni.SetCompr) -> (ir.Value | None) {
         elem_type_name = f"tuple{elem_size}";
         elem_type = ir.IntType(8).as_pointer();
     } elif isinstance(out_expr, uni.FuncCall) {
-        call_name = self._get_name(out_expr.target);
+        call_name = self._arch_ref_key(out_expr.target)
+            or self._get_name(out_expr.target);
         if call_name is not None and call_name in self.struct_types {
             elem_type_name = "ptr";
             elem_type = ir.IntType(8).as_pointer();
@@ -488,7 +524,7 @@ impl NaIRGenPass._codegen_compr_walk_body(
             if built is not None {
                 self._codegen_compr_iter_walk(compr, idx, (built[0], built[2], True));
             } else {
-                self.ctx.emit(
+                self.emit(
                     E5092,
                     node_override=collection,
                     kind="expression",
@@ -578,7 +614,7 @@ impl NaIRGenPass._codegen_compr_walk_body(
 
     if unpack_target is not None {
         if not self._codegen_tuple_unpack(unpack_target.values, elem_val, None) {
-            self.ctx.emit(
+            self.emit(
                 E5092,
                 node_override=unpack_target,
                 kind="comprehension target",
@@ -652,7 +688,7 @@ impl NaIRGenPass._codegen_compr_iter_walk(
         );
     }
     if not self._codegen_tuple_unpack(targets, yielded, None) {
-        self.ctx.emit(
+        self.emit(
             E5092,
             node_override=inner.target,
             kind="comprehension target",
