@@ -461,7 +461,10 @@ def unresolved_toml_references(text: str, environ: dict[str, str]) -> list[str] 
 
 
 def _is_shell_script_ref(ref: any) -> bool {
-    return ref.unsupported and ref.path.split(".")[0] == "scripts";
+    parts = ref.path.split(".");
+    in_scripts = parts[0] == "scripts"
+        or (parts[0] == "environments" and parts[2:3] == ["scripts"]);
+    return ref.unsupported and in_scripts;
 }
 
 

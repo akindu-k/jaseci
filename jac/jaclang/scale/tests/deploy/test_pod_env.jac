@@ -582,6 +582,13 @@ test "a shipped jac.toml value the pods cannot resolve stops the deploy before p
             []
         ),
         (
+            "a shell form in a profile's script",
+            {
+                "jac.toml": "[environments.ci.scripts]\nbuild = \"npm run build ${CI:+--ci}\"\n"
+            },
+            []
+        ),
+        (
             "a form jac does not read in a value the pods are handed",
             {"jac.toml": "[plugins.demo]\nalt = \"${DEMO_ALT:+on}\"\n"},
             ["jac.toml: plugins.demo.alt: Unsupported form ${DEMO_ALT:+on}"]
