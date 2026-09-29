@@ -291,45 +291,207 @@ native layout records the emitted name separately from its source-level key.
   CPython's `fnmatch` would case-fold first. `filter` and `translate` are not
   provided.
 
-- **`logging.jac`** (#8201) -- `basicConfig`, `getLogger(name)`, the level
-  constants, and `.debug`/`.info`/`.warning`/`.error`/`.critical` on both the
-  logger and the module. Records go to stderr, which is where CPython's
-  last-resort/`basicConfig` handler puts them, rendered through the
-  `%(levelname)s` / `%(name)s` / `%(message)s` fields of the active format
-  (default `BASIC_FORMAT`, i.e. `LEVEL:name:message`). The WARNING default
-  threshold is honored, so `.debug`/`.info` are dropped until `basicConfig`
-  lowers it, matching CPython. SCOPE: no handlers, formatters, filters, or
-  logger hierarchy -- there is one process-wide level and one format, so
-  `Logger.setLevel` sets *the* level rather than that logger's, and
-  `basicConfig` is not the once-only call it is on CPython (a second call
-  reconfigures). `%(asctime)s` and the other `%`-fields are left in the output
-  verbatim rather than substituted; `filename`/`filemode`/`stream`/`handlers`
-  are accepted and ignored, so file logging silently stays on stderr.
-  Lazy `%`-args (`log.info("x %s", y)`) and `exc_info` are not provided.
+- **`logging.jac`** (#8201, rewritten for #6978) -- the level constants,
+  `getLevelName`/`addLevelName`/`getLevelNamesMapping`, `LogRecord`,
+  `Formatter` (`%`-style), `Handler`, `StreamHandler`, `FileHandler`, a real
+  dotted-name `Logger` hierarchy (`getLogger("a.b")` links to `getLogger("a")`
+  and finally the root logger), `setLevel`/`getEffectiveLevel`/`isEnabledFor`/
+  `propagate`/`addHandler`/`removeHandler`/`hasHandlers`/`getChild`,
+  `basicConfig`, `disable`, `shutdown`, and the module-level `debug`/`info`/
+  `warning`/`error`/`critical`/`exception`/`log`. `Formatter` substitutes
+  `%(asctime)s` (through `strftime(3)` on `localtime_r(3)`, so `datefmt` is the
+  C format string CPython also passes), `%(levelname)s`, `%(levelno)s|d`,
+  `%(name)s`, `%(message)s`, `%(pathname)s`, `%(filename)s`, `%(module)s`,
+  `%(lineno)s|d`, `%(funcName)s`, `%(created)f`, `%(msecs)d`, and
+  `%(relativeCreated)d`; unknown fields are left verbatim. Records with no
+  handler anywhere on the chain fall back to CPython's last-resort stderr
+  write for WARNING and above.
+
+  SCOPE: `StreamHandler`/`FileHandler` are factory *functions* over one
+  `Handler` type selected by a `kind` tag rather than subclasses, so
+  `isinstance(h, logging.StreamHandler)` and user-defined `Handler` subclasses
+  are not available, and `StreamHandler` takes `"stderr"`/`"stdout"` rather
+  than a stream object. `logging.root` is not exported (`root` is reserved in
+  Jac) -- use `getLogger()`. Lazy `%`-args (`log.info("x %s", y)`),
+  `exc_info`/`stack_info`, `Filter`/`Filterer`, `LoggerAdapter`,
+  `dictConfig`/`fileConfig`, and the rotating handlers are not provided;
+  `LogRecord` takes keyword fields (`name=`, `level=`, `pathname=`, `lineno=`,
+  `msg=`) rather than CPython's positional `args`/`exc_info` tail. `disable`
+  is a module-wide threshold as on CPython.
 
 - **`contextvars.jac`** (#8201, held back by #8220 until #8229 and #8230
   landed) -- `ContextVar[T]` as a single process-wide cell: `ContextVar(name)`
-  and `` ContextVar(name, `default=...) ``, `.name`, `.get()`, `.get(default)`
-  and `.set(value)`. `get` walks CPython's precedence -- the value last `set`,
-  else the default the call passed, else the default the constructor took,
-  else `LookupError(name)`.
-  SCOPE: `None` is the sentinel for *both* "no value" and "no default", where
-  CPython keys the second step on whether the argument was **passed**, so an
-  explicit `get(None)` reads as an omitted argument: on an unset variable it
-  answers the constructor default, or raises, where CPython answers `None`.
-  (A variadic `get(*fallback: T)` would carry the presence bit exactly, but a
-  variadic parameter of the erased type segfaults the native binary, so this
-  waits on that gap.) `None` is likewise the unset marker in the value slot,
-  so `set(None)` on a `ContextVar[X | None]` reads back as unset.
-  There is also one cell per variable rather than one per context, because
-  the native pathway has neither asyncio tasks nor threads to separate them,
-  so `copy_context`, `Context.run`, and the `Token` that `set` returns
-  (with `reset`) are not provided -- `set` answers `None`. A reference type
-  argument (an archetype, `list`, `dict`) lowers; a **scalar** one
-  (`int`, `float`, `bool`, and `str`, which is a by-value descriptor
-  natively) is refused at the construction site with `E5092` naming the
-  instantiation, because a generic archetype is laid out once for every
-  instantiation and its `T` slot is a raw pointer (#8229).
+  and `` ContextVar(name, `default=...) ``, `.name`, `.get()`, `.get(default)`,
+  `.set(value)` and `.reset(token)`. `get` walks CPython's precedence -- the
+  value last `set`, else the default the call passed, else the default the
+  constructor took, else `LookupError(name)`. `set` returns a `Token[T]`
+  (the class is `ContextVarToken`, with `Token` its alias, because a native
+  program identifies classes by bare name and the compiler has its own
+  `Token`) carrying `.var` and `.old_value`, and `reset(token)` restores the value the
+  variable held before that `set`, or unsets it when it held none. As in
+  CPython, a token can be used once (`RuntimeError` on the second `reset`),
+  only by the variable that made it (`ValueError` otherwise), and as a
+  context manager that resets on exit. An omitted default (to the
+  constructor or to `get`) is a private `_NoDefault` marker rather than
+  `None`, so `` ContextVar(name, `default=None) `` and `get(None)` answer
+  `None` exactly as CPython does.
+  Any type argument lowers except a tagged `any` union such as `int | str`:
+  a reference type (an archetype, `list`, `dict`) directly, and a by-value
+  one (`int`, `float`, `bool`, `str`, a tuple, or an option of any of these
+  or of a reference) boxed into the pointer slot the one shared generic
+  layout gives `T`, so `0`, `False` and `""` stay distinct from the null that
+  spells None (#8229). `ContextVar[int | str]` is refused at the construction
+  site with `E5092` naming the instantiation.
+  SCOPE: `Token.old_value` answers `None` where CPython answers
+  `Token.MISSING` for a variable that had no value. There is one cell per
+  variable rather than one per context, because the native pathway has
+  neither asyncio tasks nor threads to separate them, so `copy_context` and
+  `Context.run` are not provided. A numeric value is boxed at the
+  instantiation's type, so an `int` stored into a `ContextVar[float]` reads
+  back as a float where CPython keeps the `int`.
+
+- **`colorsys.jac`** (#6978) -- the six RGB/YIQ/HLS/HSV conversions
+  (`rgb_to_yiq`, `yiq_to_rgb`, `rgb_to_hls`, `hls_to_rgb`, `rgb_to_hsv`,
+  `hsv_to_rgb`) plus `ONE_THIRD`/`ONE_SIXTH`/`TWO_THIRD`. A direct
+  transliteration of CPython's pure-Python module, including the FCC NTSC
+  constants, the `yiq_to_rgb` clamping, the `gh-106498` `2.0-maxc-minc`
+  saturation form, and `int()`-truncating hue sector selection, so the outputs
+  are bit-identical to CPython's.
+
+- **`uuid.jac`** (#6978, Mechanism F over the `_csprng_native` OpenSSL floor
+  and the bundled `hashlib`) -- `UUID` with the `hex`/`bytes`/`bytes_le`/
+  `fields` constructor forms (curly braces, hyphens and a `urn:uuid:` prefix
+  all optional) and a `version=` override, the derived accessors (`hex`,
+  `bytes_le`, `fields`, `time_low`, `time_mid`, `time_hi_version`,
+  `clock_seq_hi_variant`, `clock_seq_low`, `clock_seq`, `` `node ``, `time`,
+  `urn`, `variant`, `version`), ordering/equality/`__hash__`, `str`/`repr`,
+  `getnode`, `uuid1`, `uuid3`, `uuid4`, `uuid5`, `uuid6`, `uuid7`, `uuid8`,
+  the four `NAMESPACE_*` constants, `NIL`, `MAX`, and the four variant strings.
+  A UUID is stored as its 16 big-endian bytes, so `version` is `int | None`
+  exactly as on CPython (it is `None` unless the variant is RFC 4122).
+  `uuid1`/`uuid6`/`uuid7` keep CPython's monotonicity guards.
+
+  SCOPE: the 128-bit `.int` attribute and `int=` constructor form have no i64
+  representation and are absent; the raw 16 bytes read through `to_bytes()`
+  rather than a `.bytes` property (`bytes` names the builtin type), and the
+  keyword is `bytes=` on the constructor. `fields=` takes any 6-element
+  sequence (CPython accepts the same). `is_safe`/`SafeUUID` and the
+  `uuid_generate_time_safe(3)` fast path are not provided, so `uuid1` always
+  takes the pure-Jac path. `getnode` reads `/sys/class/net/*/address` (skipping
+  `lo`) and otherwise falls back to a random multicast node; on non-Linux hosts
+  only the random fallback applies. The result is cached for the process, as it
+  is on CPython.
+
+- **`sched.jac`** (#6978) -- `Event` and `scheduler` with
+  `enterabs`/`enter`/`cancel`/`empty`/`run`/`queue` and the
+  `timefunc`/`delayfunc` constructor hooks (defaulting to `time.monotonic` and
+  `time.sleep`). The queue is kept in `(time, priority, sequence)` order, which
+  is exactly the order CPython's heap pops in, so `queue` and `run` agree.
+  `cancel` on an event that is no longer queued raises
+  `ValueError("list.remove(x): x not in list")` as CPython's `list.remove`
+  does.
+
+  SCOPE: actions are zero-argument callables (`Callable[[], None]`); a
+  non-empty `argument`/`kwargs` raises `TypeError` rather than being splatted
+  into the call, because the native pathway cannot marshal a dynamic-arity
+  call. Bind arguments in a closure instead. `Event` is an `obj` with the same
+  six fields rather than a `namedtuple`, and there is no lock (`sched` is not
+  thread-safe here; CPython's `RLock` is).
+
+- **`ipaddress.jac`** (#6978) -- `IPv4Address`/`IPv6Address` (string, integer
+  and packed-bytes constructors, `+`/`-`, ordering, `packed`, `exploded`,
+  `compressed`, `reverse_pointer`, and the whole `is_*` predicate family driven
+  by CPython's own network tables), `IPv4Network`/`IPv6Network` (strict
+  parsing, `netmask`/`hostmask`/`prefixlen`/`num_addresses`, `hosts`,
+  `subnets`/`supernet`, `__contains__`, `overlaps`, `subnet_of`/`supernet_of`,
+  `compare_networks`, `address_exclude`), `IPv4Interface`/`IPv6Interface`, the
+  `ip_address`/`ip_network`/`ip_interface` factories, `summarize_address_range`
+  and `collapse_addresses`. `AddressValueError` and `NetmaskValueError` are
+  `ValueError` subclasses with CPython's messages, exactly as there. CPython
+  properties are `has x { getter; }` so `a.packed` reads identically on both
+  backends; CPython methods stay `def`s.
+
+  SCOPE: an IPv6 address is an unsigned 128-bit `(hi, lo)` i64 pair, so there
+  is no `.int`; `hosts()`/`subnets()` materialize a list rather than returning
+  a generator; `__hash__`, pickling, and `ipaddress.v4_int_to_packed`-style
+  private helpers are not provided. `IPv6Address.teredo` is split into
+  `teredo_server` and `teredo_client` (each `IPv4Address | None`): CPython's
+  single 2-tuple-or-`None` property has to be typed `any` here, and a tuple of
+  objects boxed into `any` does not lower -- it fails a native build closure
+  outright ("Declarations in the native closure could not lower") and, worse,
+  merely *demotes* under the JIT, where a demoted callee reached from a pinned
+  function aborts with SIGABRT and no diagnostic. Comparisons go through
+  `__eq__`/`__lt__` explicitly, since the operators do not dispatch to a
+  bundled obj's dunders.
+
+- **`mimetypes.jac`** (#6978) + **`_mimetypes_tables.jac`** -- `MimeTypes` with
+  `add_type`, `guess_type`, `guess_file_type`, `guess_all_extensions`,
+  `guess_extension` and `read`, the module-level wrappers, `init`,
+  `read_mime_types`, and the `suffix_map`/`encodings_map`/`types_map`/
+  `common_types` tables. The default tables are CPython 3.14's verbatim (in
+  insertion order, so the preferred extension of a type still comes first), and
+  the module reads the same `knownfiles` list (`/etc/mime.types` and friends)
+  at import, so a configured host sees the same answers on both backends.
+  `guess_type` reproduces CPython's suffix-map chaining (`.tgz` ->
+  `.tar.gz`), case-sensitive encoding suffixes vs case-insensitive type
+  suffixes, the `data:` URL rules, and the "scheme longer than one character"
+  test that keeps Windows drive letters on the path branch.
+
+  SCOPE: the tables are module globals populated at import (so `inited` is
+  already `True` and `init()` re-reads rather than rebinding); `readfp`,
+  `read_windows_registry`, path-like arguments, and the undotted-extension
+  deprecation warning are not provided.
+
+- **`locale.jac`** (#6978, Mechanism F) + **`_locale_native.linux.jac`** /
+  **`_locale_native.darwin.jac`** (FFI floor over `setlocale(3)`,
+  `localeconv(3)`, `nl_langinfo(3)`, `strcoll(3)` and `strxfrm(3)`) +
+  **`_locale_tables.jac`** (CPython's `locale_alias` and
+  `locale_encoding_alias`, generated verbatim) -- the `LC_*` category
+  constants (per-OS, from the floor), `CHAR_MAX`, `Error`, `setlocale`,
+  `localeconv`, `getencoding`, `getpreferredencoding`, `getlocale`,
+  `getdefaultlocale`, `strcoll`, `strxfrm`, `normalize`, `_parse_localename`,
+  `_build_localename`, `atof`, `atoi`, `delocalize`, `localize`,
+  `format_string` and `currency`. `normalize` is CPython's four-stage lookup
+  including the `@euro` modifier rewrite and the `:`-as-encoding-delimiter
+  form; `_group`/`_strip_padding`/`localize`/`currency` are its grouping and
+  sign-position algorithms line for line.
+
+  SCOPE: `locale.str` is absent (`str` names the builtin); `format_string`
+  takes one value and supports the `%[flags][width][.prec](eEfFgGdiu s)`
+  conversions plus `%%` rather than tuples, mappings and `*` width arguments;
+  `nl_langinfo` and the `ABDAY_*`/`DAY_*`/`MON_*`/`ERA*` item constants are not
+  exposed (only `CODESET`, used internally by `getencoding`);
+  `windows_locale` is absent; `_replace_encoding` consults
+  `locale_encoding_alias` but not `encodings.aliases`; and `setlocale` takes
+  a locale *string* (`None` queries, `""` sets from the environment) rather
+  than also accepting a `(language, encoding)` iterable -- compose it with
+  `normalize(_build_localename(lang, enc))` yourself.
+
+- **`gettext.jac`** (#6978) -- `NullTranslations` and `GNUTranslations`
+  (`gettext`, `ngettext`, `pgettext`, `npgettext`, `add_fallback`, `info`,
+  `charset`), a `.mo` parser that handles both endiannesses, the catalogue
+  metadata block (`Content-Type` charset and `Plural-Forms`), `find`,
+  `find_all`, `translation`, `textdomain`, `bindtextdomain`, `dgettext`,
+  `dngettext`, `dpgettext`, `dnpgettext` and the module-level
+  `gettext`/`ngettext`/`pgettext`/`npgettext`, plus `_expand_lang` over the
+  bundled `locale.normalize`.
+
+  The C plural-form expression is the interesting part: CPython's `c2py`
+  compiles it to a Python lambda through `exec`, which the native pathway
+  cannot do. Here `c2py_ast` tokenizes and parses the same grammar (the same
+  operator set, the same six precedence levels, the same left-associative
+  chained comparisons and low-priority `?:`) into an AST, and
+  `plural_index(tree, n)` evaluates it -- C truthiness, `/` as floor division,
+  the same `ValueError` messages for an invalid token, an unexpected token, an
+  unbalanced parenthesis, and an over-long (>1000 character) expression.
+
+  SCOPE: `c2py` returns an AST (`c2py_ast`) evaluated by `plural_index` instead
+  of a callable; `install`/`NullTranslations.install` cannot inject `_` into
+  builtins and are absent; `translation` takes no `class_` and does not cache
+  parsed catalogues; `find` returns `str | None` with `find_all` as the
+  `all=True` form; catalogues are read as bytes by path (no file objects); and
+  the plural lookup is keyed by msgid into a `dict[str, list[str]]` rather than
+  CPython's `(msgid, index)` tuple keys.
 
 - **`io.jac`** (Mechanism B) -- `BytesIO` (the CPython `io.BytesIO` value
   model: `read`/`read1`/`write`/`seek`/`tell`/`getvalue`/`seek`-relative
@@ -341,9 +503,16 @@ native layout records the emitted name separately from its source-level key.
   than a `BufferedIOBase` subclass -- the native pathway does not yet support
   cross-module vtable dispatch (calling an overridden method through a
   base-typed reference defined in another module aborts at run time), so the
-  bundled readers avoid inheritance across the module boundary. SCOPE: binary
-  streams only (no text `StringIO`, no `BufferedReader`/`BufferedWriter`
-  wrappers).
+  bundled readers avoid inheritance across the module boundary. `FileIO` is
+  CPython's raw binary file for reading: `FileIO(path, mode="r")` over the
+  `_file_native.jac` stdio floor, with `read(size=-1)`, `readall`, `seek` over
+  every `whence`, `tell`, `close`, the context manager, and CPython's `name`,
+  `mode == "rb"` and `closed`; a missing file raises `FileNotFoundError` and a
+  closed one `ValueError`. It is what a ranged read (`seek` then `read(n)`)
+  spells on both pathways, e.g. the stub catalog embedded in the `jac`
+  executable. DIVERGENCE: `FileIO` is read-only (any mode other than `r`/`rb`
+  raises `ValueError`). SCOPE: binary streams only (no text `StringIO`, no
+  `BufferedReader`/`BufferedWriter` wrappers).
 
 - **`compression/zstd.jac`** (Mechanism F) + **`_zstd_native.jac`** (FFI
   floor over the bundled `libzstd`, zstd 1.5.7) -- the CPython 3.14

@@ -21,10 +21,12 @@ import jaclang.compiler.frontend.unitree as uni;
 import from jaclang.compiler.driver.program { JacProgram }
 import from jaclang.compiler.frontend.codeinfo { InteropBinding, InteropContext }
 import from jaclang.compiler.driver.na_coverage {
-    _drop_demoted_native_bindings,
     na_coverage_begin,
     na_coverage_end,
-    na_coverage_record,
+    na_coverage_record
+}
+import from jaclang.compiler.driver.session_compile {
+    drop_demoted_native_bindings,
     na_demotion_note
 }
 import from jaclang.compiler.driver.boundary_classify {
@@ -38,7 +40,8 @@ import from jaclang.compiler.driver.jir {
     write_module_cache
 }
 import from jaclang.compiler.driver.nativecache { read_native_verdict }
-import from jaclang.compiler.placement.placement { PlacementSummary, summary_to_bytes }
+import from jaclang.compiler.placement.placement { PlacementSummary }
+import from jaclang.compiler.placement.placement_export { summary_to_bytes }
 import from jaclang.compiler.placement.placement_pins {
     effective_module_pin,
     effective_pin_for,
@@ -143,6 +146,9 @@ test "a demoted module loses the pin everywhere it is consulted" {
         assert effective_pin_for(models_path, '', prog) == '' , "a demoted module is server ground; the pin must not win";
         assert effective_module_pin(models_path, prog) == '';
         assert plain_native_import_target(imp, prog) is None;
+        # The verdict is in this program's memory only until the module's
+        # summary is persisted, so a reader without the program still sees
+        # the configured pin.
         assert read_native_verdict(models_path) is None , "nothing persisted yet";
         assert effective_module_pin(models_path) == 'native';
         assert import_declares_native_target(imp);
@@ -160,6 +166,7 @@ test "a demotion verdict persists across programs through the JIR and dies with 
         with open(path, "w", encoding="utf-8") as f {
             f.write("with entry { x = 1; }\n");
         }
+        # Source mtime in the past so a cache written now is strictly newer.
         past = time.time() - 2;
         os.utime(path, (past, past));
         prog = JacProgram();
@@ -168,12 +175,14 @@ test "a demotion verdict persists across programs through the JIR and dies with 
         prog.native_units().record_verdict(path, "E5092", "error[E5092]: nope");
         assert module_native_demoted(path, prog) , "the recording program answers from memory";
         assert native_demotion_code(path, prog) == "E5092";
+        # A fresh program has no note and nothing is on disk yet.
         fresh = JacProgram();
         assert read_native_verdict(path) is None , (
             "a verdict must not be readable before the placement summary is persisted"
         );
         assert not module_native_demoted(path, fresh);
         assert not module_native_demoted(path);
+        # Persist the summary the way the driver does, then every reader sees it.
         assert persist_verdict(path, "E5092", "error[E5092]: nope") , "module cache write failed";
         cache_path = get_module_cache_path(path);
         assert is_module_cache_valid(path, cache_path) , "the entry must be valid for the current content";
@@ -185,6 +194,8 @@ test "a demotion verdict persists across programs through the JIR and dies with 
         assert native_demotion_code(path) == "E5092";
         assert module_native_demoted(path, fresh) , "a fresh program reads the JIR too";
         assert fresh.native_units().demoted_code(path) == "E5092";
+        # An edit changes MODKEY: the entry is no longer valid and the verdict
+        # goes with it, so the module is retried natively.
         with open(path, "w", encoding="utf-8") as f {
             f.write("with entry { x = 12; }\n");
         }
@@ -221,7 +232,7 @@ test "importer invalidation clears ES output and NATIVE bindings" {
     assert app.gen.js == "" , "stale ES output must be cleared";
     assert app.gen.es_ast is None;
     for m in cleared {
-        _drop_demoted_native_bindings(m, models_path);
+        drop_demoted_native_bindings(m, models_path);
     }
     assert "double" not in manifest.bindings , "the NATIVE binding naming the demoted module must be dropped";
     assert "unrelated" in manifest.bindings , "bindings in other contexts must survive";
@@ -232,6 +243,8 @@ test "the demotion fallback re-lowers importers away from the na seam" {
     prog = JacProgram();
     app_path = os.path.realpath(os.path.join(E2E_FIXTURE_DIR, "app.jac"));
     models_path = os.path.realpath(os.path.join(E2E_FIXTURE_DIR, "models.jac"));
+    # A verdict persisted by an earlier run would cancel the pin before the
+    # test starts; begin from a clean module cache.
     forget_verdict(None, models_path);
     try {
         app = prog.compile(app_path);
@@ -268,10 +281,114 @@ test "a docstring-only module is never decided native" {
         fh.write('"""pkg."""\n');
     }
     prog = JacProgram();
-    mod = prog.compile(
-        path, options=CompileOptions(no_cgen=True, force_target_program=True)
-    );
+    mod = prog.compile(path, options=CompileOptions(no_cgen=True));
     (ok, why) = native_default_verdict(mod);
     assert not ok , "an empty module passed the native verdict";
     assert "empty module" in why , why;
+}
+
+def write_sources(base: str, sources: dict[str, str]) {
+    for (name, text) in sources.items() {
+        path = os.path.join(base, name);
+        with open(path, "w", encoding="utf-8") as f {
+            f.write(text);
+        }
+        stamp = os.stat(path).st_mtime_ns + 2000000000;
+        os.utime(path, ns=(stamp, stamp));
+    }
+}
+
+def compile_native_default(prog: JacProgram, path: str) -> uni.Module {
+    import from jaclang.compiler.driver.compile_options { CompileOptions }
+    import from jaclang.compiler.frontend.codeinfo {
+        set_effective_default_codespace,
+        get_effective_default_codespace_override
+    }
+    prev = get_effective_default_codespace_override();
+    try {
+        return prog.compile(path, options=CompileOptions(default_codespace="native"));
+    } finally {
+        set_effective_default_codespace(prev);
+    }
+}
+
+glob GOOD_COMBAT = "def pick_spot(x: int) -> int {\n    return x * 2;\n}\n",
+     BAD_COMBAT = "def pick_spot(x: int) -> int {\n    n: int = \"oops\";\n    return x * 2;\n}\n",
+     WEAPONS_SRC = "import from .combat { pick_spot }\n\ndef weapon_rules(x: int) -> int {\n    return pick_spot(x);\n}\n\nwith entry {\n    print(weapon_rules(2));\n}\n";
+
+"""Persist a verdict the way the driver does, with the dependency rows the
+recording program noted for it."""
+def persist_noted_verdict(prog: JacProgram, path: str) -> bool {
+    (code, detail, rows) = prog.analysis.native_verdict_notes[os.path.realpath(path)];
+    ps = PlacementSummary(
+        mod_path=path,
+        native_verdict=detail,
+        native_verdict_code=code,
+        native_verdict_deps=rows
+    );
+    return write_module_cache(
+        path, None, extra_sections={SEC_PLACEMENT: summary_to_bytes(ps)}
+    );
+}
+
+test "a demotion an imported module caused dies when that module is fixed" {
+    # weapons.jac is fine on its own; the imported combat.jac breaks its
+    # native lowering. The verdict is recorded against weapons.jac, whose own
+    # source never changes, so it used to outlive the fix to combat.jac and
+    # keep weapons.jac (and everything importing it) off the native lane.
+    import tempfile;
+    with tempfile.TemporaryDirectory() as tmp {
+        base = os.path.realpath(tmp);
+        write_sources(base, {"combat.jac": BAD_COMBAT, "weapons.jac": WEAPONS_SRC});
+        weapons_path = os.path.join(base, "weapons.jac");
+        combat_path = os.path.join(base, "combat.jac");
+        prog = JacProgram();
+        compile_native_default(prog, weapons_path);
+        assert module_native_demoted(weapons_path, prog) , "the broken import must demote weapons.jac";
+        noted = prog.analysis.native_verdict_notes[weapons_path];
+        assert combat_path in [row[0] for row in noted[2]] , (
+            f"the verdict must record the import it was lowered against: {noted[2]}"
+        );
+        assert persist_noted_verdict(prog, weapons_path) , "module cache write failed";
+        assert module_native_demoted(weapons_path) , "a fresh reader sees the persisted verdict";
+        write_sources(base, {"combat.jac": GOOD_COMBAT});
+        assert read_native_verdict(weapons_path) is None , "fixing combat.jac must clear the persisted verdict";
+        assert not module_native_demoted(weapons_path);
+        assert not module_native_demoted(weapons_path, JacProgram());
+        assert not module_native_demoted(weapons_path, prog) , "the recording program must drop its in-memory verdict too";
+        retry = compile_native_default(JacProgram(), weapons_path);
+        assert retry.decided_codespace == 'native' , "weapons.jac lowers native again";
+    }
+}
+
+test "a demotion verdict follows the import closure, not unrelated files" {
+    import tempfile;
+    with tempfile.TemporaryDirectory() as tmp {
+        base = os.path.realpath(tmp);
+        write_sources(
+            base,
+            {
+                "combat.jac": GOOD_COMBAT,
+                "weapons.jac": WEAPONS_SRC,
+                "items.jac": "import from .weapons { weapon_rules }\n\ndef drop(x: int) -> int {\n    return weapon_rules(x) + 1;\n}\n",
+                "unrelated.jac": "def other -> int {\n    return 1;\n}\n"
+            }
+        );
+        items_path = os.path.join(base, "items.jac");
+        prog = JacProgram();
+        prog.native_units().record_verdict(items_path, "E5020", "error[E5020]: stale");
+        assert persist_noted_verdict(prog, items_path) , "module cache write failed";
+        try {
+            write_sources(
+                base, {"unrelated.jac": "def other -> int {\n    return 2;\n}\n"}
+            );
+            assert module_native_demoted(items_path) , "an edit outside the closure keeps the verdict";
+            assert module_native_demoted(items_path, prog);
+            write_sources(base, {"combat.jac": BAD_COMBAT});
+            assert not module_native_demoted(items_path) , "an edit two imports down clears the verdict";
+            assert not module_native_demoted(items_path, prog);
+        } finally {
+            forget_verdict(prog, items_path);
+        }
+    }
 }

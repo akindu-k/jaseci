@@ -4,6 +4,8 @@ import subprocess;
 import tempfile;
 import from pathlib { Path }
 import from jaclang.cli.console { console }
+import from jaclang.compiler.driver.program { JacProgram }
+import from jaclang.compiler.driver.compile_options { CompileOptions }
 import type from jaclang.project.apps { AppConfig }
 
 
@@ -68,7 +70,8 @@ def resolve_entry_file(config: any, app: str = "") -> (Path | None) {
 }
 
 def build_serve_manifest(entry_file: Path, proj_root: Path) -> (dict[str, any] | None) {
-    import from jaclang.runtime.runtime { JacRuntime as Jac }
+    program = JacProgram();
+    program.options = CompileOptions(skip_native_engine=True);
     import from jaclang.compiler.driver.application { prepare_application }
     import from jaclang.project.config { get_config_for_path }
     import from jaclang.project.app_kinds { kind_has_server }
@@ -85,7 +88,7 @@ def build_serve_manifest(entry_file: Path, proj_root: Path) -> (dict[str, any] |
         }
         prepared = prepare_application(
             str(entry_file.resolve()),
-            Jac.get_program(),
+            program,
             str(proj_root.resolve()),
             services=[svc.entry_path(str(proj_root.resolve())) for svc in services]
         );
@@ -99,8 +102,11 @@ def build_serve_manifest(entry_file: Path, proj_root: Path) -> (dict[str, any] |
     } except Exception as e {
         console.error(f"Seal aborted: application preparation failed: {e}");
         return None;
+    } finally {
+        program.release_compile_closure();
     }
 }
+
 
 def ensure_client_dist(config: any, entry_file: Path) -> (Path | None) {
     import from jaclang.client { get_bun }
@@ -215,6 +221,38 @@ def bake_serve_payloads(
     return True;
 }
 
+def vendor_packages(config: any, pkg_copy: Path) {
+    import os;
+    import from jaclang.packages.artifact { stage_source_tree }
+    import from jaclang.packages.install { has_packages, sync }
+    import from jaclang.project.package_scope { mounts_dir }
+    if not has_packages(config) {
+        return;
+    }
+    result = sync(config);
+    proj_root = os.path.realpath(str(config.project_root));
+    mounts_rel = mounts_dir(config.get_build_dir()).relative_to(
+        Path(config.project_root)
+    );
+    runtime = {
+        p.name
+        for p in result.lock.packages
+        if not p.dev
+    };
+    for (name, target) in sorted(result.targets.items()) {
+        if name not in runtime or os.path.realpath(str(target)) == proj_root {
+            continue;
+        }
+        (org, pkg) = name.split("/", 1);
+        stage_source_tree(Path(target), pkg_copy / mounts_rel / org / pkg);
+    }
+    result.lock.write(pkg_copy / "jac.lock");
+    console.print(
+        f"  Sealing {len(result.lock.packages)} Jac package(s) into the image",
+        style="muted"
+    );
+}
+
 def make_sealed_image(
     config: any,
     parent: Path,
@@ -226,6 +264,7 @@ def make_sealed_image(
     import shutil;
     import tempfile;
     import from jaclang.jac0core { ext_registry }
+    import from jaclang.dist.sanitize { sanitize_shipped_tree }
 
     proj_root = config.project_root;
     if proj_root is None {
@@ -260,6 +299,8 @@ def make_sealed_image(
     try {
         pkg_copy = stage / name;
         shutil.copytree(proj_root, pkg_copy, ignore=copy_ignore);
+        sanitize_shipped_tree(pkg_copy);
+        vendor_packages(config, pkg_copy);
 
         has_init = any((pkg_copy / f).exists() for f in ext_registry.INIT_FILES);
         if not has_init and not (pkg_copy / "__init__.py").exists() {
@@ -363,42 +404,16 @@ def vendor_jab_deps(config: any, img: Path) -> bool {
 }
 
 
-def tar_gz_dir(top: Path) -> bytes {
-    import io;
-    import gzip;
-    import tarfile;
-    import os;
-
-    def normalize(ti: any) -> any {
-        ti.mtime = 0;
-        ti.uid = 0;
-        ti.gid = 0;
-        ti.uname = "";
-        ti.gname = "";
-        return ti;
-    }
-
-    buf = io.BytesIO();
-    with tarfile.open(fileobj=buf, mode="w") as tf {
-        for (dirpath, dirnames, filenames) in os.walk(str(top)) {
-            dirnames.sort();
-            for fn in sorted(filenames) {
-                full = Path(str(dirpath)) / str(fn);
-                tf.add(str(full), arcname=str(full.relative_to(top)), filter=normalize);
-            }
-        }
-    }
-    return gzip.compress(buf.getvalue(), 6, mtime=0);
-}
-
-
 def build_jab(
     config: any,
     out_path: Path,
     app: str = "",
     fat: bool = False,
-    bake_client: bool = True
+    bake_client: bool = True,
+    require_entry: bool = False
 ) -> Path {
+    import from jaclang.dist.archive { tar_gz_dir }
+    import from jaclang.dist.jab { jab_app_meta }
     out_path = Path(out_path);
     out_path.parent.mkdir(parents=True, exist_ok=True);
     work = Path(tempfile.mkdtemp(prefix="jab-", dir=str(out_path.parent)));
@@ -413,6 +428,13 @@ def build_jab(
         );
         if img is None {
             raise RuntimeError(f"sealing {config.project.name} failed");
+        }
+        if require_entry and not (jab_app_meta(img).get("entry") or {}).get("path") {
+            raise RuntimeError(
+                f"No runnable entry for '{config.project.name}'; a runnable image "
+                "needs an entry (main.jac at the package root, or [project] "
+                "entry-point in jac.toml)."
+            );
         }
         if fat and not vendor_jab_deps(config, img) {
             raise RuntimeError(

@@ -1,5 +1,5 @@
 import from pathlib { Path }
-import from jaclang.cache.policy { Policy, Retention, SweepReport, TempLock }
+import from jaclang.cache.policy { Policy, Retention, SweepReport, KeepMatch, TempLock }
 
 obj Bucket {
     has name: str,
@@ -75,16 +75,56 @@ glob RETIRED: tuple[str, ...] = (
              summary="pre-resolved typeshed catalogs"
          ),
          Bucket(
+             name="jir-jit",
+             relpath="jir/jit",
+             policy=Policy(ttl_days=14.0, pattern="*.bc"),
+             summary="optimized whole-program images for the in-process JIT, one per link plan"
+         ),
+         Bucket(
              name="jir-digests",
              relpath="jir",
              policy=Policy(ttl_days=14.0, pattern="compiler_digest.*.json"),
              summary="compiler source digests, one per checkout"
          ),
          Bucket(
+             name="stage0",
+             relpath="stage0",
+             policy=Policy(
+                 ttl_days=30.0, pattern="[0-9a-f]" * 40, markers=[".stage0.json"]
+             ),
+             summary="pinned stage-0 compiler snapshots that build the kernel, one per commit"
+         ),
+         Bucket(
              name="apps",
              relpath="apps",
              policy=Policy(ttl_days=30.0, markers=[".used"]),
              summary="materialized app images (.jab), content-keyed"
+         ),
+         Bucket(
+             name="pkgs",
+             relpath="pkgs",
+             policy=Policy(
+                 ttl_days=90.0,
+                 depth=3,
+                 markers=[".jac-package.json"],
+                 temp_patterns=[".fetch-*"],
+                 temp_lock=TempLock.SIBLINGS
+             ),
+             summary="Jac packages by name, version and content hash (read-only, shared)",
+             root_env="JAC_PACKAGE_STORE",
+             root_prefix="pkgs"
+         ),
+         Bucket(
+             name="pkg-git",
+             relpath="pkg-git",
+             policy=Policy(ttl_days=30.0, temp_patterns=["*.lock"]),
+             summary="git mirrors and checkouts behind git package dependencies"
+         ),
+         Bucket(
+             name="pkg-index",
+             relpath="pkg-index",
+             policy=Policy(ttl_days=30.0, depth=3, pattern="*.json"),
+             summary="cached package index entries, one file per package and registry"
          ),
          Bucket(
              name="scale-binaries",
