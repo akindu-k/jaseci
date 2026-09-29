@@ -1,3 +1,4 @@
+import from jaclang.project.persistence { PersistenceConfig }
 import os;
 import re;
 import sys;
@@ -198,7 +199,8 @@ obj CheckConfig {
         suppress: list[str] = [],
         suppress_categories: list[str] = [],
         enforce_access: bool = False,
-        warn_native_seams: bool = True;
+        warn_native_seams: bool = True,
+        untyped_external: str = "warning";
 }
 
 obj DotConfig {
@@ -280,7 +282,8 @@ def serialize_toml(data: dict[str, any], prefix: str = "") -> str;
 def toml_value(value: any) -> str;
 
 obj JacConfig {
-    has project: ProjectConfig = ProjectConfig(),
+    has persistence: PersistenceConfig = PersistenceConfig(),
+        project: ProjectConfig = ProjectConfig(),
         run: RunConfig = RunConfig(),
         build: BuildConfig = BuildConfig(),
         native: NativeConfig = NativeConfig(),
