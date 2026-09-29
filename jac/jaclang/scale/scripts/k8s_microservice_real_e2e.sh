@@ -358,7 +358,7 @@ fi
 echo "  breaker opened after ${BREAKER_CALLS} call(s) and shed load in ${BREAKER_SECS}s"
 
 _t "circuit breaker load shedding OK"
-echo "=== verify HPA OOM guardrails (cpu+memory metrics, behavior rate limits) ==="
+echo "=== verify HPA OOM guardrails (cpu metric only without memory_request, behavior rate limits) ==="
 # The heredoc feeds python's stdin, so the HPA JSON must travel via a file.
 HPA_JSON="$(mktemp)"
 kubectl get hpa -n "${NAMESPACE}" -l managed=jac-scale -o json > "${HPA_JSON}"
@@ -378,8 +378,8 @@ for hpa in items:
         for m in spec.get("metrics", [])
         if m.get("type") == "Resource"
     )
-    if metric_names != ["cpu", "memory"]:
-        sys.exit(f"FAIL: {name} metrics={metric_names}, expected cpu+memory")
+    if metric_names != ["cpu"]:
+        sys.exit(f"FAIL: {name} metrics={metric_names}, expected cpu only")
     behavior = spec.get("behavior") or {}
     up = behavior.get("scaleUp") or {}
     down = behavior.get("scaleDown") or {}
