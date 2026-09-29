@@ -495,9 +495,9 @@ impl PgRuntime._download_zonky(major: int) -> (str | None) {
         return bin_dir;
     }
 
-    import from jaclang.toolchains.store { InstallLock }
+    import from jaclang.jac0core.cache_paths { FileLock }
     lock_path = Path(dist_cache_dir()) / f".{slug}-{version}.lock";
-    with InstallLock(lock_path) {
+    with FileLock(lock_path) {
         if os.path.isfile(os.path.join(bin_dir, 'postgres')) {
             return bin_dir;
         }
@@ -682,8 +682,37 @@ impl PgRuntime._ensure_database -> None {
         if created and self.kind == DbKind.SCRATCH {
             self._reap_scratch(conn);
         }
+        if created and self.sole_owner_database {
+            self._warn_superseded(conn);
+        }
     } finally {
         conn.close();
+    }
+}
+
+
+impl PgRuntime._warn_superseded(conn: any) -> None {
+    import from jaclang.data.dbcatalog { list_databases }
+    try {
+        previous = [
+            rec.database
+            for rec in list_databases(conn, with_size=False)
+            if rec.database != self.database
+                and rec.kind == DbKind.PROJECT.value
+                and rec.owner_path == self.owner_path
+        ];
+    } except Exception as e {
+        logger.debug(f"superseded database check skipped: {e}");
+        return;
+    }
+    if previous {
+        logger.warning(
+            f"Created database {self.database} for {self.owner_path}, which "
+            f"already has data in {', '.join(previous)}. A changed project name "
+            "or [persistence] namespace selects a new database and schema "
+            "identity; restore the previous namespace to keep that data, or "
+            "migrate it explicitly."
+        );
     }
 }
 

@@ -570,7 +570,19 @@ impl NaIRGenPass._emit_rc_helpers -> None {
     dtor_fnty = ir.FunctionType(ir.VoidType(), [i8_ptr]);
     dtor_fn_i8 = b.inttoptr(dtor_val, i8_ptr, name="dtor.i8");
     dtor_fn_ptr = b.bitcast(dtor_fn_i8, dtor_fnty.as_pointer(), name="dtor.fn");
+    _depth_gv = self.rc_release_depth_gv;
+    if _depth_gv is not None {
+        b.store(
+            b.add(b.load(_depth_gv, name="rel.depth"), ir.Constant(i64, 1)), _depth_gv
+        );
+    }
     b.call(dtor_fn_ptr, [release_fn.args[0]]);
+    if _depth_gv is not None {
+        b.store(
+            b.sub(b.load(_depth_gv, name="rel.depth.after"), ir.Constant(i64, 1)),
+            _depth_gv
+        );
+    }
     post_dtor_live_rm_bb = release_fn.append_basic_block("post_dtor_live_rm");
     b.branch(post_dtor_live_rm_bb);
 
@@ -2492,6 +2504,14 @@ impl NaIRGenPass._emit_scope_cleanup(
         if var_name in self.closure_cell_handles {
             continue;
         }
+        if var_name in self.owned_tuple_vars {
+            if var_name == skip_var {
+                self.builder.store(ir.Constant(alloca.pointee_type, None), alloca);
+            } else {
+                self._release_tuple_slot(alloca, op="scope_exit");
+            }
+            continue;
+        }
 
         if self.jacval_type is not None
             and isinstance(alloca.type, ir.PointerType)
@@ -2586,6 +2606,10 @@ impl NaIRGenPass._emit_loop_iter_cleanup(
         }
         alloca = self.local_vars.get(var_name);
         if alloca is None {
+            continue;
+        }
+        if var_name in self.owned_tuple_vars {
+            self._release_tuple_slot(alloca, op="iter_end");
             continue;
         }
         if self.jacval_type is not None
@@ -2727,6 +2751,16 @@ impl NaIRGenPass._emit_struct_release_fn(arch_name: str) -> None {
     _hook = self._drop_hook_for(arch_name);
     if _hook is not None {
         b.call(_hook, [b.bitcast(release_fn.args[0], _hook.args[0].type)]);
+    }
+
+    _node_lay = self._arch_layout(arch_name);
+    if self._osp_pins_refs()
+        and _node_lay is not None
+        and _node_lay.arch_type == "node" {
+        b.call(
+            self._osp_reclaim_hook(),
+            [b.ptrtoint(release_fn.args[0], i64, name="osp.forget.h")]
+        );
     }
 
     if self._pyb_base_of(arch_name) is not None {
