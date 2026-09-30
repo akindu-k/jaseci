@@ -114,6 +114,7 @@ test "hpa.enabled false still short-circuits before behavior is considered" {
 }
 
 test "memory triggers are seeded or skipped based on the configured request" {
+    configured = {"billing_ops": {"memory_request": "512Mi"}};
     for (cfg, expected) in [
         ({}, ["cpu"]),
         ({"has_memory_request": True}, ["cpu"]),
@@ -122,6 +123,8 @@ test "memory triggers are seeded or skipped based on the configured request" {
             ["cpu", "memory"]
         ),
         ({"has_memory_request": False}, ["cpu"]),
+        (_builder({"billing_ops": {}})._get_autoscaler_config("billing_ops"), ["cpu"]),
+        (_builder(configured)._get_autoscaler_config("billing_ops"), ["cpu", "memory"]),
         (
             {
                 "has_memory_request": True,
