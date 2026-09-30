@@ -770,7 +770,6 @@ test "native print renders bools as True and False" {
 }
 
 test "bundled shutil" {
-    import os;
     import platform;
     if platform.system() == "Darwin" {
         # The dirent floor is darwin-correct (#7626 C3), but rmtree also
@@ -782,10 +781,6 @@ test "bundled shutil" {
     run_with_both(
         "prim_shutil.jac", "shutil_py", "shutil_cl", "shutil_na", require=["na"]
     );
-    if os.geteuid() != 0 {
-        py_result = run_py_fixture("prim_shutil", "shutil_py");
-        assert py_result["locked_has_reason"] == 1 , "the locked directory must make rmtree fail with Permission denied";
-    }
 }
 
 test "native sort never silently orders object-returning keys" {

@@ -60,12 +60,13 @@ def:pub move(src: str, dst: str) -> str {
     if rename(src, real_dst) == 0 {
         return real_dst;
     }
+    reason = errno_message();
     if os.path.isdir(src) {
-        raise ValueError(f"move: cannot relocate directory '{src}' across filesystems");
+        raise ValueError(f"move: could not move directory '{src}': {reason}");
     }
     copyfile(src, real_dst);
     if unlink(src) != 0 {
-        raise ValueError(f"move: could not remove '{src}'");
+        raise ValueError(f"move: could not remove '{src}': {errno_message()}");
     }
     return real_dst;
 }
