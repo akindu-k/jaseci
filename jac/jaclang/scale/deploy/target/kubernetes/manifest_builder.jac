@@ -1,6 +1,6 @@
 import from jaclang.scale.runtime.context.util { GATEWAY_NAME, k8s_safe_name }
 import from jaclang.server { sv_client }
-import from jaclang.project.config { ServeConfig }
+import from jaclang.project.config { JacConfig, ServeConfig }
 import from jaclang.server.settings { resolve_count }
 import from jaclang.scale.config.app_config { AppConfig }
 import from jaclang.scale.config.config_loader {
@@ -895,12 +895,21 @@ obj ManifestBuilder {
         if cached is not None {
             return cached;
         }
-        project = self._project_config()
+        project = self._shipped_config()
             if self.project_dir
             else get_scale_config().get_jac_config();
         serve: ServeConfig = project.serve if project is not None else ServeConfig();
         self._serve_config_cache = serve;
         return serve;
+    }
+
+    def _shipped_config -> (JacConfig | None) {
+        import from pathlib { Path }
+        app_dir = Path(self.project_dir);
+        if not (app_dir / "jac.toml").is_file() {
+            return None;
+        }
+        return JacConfig.resolve(start_path=app_dir);
     }
 
     def _drain_timeout -> int {

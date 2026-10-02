@@ -368,6 +368,13 @@ test "embedder-supplied overrides reach the builder with gateway defaults" {
                 "10.1.0.0/16"
             ),
             (
+                None,
+                "10",
+                PLACEHOLDER_JWT_SECRET,
+                "1",
+                "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+            ),
+            (
                 '[serve.workers]\ncount = "auto"\n',
                 "10",
                 PLACEHOLDER_JWT_SECRET,
@@ -375,12 +382,16 @@ test "embedder-supplied overrides reach the builder with gateway defaults" {
                 "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
             )
         ] {
-            app = _builder({"svc_a": {}}, project_dir=_project_with(serve_toml));
+            app_dir = _project_with(serve_toml)
+                if serve_toml is not None
+                else str(Path(deployer, "bare"));
+            Path(app_dir).mkdir(exist_ok=True);
+            app = _builder({"svc_a": {}}, project_dir=app_dir);
             env = {e["name"]: e["value"] for e in app._serve_env("svc_a", {})};
-            assert env["JAC_SERVE_DRAIN_TIMEOUT"] == drain , serve_toml;
-            assert env["JAC_SERVE_WORKERS"] == workers , serve_toml;
-            assert env["JAC_SERVE_PROXY_TRUSTED"] == trusted , serve_toml;
-            assert app._signing_secret() == secret , serve_toml;
+            assert env["JAC_SERVE_DRAIN_TIMEOUT"] == drain , app_dir;
+            assert env["JAC_SERVE_WORKERS"] == workers , app_dir;
+            assert env["JAC_SERVE_PROXY_TRUSTED"] == trusted , app_dir;
+            assert app._signing_secret() == secret , app_dir;
         }
     } finally {
         reset_scale_config();
