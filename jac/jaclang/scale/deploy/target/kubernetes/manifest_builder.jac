@@ -1,7 +1,7 @@
 import from jaclang.scale.runtime.context.util { GATEWAY_NAME, k8s_safe_name }
 import from jaclang.server { sv_client }
 import from jaclang.project.config { ServeConfig }
-import from jaclang.server.settings { cpu_quota, resolve_count }
+import from jaclang.server.settings { resolve_count }
 import from jaclang.scale.config.app_config { AppConfig }
 import from jaclang.scale.config.config_loader {
     GATEWAY_POD_KEYS,
@@ -265,8 +265,7 @@ obj ManifestBuilder {
         client_entry: (str | None) = None,
         dry_run: bool = False,
         _bundle_files_cache: (dict[str, str] | None) = None,
-        _serve_config_cache: (ServeConfig | None) = None,
-        _minted_secret: str = "";
+        _serve_config_cache: (ServeConfig | None) = None;
 
     def _gateway_cfg -> dict[str, any] {
         if self.gateway_config is not None {
@@ -909,7 +908,7 @@ obj ManifestBuilder {
     }
 
     def _signing_secret -> str {
-        import secrets;
+        import from jaclang.server.serving.authcrypt { PLACEHOLDER_JWT_SECRET }
         configured = str(self.secrets.get("JAC_SERVE_AUTH_SECRET") or "").strip();
         if configured {
             return configured;
@@ -918,20 +917,16 @@ obj ManifestBuilder {
         if from_project {
             return from_project;
         }
-        if not self._minted_secret {
-            self._minted_secret = secrets.token_urlsafe(48);
-        }
-        return self._minted_secret;
+        return PLACEHOLDER_JWT_SECRET;
     }
 
     def _serve_env(svc_name: str, svc_cfg: dict[str, any]) -> list[dict[str, any]] {
         serve = self._serve_config();
-        workers = str(
-            svc_cfg.get("workers")
-                or resolve_count(
-                    serve.workers.count, cpu_quota(), '[serve.workers] count'
-                )
-        );
+        workers = str(svc_cfg.get("workers") or "");
+        if not workers {
+            resolve_count(serve.workers.count, 1, '[serve.workers] count');
+            workers = serve.workers.count.strip();
+        }
         env: list[dict[str, any]] = [
             {"name": "JAC_SERVE_WORKERS", "value": workers},
             {"name": "JAC_SERVE_ACCESS_LOG_FORMAT", "value": "json"},

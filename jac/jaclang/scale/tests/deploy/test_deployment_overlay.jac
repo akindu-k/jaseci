@@ -16,6 +16,7 @@ import from jaclang.scale.config.config_loader {
 }
 import from jaclang.scale.deploy.autoscale.autoscaler { Autoscaler, AutoscalerSpec }
 import from jaclang.scale.runtime.fleet { fleet_of }
+import from jaclang.server.serving.authcrypt { PLACEHOLDER_JWT_SECRET }
 
 
 def _builder(services: dict[str, any], project_dir: str = "") -> ManifestBuilder {
@@ -350,7 +351,13 @@ test "embedder-supplied overrides reach the builder with gateway defaults" {
     get_scale_config(project_dir=Path(deployer));
     try {
         for (serve_toml, drain, secret, workers, trusted) in [
-            ("", "10", "", "1", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"),
+            (
+                "",
+                "10",
+                PLACEHOLDER_JWT_SECRET,
+                "1",
+                "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+            ),
             (
                 '[serve.timeouts]\ndrain = 30.0\n[serve.auth]\nsecret = "app"\n'
                     + '[serve.workers]\ncount = "3"\n'
@@ -359,6 +366,13 @@ test "embedder-supplied overrides reach the builder with gateway defaults" {
                 "app",
                 "3",
                 "10.1.0.0/16"
+            ),
+            (
+                '[serve.workers]\ncount = "auto"\n',
+                "10",
+                PLACEHOLDER_JWT_SECRET,
+                "auto",
+                "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
             )
         ] {
             app = _builder({"svc_a": {}}, project_dir=_project_with(serve_toml));
@@ -366,9 +380,7 @@ test "embedder-supplied overrides reach the builder with gateway defaults" {
             assert env["JAC_SERVE_DRAIN_TIMEOUT"] == drain , serve_toml;
             assert env["JAC_SERVE_WORKERS"] == workers , serve_toml;
             assert env["JAC_SERVE_PROXY_TRUSTED"] == trusted , serve_toml;
-            minted = app._signing_secret();
-            assert minted not in ("deployer-toml", "deployer-env") , serve_toml;
-            assert not secret or minted == secret , serve_toml;
+            assert app._signing_secret() == secret , serve_toml;
         }
     } finally {
         reset_scale_config();
