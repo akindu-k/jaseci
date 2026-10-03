@@ -1,0 +1,44 @@
+name: debug-9671
+
+on:
+  push:
+    branches: [debug/9671-metrics-k8s]
+
+jobs:
+  probe:
+    name: app-pod metrics probe (jac ${{ matrix.jac }}, ${{ matrix.workers }} workers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        jac: ["0.37.23"]
+        workers: [2, 1]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the released jac
+        run: |
+          bash scripts/install.sh --version ${{ matrix.jac }}
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH"
+          which jac && jac --version
+
+      - name: Install scale deploy deps
+        run: |
+          jac install \
+            "python-dotenv>=1.2.1,<2.0.0" \
+            "kubernetes>=34.1.0,<35.0.0" "docker>=7.1.0,<8.0.0" "humanize>=4.0.0" \
+            --global
+
+      - name: Set up kind cluster
+        run: |
+          curl -fsSL -o ./kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
+          chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
+          curl -fsSL -o kubectl https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl
+          sudo install kubectl /usr/local/bin/kubectl
+          kind create cluster --name jac --wait 150s
+          kubectl get nodes -o wide
+
+      - name: Probe
+        run: bash scripts/debug_9671_probe.sh
