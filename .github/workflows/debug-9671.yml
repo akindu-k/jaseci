@@ -6,23 +6,37 @@ on:
 
 jobs:
   probe:
-    name: app-pod metrics probe (jac ${{ matrix.jac }}, ${{ matrix.workers }} workers)
+    name: ${{ matrix.scenario }}
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 80
     strategy:
       fail-fast: false
       matrix:
-        jac: ["0.37.23"]
-        workers: [2, 1]
+        include:
+          - { scenario: control-1-worker, workers: 1 }
+          - { scenario: baseline-2-workers, workers: 2 }
+          - { scenario: recycle-workers, workers: 2, max_requests: 20, pings: 30 }
+          - { scenario: extra-prometheus-client-dep, workers: 2, extra_dep: 'prometheus-client = "==0.20.0"' }
+          - { scenario: 2-replicas-external-postgres, workers: 2, replicas: 2, external_db: 1 }
+          - { scenario: soak-45m, workers: 2, duration: 45 }
+    env:
+      SCENARIO: ${{ matrix.scenario }}
+      WORKERS: ${{ matrix.workers }}
+      REPLICAS: ${{ matrix.replicas || 1 }}
+      MAX_REQUESTS: ${{ matrix.max_requests || 0 }}
+      EXTRA_DEP: ${{ matrix.extra_dep || '' }}
+      EXTERNAL_DB: ${{ matrix.external_db || 0 }}
+      DURATION_MIN: ${{ matrix.duration || 6 }}
+      PINGS_PER_CYCLE: ${{ matrix.pings || 10 }}
     steps:
       - uses: actions/checkout@v5
 
       - name: Install the released jac
         run: |
-          bash scripts/install.sh --version ${{ matrix.jac }}
+          bash scripts/install.sh --version 0.37.23
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.local/bin:$PATH"
-          which jac && jac --version
+          jac --version
 
       - name: Install scale deploy deps
         run: |
@@ -38,7 +52,6 @@ jobs:
           curl -fsSL -o kubectl https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl
           sudo install kubectl /usr/local/bin/kubectl
           kind create cluster --name jac --wait 150s
-          kubectl get nodes -o wide
 
       - name: Probe
         run: bash scripts/debug_9671_probe.sh
