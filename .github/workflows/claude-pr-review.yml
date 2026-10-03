@@ -1,0 +1,196 @@
+name: Claude PR review
+
+# Reviews the owner's open upstream PRs; one issue per PR holds the latest review.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Upstream PR number to re-review even if its head is unchanged
+        required: false
+
+concurrency:
+  group: claude-pr-review
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  UPSTREAM: jaseci-labs/jac
+  AUTHOR: ${{ github.repository_owner }}
+  LABEL: claude-review
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.plan.outputs.targets }}
+    steps:
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_PR: ${{ inputs.pr }}
+          HAS_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "::warning::CLAUDE_CODE_OAUTH_TOKEN is not set; skipping."
+            echo "targets=[]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh label create "$LABEL" -R "$GITHUB_REPOSITORY" --color 5319e7 \
+            --description "Automated Claude review of an upstream PR" 2>/dev/null || true
+
+          open_prs=$(gh pr list -R "$UPSTREAM" --author "$AUTHOR" --state open \
+            --limit 200 --json number,headRefOid)
+          tracked=$(gh issue list -R "$GITHUB_REPOSITORY" --label "$LABEL" --state all \
+            --limit 1000 --json number,state,body | jq '[.[] | . as $i
+              | (.body // "")
+              | capture("<!-- claude-review pr=(?<pr>[0-9]+) sha=(?<sha>[0-9a-f]+) -->")
+              | {pr: (.pr | tonumber), sha, issue: $i.number, state: $i.state}]')
+
+          jq -r --argjson prs "$open_prs" '.[] | select(.state == "OPEN")
+            | select(.pr as $n | any($prs[]; .number == $n) | not) | .issue' <<<"$tracked" \
+            | while read -r issue; do
+                gh issue close "$issue" -R "$GITHUB_REPOSITORY" \
+                  --comment "The upstream PR is no longer open."
+              done
+
+          targets=$(jq -nc --argjson prs "$open_prs" --argjson tracked "$tracked" \
+            --arg force "${FORCE_PR:-}" '[$prs[] | . as $p
+              | ([$tracked[] | select(.pr == $p.number)] | first) as $t
+              | select($t == null or $t.sha != $p.headRefOid or ($p.number | tostring) == $force)
+              | {pr: $p.number, issue: ($t.issue // null)}]')
+          echo "Review targets: $targets"
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+
+  review:
+    needs: plan
+    if: needs.plan.outputs.targets != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        target: ${{ fromJSON(needs.plan.outputs.targets) }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR: ${{ matrix.target.pr }}
+      ISSUE: ${{ matrix.target.issue }}
+      CTX: .claude-review
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ env.UPSTREAM }}
+          ref: refs/pull/${{ matrix.target.pr }}/head
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Collect PR context
+        run: |
+          set -euo pipefail
+          mkdir -p "$CTX"
+          gh pr view "$PR" -R "$UPSTREAM" \
+            --json number,title,body,url,headRefName,baseRefName,isDraft,commits,files > "$CTX/meta.json"
+          gh pr diff "$PR" -R "$UPSTREAM" > "$CTX/pr.diff" 2>/dev/null \
+            || gh api --paginate "repos/$UPSTREAM/pulls/$PR/files" \
+                 --jq '.[] | "=== \(.filename) (\(.status))\n\(.patch // "(patch too large to show)")"' > "$CTX/pr.diff"
+          if [ -n "$ISSUE" ]; then
+            gh issue view "$ISSUE" -R "$GITHUB_REPOSITORY" --json body --jq .body > "$CTX/prior.md"
+          fi
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Review
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          cat > "$CTX/prompt.md" <<EOF
+          You are reviewing pull request $PR on $UPSTREAM. The working directory is a
+          checkout of the PR head. Context files:
+          - $CTX/meta.json: title, description, branches, commit messages, changed files
+          - $CTX/pr.diff: the full diff against the base branch
+          - $CTX/prior.md: your review of an earlier commit of this PR (absent on the first review)
+
+          Find real defects this PR introduces: correctness bugs, regressions, unhandled edge
+          cases, error handling gaps, concurrency or state problems, security issues, and tests
+          that do not actually prove the change. Read the surrounding code, callers, and existing
+          tests to confirm every finding; drop anything you cannot substantiate. Do not build or
+          run anything.
+
+          Also flag violations of the author's conventions:
+          - Comments are short one-liners only; no multi-line explanatory comment blocks.
+          - Docstrings are a single line stating what the function does.
+          - No em dashes anywhere (code, comments, docstrings, release notes, docs).
+          - Release note: exactly one concise bullet from the user's perspective, no file paths,
+            no implementation details, no testing notes.
+          - Repeated or large inline logic should be a well-named helper; no needless abstractions.
+          - Bug fixes extend the closest existing test rather than adding a new one; multiple
+            cases use table-driven tests; prefer in-process tests over subprocess/server ones.
+          - No AI attribution (Co-Authored-By AI trailers, "Generated with" lines) in commits.
+
+          Reply with ONLY this markdown, nothing before or after it:
+
+          **Verdict:** <Ready to merge | Minor nits only | Needs changes>. <one sentence why>
+
+          ## Findings
+
+          ### F<n> [<blocker|major|minor|nit>] <short title>
+          **Where:** \`<path>:<line>\`
+          **Problem:** <what is wrong and the concrete scenario that breaks>
+          **Fix:** <the change to make>
+
+          (Order findings by severity. Write "No findings." if there are none. If $CTX/prior.md
+          exists, keep the same F-number for a finding that is still open and number new ones
+          after the highest previous number.)
+
+          ## Previous findings
+
+          - F<n> <title>: <resolved | still open | no longer applicable>
+
+          (Omit this section when $CTX/prior.md does not exist.)
+          EOF
+          claude -p "$(cat "$CTX/prompt.md")" \
+            --model opus \
+            --max-turns 80 \
+            --output-format text \
+            --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git grep:*)" \
+            --disallowedTools "Edit,Write,NotebookEdit,WebFetch,WebSearch" \
+            > "$CTX/review.md"
+          test -s "$CTX/review.md"
+
+      - name: Publish to issue
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          title=$(jq -r .title "$CTX/meta.json")
+          branch=$(jq -r .headRefName "$CTX/meta.json")
+          {
+            echo "<!-- claude-review pr=$PR sha=$sha -->"
+            echo "Upstream PR: \`https://github.com/$UPSTREAM/pull/$PR\` on branch \`$branch\`"
+            echo "Reviewed commit: \`${sha:0:9}\` at $(date -u '+%Y-%m-%d %H:%M UTC')"
+            echo
+            head -c 60000 "$CTX/review.md"
+          } > "$CTX/body.md"
+
+          if [ -z "$ISSUE" ]; then
+            gh issue create -R "$GITHUB_REPOSITORY" --label "$LABEL" \
+              --title "PR $PR: $title" --body-file "$CTX/body.md"
+            exit 0
+          fi
+          gh issue edit "$ISSUE" -R "$GITHUB_REPOSITORY" --title "PR $PR: $title" --body-file "$CTX/body.md"
+          if [ "$(gh issue view "$ISSUE" -R "$GITHUB_REPOSITORY" --json state --jq .state)" = "CLOSED" ]; then
+            gh issue reopen "$ISSUE" -R "$GITHUB_REPOSITORY"
+          fi
+          tail -n +2 "$CTX/body.md" | gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body-file -
