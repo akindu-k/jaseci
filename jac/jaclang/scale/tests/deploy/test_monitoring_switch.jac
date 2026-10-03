@@ -75,8 +75,9 @@ test "prometheus scrapes every app pod alongside the gateway" {
         for rule in pods["relabel_configs"]
         if rule.get("action") == "keep"
     };
-    assert keeps == {
-        "__meta_kubernetes_pod_label_managed;__meta_kubernetes_pod_label_jac_scale_role": "jac-scale;microservice",
-        "__meta_kubernetes_pod_container_port_number": "8000"
-    };
+    assert keeps
+        == {
+            "__meta_kubernetes_pod_label_managed;__meta_kubernetes_pod_label_jac_scale_role": "jac-scale;microservice",
+            "__meta_kubernetes_pod_container_port_number": "8000"
+        };
 }

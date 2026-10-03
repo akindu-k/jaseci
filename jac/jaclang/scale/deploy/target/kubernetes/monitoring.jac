@@ -27,13 +27,13 @@ obj MonitoringDeployer {
         }
     }
 
+    """Build the Prometheus config scraping the entry service and every app pod."""
     def _scrape_config(
         app_name: str,
         namespace: str,
         provider: ClusterProvider,
         scrape_target_service: str = ""
     ) -> str {
-        """Build the Prometheus config scraping the entry service and every app pod.""";
         ksm_name = f"{app_name}-kube-state-metrics";
         ne_name = f"{app_name}-node-exporter";
         container_port = self.k8s_config.container_port;
