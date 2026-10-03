@@ -9,6 +9,9 @@ import from jaclang.scale.deploy.target.kubernetes.kubernetes_config {
     KubernetesConfig
 }
 import from jaclang.scale.deploy.target.kubernetes.target { KubernetesTarget }
+import from jaclang.scale.deploy.target.kubernetes.monitoring { MonitoringDeployer }
+import from jaclang.scale.deploy.target.kubernetes.cluster_provider { LocalProvider }
+import yaml;
 
 
 def _target(
@@ -51,4 +54,29 @@ test "logs or tracing still request the stack without the monitoring switch" {
 
 test "nothing enabled requests nothing" {
     assert _target(monitoring=False)._observability_requested() == False;
+}
+
+
+test "prometheus scrapes every app pod alongside the gateway" {
+    deployer = MonitoringDeployer(
+        KubernetesConfig(app_name="t", namespace="t-ns", container_port=8000)
+    );
+    scrape = yaml.safe_load(
+        deployer._scrape_config("t", "t-ns", LocalProvider(), "gateway-service")
+    );
+    jobs = {j["job_name"]: j for j in scrape["scrape_configs"]};
+    assert jobs["t"]["static_configs"][0]["targets"] == ["gateway-service:8000"];
+    pods = jobs["t-pods"];
+    assert pods["kubernetes_sd_configs"]
+        == [{"role": "pod", "namespaces": {"names": ["t-ns"]}}];
+    assert pods["basic_auth"] == jobs["t"]["basic_auth"];
+    keeps = {
+        ";".join(rule["source_labels"]): rule["regex"]
+        for rule in pods["relabel_configs"]
+        if rule.get("action") == "keep"
+    };
+    assert keeps == {
+        "__meta_kubernetes_pod_label_managed;__meta_kubernetes_pod_label_jac_scale_role": "jac-scale;microservice",
+        "__meta_kubernetes_pod_container_port_number": "8000"
+    };
 }

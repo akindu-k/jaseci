@@ -27,19 +27,23 @@ obj MonitoringDeployer {
         }
     }
 
-    def _deploy_prometheus(
+    def _scrape_config(
         app_name: str,
         namespace: str,
-        apps_v1: any,
-        core_v1: any,
         provider: ClusterProvider,
         scrape_target_service: str = ""
-    ) {
-        prometheus_name = f"{app_name}-prometheus";
+    ) -> str {
+        """Build the Prometheus config scraping the entry service and every app pod.""";
         ksm_name = f"{app_name}-kube-state-metrics";
         ne_name = f"{app_name}-node-exporter";
-        service_port = provider.prometheus_scrape_port(self.k8s_config.container_port);
+        container_port = self.k8s_config.container_port;
+        service_port = provider.prometheus_scrape_port(container_port);
         scrape_target = scrape_target_service or f"{app_name}-service";
+        basic_auth = (
+            "    basic_auth:\n"
+            f"      username: '{self.k8s_config.admin_username}'\n"
+            "      password_file: /etc/prometheus/scrape-secret/password\n"
+        );
 
         scrape_config = (
             "global:\n"
@@ -50,9 +54,26 @@ obj MonitoringDeployer {
             "    static_configs:\n"
             f"      - targets: ['{scrape_target}:{service_port}']\n"
             "    metrics_path: '/metrics'\n"
-            "    basic_auth:\n"
-            f"      username: '{self.k8s_config.admin_username}'\n"
-            "      password_file: /etc/prometheus/scrape-secret/password\n"
+            + basic_auth
+            + f"  - job_name: '{app_name}-pods'\n"
+            "    kubernetes_sd_configs:\n"
+            "      - role: pod\n"
+            "        namespaces:\n"
+            f"          names: ['{namespace}']\n"
+            "    metrics_path: '/metrics'\n"
+            + basic_auth
+            + "    relabel_configs:\n"
+            "      - source_labels: [__meta_kubernetes_pod_label_managed, "
+            "__meta_kubernetes_pod_label_jac_scale_role]\n"
+            "        regex: 'jac-scale;microservice'\n"
+            "        action: keep\n"
+            "      - source_labels: [__meta_kubernetes_pod_container_port_number]\n"
+            f"        regex: '{container_port}'\n"
+            "        action: keep\n"
+            "      - source_labels: [__meta_kubernetes_pod_label_app]\n"
+            "        target_label: service\n"
+            "      - source_labels: [__meta_kubernetes_pod_name]\n"
+            "        target_label: pod\n"
         );
         if self.k8s_config.k8s_metrics_enabled {
             scrape_config = scrape_config
@@ -89,6 +110,21 @@ obj MonitoringDeployer {
                 );
         }
 
+        return scrape_config;
+    }
+
+    def _deploy_prometheus(
+        app_name: str,
+        namespace: str,
+        apps_v1: any,
+        core_v1: any,
+        provider: ClusterProvider,
+        scrape_target_service: str = ""
+    ) {
+        prometheus_name = f"{app_name}-prometheus";
+        scrape_config = self._scrape_config(
+            app_name, namespace, provider, scrape_target_service
+        );
         config_hash = hashlib.md5(scrape_config.encode()).hexdigest()[:12];
 
         prometheus_configmap = {
