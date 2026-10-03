@@ -45,8 +45,8 @@ jobs:
           gh label create "$LABEL" -R "$GITHUB_REPOSITORY" --color 5319e7 \
             --description "Automated Claude review of an upstream PR" 2>/dev/null || true
 
-          open_prs=$(gh pr list -R "$UPSTREAM" --author "$AUTHOR" --state open \
-            --limit 200 --json number,headRefOid)
+          open_prs=$(gh api --paginate "repos/$UPSTREAM/pulls?state=open&per_page=100" \
+            --jq ".[] | select(.user.login == \"$AUTHOR\") | {number, headRefOid: .head.sha}" | jq -s .)
           tracked=$(gh issue list -R "$GITHUB_REPOSITORY" --label "$LABEL" --state all \
             --limit 1000 --json number,state,body | jq '[.[] | . as $i
               | (.body // "")
