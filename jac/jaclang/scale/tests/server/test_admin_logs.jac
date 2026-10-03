@@ -226,7 +226,15 @@ test "pod log fallback applies the service, level, search, trace and before filt
     second_ns = 1790985602000000000;
     far = 10 ** 19;
     cases = [
-        ("", "", "", "", far, 10, ["INFO built", "[trace=abc12345] INFO hello", "boom"]),
+        (
+            "",
+            "",
+            "",
+            "",
+            far,
+            10,
+            ["INFO built", "[trace=abc12345] INFO hello", "boom"]
+        ),
         ("gateway", "", "", "", far, 10, ["[trace=abc12345] INFO hello", "boom"]),
         ("", "error", "", "", far, 10, ["boom"]),
         ("", "", "hello", "", far, 10, ["[trace=abc12345] INFO hello"]),
