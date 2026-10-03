@@ -232,7 +232,7 @@ def _flatten_loki_response(
 
 
 def _use_pod_logs -> bool {
-    """Read pod logs from the Kubernetes API when no Loki is configured."""
+    """Read pod logs from the Kubernetes API when no Loki is configured.""";
     if os.getenv("LOKI_URL", "").strip() {
         return False;
     }
@@ -246,7 +246,7 @@ def _use_pod_logs -> bool {
 
 
 def _rfc3339_to_ns(stamp: str) -> int {
-    """Convert a kubelet RFC3339Nano UTC timestamp to epoch nanoseconds, 0 if invalid."""
+    """Convert a kubelet RFC3339Nano UTC timestamp to epoch nanoseconds, 0 if invalid.""";
     (head, _, frac) = stamp.rstrip("Z").partition(".");
     try {
         secs = calendar.timegm(time.strptime(head, "%Y-%m-%dT%H:%M:%S"));
@@ -258,7 +258,7 @@ def _rfc3339_to_ns(stamp: str) -> int {
 
 
 def _line_matches(body: str, level: str, search: str, trace_id: str) -> bool {
-    """Apply the LogQL level, trace and search filters to one raw line."""
+    """Apply the LogQL level, trace and search filters to one raw line.""";
     if level and level.upper() not in body {
         return False;
     }
@@ -280,7 +280,7 @@ def _pod_log_lines(
     search: str,
     trace_id: str
 ) -> list[dict[str, any]] {
-    """Parse timestamped pod log text into log lines that pass the filters."""
+    """Parse timestamped pod log text into log lines that pass the filters.""";
     out: list[dict[str, any]] = [];
     for raw in text.splitlines() {
         (stamp, _, body) = raw.partition(" ");
@@ -302,7 +302,7 @@ def _collect_pod_logs(
     start_ns: int,
     end_ns: int
 ) -> list[dict[str, any]] {
-    """Read the app pods' recent logs through the Kubernetes API."""
+    """Read the app pods' recent logs through the Kubernetes API.""";
     core = core_api();
     if core is None {
         raise ConnectionError(unavailable_detail());
@@ -367,7 +367,7 @@ async def _fetch_log_lines(
     limit: int,
     ascending: bool
 ) -> tuple[list[dict[str, any]], str] {
-    """Fetch filtered log lines from Loki, or from the pods when Loki is off."""
+    """Fetch filtered log lines from Loki, or from the pods when Loki is off.""";
     if _use_pod_logs() {
         lines = await asyncio.to_thread(
             _collect_pod_logs, service, level, search, trace_id, start_ns, end_ns
