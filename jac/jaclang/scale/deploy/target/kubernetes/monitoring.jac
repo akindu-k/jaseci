@@ -27,7 +27,6 @@ obj MonitoringDeployer {
         }
     }
 
-    """Build the Prometheus config scraping the entry service and every app pod."""
     def _scrape_config(
         app_name: str,
         namespace: str,
