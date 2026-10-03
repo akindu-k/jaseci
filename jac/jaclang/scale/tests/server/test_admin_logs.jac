@@ -28,8 +28,7 @@ obj FakePodApi {
                 SimpleNamespace(
                     metadata=SimpleNamespace(name=name),
                     spec=SimpleNamespace(containers=[SimpleNamespace(name="app")])
-                )
-                for name in self.logs_by_pod
+                ) for name in self.logs_by_pod
             ]
         );
     }
@@ -204,9 +203,9 @@ test "logs fall back to pod logs only when Loki is unconfigured and in-cluster" 
     for (loki_url, logs_enabled, in_cluster, expected) in cases {
         cfg = MagicMock();
         cfg.get_gateway_config.return_value = {"logs": {"enabled": logs_enabled}};
-        with patch.dict(os.environ, {"LOKI_URL": loki_url}),
-        patch.object(logs_mod, "get_scale_config", lambda { cfg; }),
-        patch.object(logs_mod, "k8s_available", lambda { in_cluster; }) {
+        with patch.dict(os.environ, {"LOKI_URL": loki_url}), patch.object(
+            logs_mod, "get_scale_config", lambda { cfg; }
+        ), patch.object(logs_mod, "k8s_available", lambda { in_cluster; }) {
             got = logs_mod._use_pod_logs();
         }
         assert got == expected , f"{(loki_url, logs_enabled, in_cluster)} -> {got}";
@@ -227,18 +226,19 @@ test "pod log fallback applies the service, level, search, trace and before filt
     second_ns = 1790985602000000000;
     far = 10 ** 19;
     cases = [
-        ("", "", "", "", far, 10, ["built", "[trace=abc12345] INFO hello", "boom"]),
+        ("", "", "", "", far, 10, ["INFO built", "[trace=abc12345] INFO hello", "boom"]),
         ("gateway", "", "", "", far, 10, ["[trace=abc12345] INFO hello", "boom"]),
         ("", "error", "", "", far, 10, ["boom"]),
         ("", "", "hello", "", far, 10, ["[trace=abc12345] INFO hello"]),
         ("", "", "", "abc12345-0000", far, 10, ["[trace=abc12345] INFO hello", "boom"]),
         ("", "", "", "", second_ns, 10, ["[trace=abc12345] INFO hello", "boom"]),
-        ("", "", "", "", far, 1, ["built"])
+        ("", "", "", "", far, 1, ["INFO built"])
     ];
-    with patch.object(logs_mod, "_use_pod_logs", lambda { True; }),
-    patch.object(logs_mod, "_fleet_names", lambda { ["builder-sv"]; }),
-    patch.object(logs_mod, "core_api", lambda { api; }),
-    patch.object(logs_mod, "ops_namespace", lambda { "ns"; }) {
+    with patch.object(logs_mod, "_use_pod_logs", lambda { True; }), patch.object(
+        logs_mod, "_fleet_names", lambda { ["builder-sv"]; }
+    ), patch.object(logs_mod, "core_api", lambda { api; }), patch.object(
+        logs_mod, "ops_namespace", lambda { "ns"; }
+    ) {
         for (service, level, search, trace, end_ns, limit, expected) in cases {
             (lines, query) = asyncio.run(
                 logs_mod._fetch_log_lines(
@@ -251,7 +251,6 @@ test "pod log fallback applies the service, level, search, trace and before filt
         }
         assert lines[0]["pod"] == "builder-sv-deployment-def-1";
         assert lines[0]["ts_ns"] == "1790985603000000000";
-
         denied = MagicMock();
         denied.list_namespaced_pod.side_effect = ApiException(
             status=403, reason="Forbidden"

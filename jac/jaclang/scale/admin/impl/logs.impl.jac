@@ -263,8 +263,8 @@ def _line_matches(body: str, level: str, search: str, trace_id: str) -> bool {
         return False;
     }
     if trace_id
-    and f'trace_id":"{trace_id}' not in body
-    and f"[trace={trace_id[:8]}]" not in body {
+        and f'trace_id":"{trace_id}' not in body
+        and f"[trace={trace_id[:8]}]" not in body {
         return False;
     }
     return not search or search in body;
@@ -285,8 +285,9 @@ def _pod_log_lines(
     for raw in text.splitlines() {
         (stamp, _, body) = raw.partition(" ");
         ts_ns = _rfc3339_to_ns(stamp);
-        if ts_ns and start_ns <= ts_ns <= end_ns
-        and _line_matches(body, level, search, trace_id) {
+        if ts_ns
+            and start_ns <= ts_ns <= end_ns
+            and _line_matches(body, level, search, trace_id) {
             out.append(_parse_log_body(body, labels, str(ts_ns)));
         }
     }
@@ -295,12 +296,7 @@ def _pod_log_lines(
 
 
 def _collect_pod_logs(
-    service: str,
-    level: str,
-    search: str,
-    trace_id: str,
-    start_ns: int,
-    end_ns: int
+    service: str, level: str, search: str, trace_id: str, start_ns: int, end_ns: int
 ) -> list[dict[str, any]] {
     """Read the app pods' recent logs through the Kubernetes API.""";
     core = core_api();
