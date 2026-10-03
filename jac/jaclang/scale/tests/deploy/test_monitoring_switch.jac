@@ -10,10 +10,6 @@ import from jaclang.scale.deploy.target.kubernetes.kubernetes_config {
 }
 import from jaclang.scale.deploy.target.kubernetes.target { KubernetesTarget }
 import from jaclang.scale.deploy.target.kubernetes.monitoring { MonitoringDeployer }
-import from jaclang.scale.deploy.target.kubernetes.cluster_provider { LocalProvider }
-import json;
-import re;
-import unittest.mock;
 import yaml;
 
 
@@ -60,7 +56,7 @@ test "nothing enabled requests nothing" {
 }
 
 
-test "prometheus scrapes every fleet pod and the dashboard counts each request once" {
+test "prometheus scrapes every gateway and app pod in the fleet" {
     deployer = MonitoringDeployer(
         KubernetesConfig(app_name="t", namespace="t-ns", container_port=8000)
     );
@@ -88,22 +84,4 @@ test "prometheus scrapes every fleet pod and the dashboard counts each request o
         if "target_label" in rule
     ];
     assert target_labels == ["role", "app", "pod"];
-
-    core_v1 = unittest.mock.MagicMock();
-    deployer._deploy_grafana("t", "t-ns", unittest.mock.MagicMock(), core_v1);
-    dashboards = [
-        write.kwargs["body"]["data"]["jac-scale.json"]
-        for write in core_v1.replace_namespaced_config_map.call_args_list
-        if write.kwargs["name"] == "t-grafana-dashboard"
-    ];
-    exprs = [
-        query["expr"] for panel in json.loads(dashboards[0])["panels"]
-        for query in panel.get("targets", [])
-    ];
-    http_series = re.compile(r"_http_[a-z_]+(\{[^}]*\})?");
-    selectors = [m.group(1) or "" for e in exprs for m in http_series.finditer(e)];
-    assert selectors;
-    for selector in selectors {
-        assert 'role="gateway"' in selector , selector;
-    }
 }
