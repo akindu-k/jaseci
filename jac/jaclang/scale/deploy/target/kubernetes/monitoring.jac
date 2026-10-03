@@ -96,12 +96,7 @@ obj MonitoringDeployer {
         return scrape_config;
     }
 
-    def _deploy_prometheus(
-        app_name: str,
-        namespace: str,
-        apps_v1: any,
-        core_v1: any
-    ) {
+    def _deploy_prometheus(app_name: str, namespace: str, apps_v1: any, core_v1: any) {
         prometheus_name = f"{app_name}-prometheus";
         scrape_config = self._scrape_config(app_name, namespace);
         config_hash = hashlib.md5(scrape_config.encode()).hexdigest()[:12];

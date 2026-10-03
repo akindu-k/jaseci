@@ -97,8 +97,7 @@ test "prometheus scrapes every fleet pod and the dashboard counts each request o
         if write.kwargs["name"] == "t-grafana-dashboard"
     ];
     exprs = [
-        query["expr"]
-        for panel in json.loads(dashboards[0])["panels"]
+        query["expr"] for panel in json.loads(dashboards[0])["panels"]
         for query in panel.get("targets", [])
     ];
     http_series = re.compile(r"_http_[a-z_]+(\{[^}]*\})?");
