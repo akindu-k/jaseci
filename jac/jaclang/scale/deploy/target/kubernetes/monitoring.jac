@@ -9,7 +9,6 @@ import from jaclang.scale.deploy.target.kubernetes.utils.kubernetes_utils {
     delete_if_exists,
     delete_k8s_secret
 }
-import from jaclang.scale.deploy.target.kubernetes.cluster_provider { ClusterProvider }
 
 obj MonitoringDeployer {
     has k8s_config: KubernetesConfig,
@@ -27,50 +26,35 @@ obj MonitoringDeployer {
         }
     }
 
-    def _scrape_config(
-        app_name: str,
-        namespace: str,
-        provider: ClusterProvider,
-        scrape_target_service: str = ""
-    ) -> str {
+    def _scrape_config(app_name: str, namespace: str) -> str {
         ksm_name = f"{app_name}-kube-state-metrics";
         ne_name = f"{app_name}-node-exporter";
-        container_port = self.k8s_config.container_port;
-        service_port = provider.prometheus_scrape_port(container_port);
-        scrape_target = scrape_target_service or f"{app_name}-service";
-        basic_auth = (
-            "    basic_auth:\n"
-            f"      username: '{self.k8s_config.admin_username}'\n"
-            "      password_file: /etc/prometheus/scrape-secret/password\n"
-        );
-
         scrape_config = (
             "global:\n"
             "  scrape_interval: 15s\n"
             "  evaluation_interval: 15s\n"
             "scrape_configs:\n"
             f"  - job_name: '{app_name}'\n"
-            "    static_configs:\n"
-            f"      - targets: ['{scrape_target}:{service_port}']\n"
-            "    metrics_path: '/metrics'\n"
-            + basic_auth
-            + f"  - job_name: '{app_name}-pods'\n"
             "    kubernetes_sd_configs:\n"
             "      - role: pod\n"
             "        namespaces:\n"
             f"          names: ['{namespace}']\n"
             "    metrics_path: '/metrics'\n"
-            + basic_auth
-            + "    relabel_configs:\n"
+            "    basic_auth:\n"
+            f"      username: '{self.k8s_config.admin_username}'\n"
+            "      password_file: /etc/prometheus/scrape-secret/password\n"
+            "    relabel_configs:\n"
             "      - source_labels: [__meta_kubernetes_pod_label_managed, "
             "__meta_kubernetes_pod_label_jac_scale_role]\n"
-            "        regex: 'jac-scale;microservice'\n"
+            "        regex: 'jac-scale;(gateway|microservice)'\n"
             "        action: keep\n"
             "      - source_labels: [__meta_kubernetes_pod_container_port_number]\n"
-            f"        regex: '{container_port}'\n"
+            f"        regex: '{self.k8s_config.container_port}'\n"
             "        action: keep\n"
+            "      - source_labels: [__meta_kubernetes_pod_label_jac_scale_role]\n"
+            "        target_label: role\n"
             "      - source_labels: [__meta_kubernetes_pod_label_app]\n"
-            "        target_label: service\n"
+            "        target_label: app\n"
             "      - source_labels: [__meta_kubernetes_pod_name]\n"
             "        target_label: pod\n"
         );
@@ -116,14 +100,10 @@ obj MonitoringDeployer {
         app_name: str,
         namespace: str,
         apps_v1: any,
-        core_v1: any,
-        provider: ClusterProvider,
-        scrape_target_service: str = ""
+        core_v1: any
     ) {
         prometheus_name = f"{app_name}-prometheus";
-        scrape_config = self._scrape_config(
-            app_name, namespace, provider, scrape_target_service
-        );
+        scrape_config = self._scrape_config(app_name, namespace);
         config_hash = hashlib.md5(scrape_config.encode()).hexdigest()[:12];
 
         prometheus_configmap = {
@@ -874,6 +854,7 @@ obj MonitoringDeployer {
             pfx = f"_{pfx}";
         }
         ds = '{"type":"prometheus","uid":"prometheus"}';
+        ingress = '{role=\\"gateway\\"}';
 
         app_dashboard_json = (
             '{"title":"Jac Scale - App Metrics","uid":"jac-scale-app",'
@@ -884,7 +865,7 @@ obj MonitoringDeployer {
             '"fieldConfig":{"defaults":{"unit":"reqps"}},'
             f'"datasource":{ds},'
             '"targets":[{"refId":"A",'
-            f'"expr":"sum(rate({pfx}_http_requests_total[1m])) by (method,path)",'
+            f'"expr":"sum(rate({pfx}_http_requests_total{ingress}[1m])) by (method,path)",'
             '"legendFormat":"{{method}} {{path}}",'
             f'"datasource":{ds}'
             + '}]},'
@@ -894,7 +875,7 @@ obj MonitoringDeployer {
             f'"datasource":{ds},'
             '"targets":[{"refId":"A",'
             f'"expr":"sum(rate({pfx}_http_requests_total'
-            + '{status_code=~\\"5..\\"}[1m]))",'
+            + '{role=\\"gateway\\",status_code=~\\"5..\\"}[1m]))",'
             '"legendFormat":"5xx errors",'
             f'"datasource":{ds}'
             + '}]},'
@@ -903,19 +884,19 @@ obj MonitoringDeployer {
             '"fieldConfig":{"defaults":{"unit":"s"}},'
             f'"datasource":{ds},'
             '"targets":['
-            f'{{"refId":"A","expr":"histogram_quantile(0.50,rate({pfx}_http_request_duration_seconds_bucket[5m]))",'
+            f'{{"refId":"A","expr":"histogram_quantile(0.50,rate({pfx}_http_request_duration_seconds_bucket{ingress}[5m]))",'
             f'"legendFormat":"p50","datasource":{ds}'
             + '},'
-            f'{{"refId":"B","expr":"histogram_quantile(0.95,rate({pfx}_http_request_duration_seconds_bucket[5m]))",'
+            f'{{"refId":"B","expr":"histogram_quantile(0.95,rate({pfx}_http_request_duration_seconds_bucket{ingress}[5m]))",'
             f'"legendFormat":"p95","datasource":{ds}'
             + '},'
-            f'{{"refId":"C","expr":"histogram_quantile(0.99,rate({pfx}_http_request_duration_seconds_bucket[5m]))",'
+            f'{{"refId":"C","expr":"histogram_quantile(0.99,rate({pfx}_http_request_duration_seconds_bucket{ingress}[5m]))",'
             f'"legendFormat":"p99","datasource":{ds}'
             + '}]},'
             '{"id":4,"type":"stat","title":"Active Requests",'
             '"gridPos":{"x":12,"y":8,"w":6,"h":8},'
             f'"datasource":{ds},'
-            f'"targets":[{{"refId":"A","expr":"{pfx}_http_requests_in_progress",'
+            f'"targets":[{{"refId":"A","expr":"{pfx}_http_requests_in_progress{ingress}",'
             f'"legendFormat":"active","datasource":{ds}'
             + '}]},'
             '{"id":5,"type":"timeseries","title":"Requests by Status Code",'
@@ -923,7 +904,7 @@ obj MonitoringDeployer {
             '"fieldConfig":{"defaults":{"unit":"reqps"}},'
             f'"datasource":{ds},'
             '"targets":[{"refId":"A",'
-            f'"expr":"sum(rate({pfx}_http_requests_total[1m])) by (status_code)",'
+            f'"expr":"sum(rate({pfx}_http_requests_total{ingress}[1m])) by (status_code)",'
             f'"legendFormat":"{{{{status_code}}}}","datasource":{ds}'
             + '}]},'
             '{"id":6,"type":"timeseries","title":"Requests by Path",'
@@ -931,7 +912,7 @@ obj MonitoringDeployer {
             '"fieldConfig":{"defaults":{"unit":"reqps"}},'
             f'"datasource":{ds},'
             '"targets":[{"refId":"A",'
-            f'"expr":"sum(rate({pfx}_http_requests_total[1m])) by (path)",'
+            f'"expr":"sum(rate({pfx}_http_requests_total{ingress}[1m])) by (path)",'
             f'"legendFormat":"{{{{path}}}}","datasource":{ds}'
             + '}]},'
             '{"id":7,"type":"timeseries","title":"p95 Latency by Path",'
@@ -939,7 +920,7 @@ obj MonitoringDeployer {
             f'"datasource":{ds},'
             '"fieldConfig":{"defaults":{"unit":"s"}},'
             '"targets":[{"refId":"A",'
-            f'"expr":"histogram_quantile(0.95,sum(rate({pfx}_http_request_duration_seconds_bucket[5m])) by (le,path))",'
+            f'"expr":"histogram_quantile(0.95,sum(rate({pfx}_http_request_duration_seconds_bucket{ingress}[5m])) by (le,path))",'
             f'"legendFormat":"{{{{path}}}}","datasource":{ds}'
             + '}]},'
             '{"id":8,"type":"timeseries","title":"p95 Latency by Method",'
@@ -947,7 +928,7 @@ obj MonitoringDeployer {
             f'"datasource":{ds},'
             '"fieldConfig":{"defaults":{"unit":"s"}},'
             '"targets":[{"refId":"A",'
-            f'"expr":"histogram_quantile(0.95,sum(rate({pfx}_http_request_duration_seconds_bucket[5m])) by (le,method))",'
+            f'"expr":"histogram_quantile(0.95,sum(rate({pfx}_http_request_duration_seconds_bucket{ingress}[5m])) by (le,method))",'
             f'"legendFormat":"{{{{method}}}}","datasource":{ds}'
             + '}]},'
             '{"id":9,"type":"timeseries","title":"Average Request Duration",'
@@ -955,7 +936,7 @@ obj MonitoringDeployer {
             f'"datasource":{ds},'
             '"fieldConfig":{"defaults":{"unit":"s"}},'
             '"targets":[{"refId":"A",'
-            f'"expr":"rate({pfx}_http_request_duration_seconds_sum[5m]) / rate({pfx}_http_request_duration_seconds_count[5m])",'
+            f'"expr":"rate({pfx}_http_request_duration_seconds_sum{ingress}[5m]) / rate({pfx}_http_request_duration_seconds_count{ingress}[5m])",'
             f'"legendFormat":"avg latency","datasource":{ds}'
             + '}]},'
             '{"id":10,"type":"timeseries","title":"Average Latency per Path",'
@@ -963,7 +944,7 @@ obj MonitoringDeployer {
             f'"datasource":{ds},'
             '"fieldConfig":{"defaults":{"unit":"s"}},'
             '"targets":[{"refId":"A",'
-            f'"expr":"sum(rate({pfx}_http_request_duration_seconds_sum[5m])) by (path) / sum(rate({pfx}_http_request_duration_seconds_count[5m])) by (path)",'
+            f'"expr":"sum(rate({pfx}_http_request_duration_seconds_sum{ingress}[5m])) by (path) / sum(rate({pfx}_http_request_duration_seconds_count{ingress}[5m])) by (path)",'
             f'"legendFormat":"{{{{path}}}}","datasource":{ds}'
             + '}]},'
             '{"id":11,"type":"heatmap","title":"Request Duration Heatmap",'
@@ -971,7 +952,7 @@ obj MonitoringDeployer {
             f'"datasource":{ds},'
             '"options":{"calculate":false,"yAxis":{"unit":"s"}},'
             '"targets":[{"refId":"A",'
-            f'"expr":"sum(increase({pfx}_http_request_duration_seconds_bucket[1m])) by (le)",'
+            f'"expr":"sum(increase({pfx}_http_request_duration_seconds_bucket{ingress}[1m])) by (le)",'
             '"format":"heatmap",'
             f'"legendFormat":"{{{{le}}}}","datasource":{ds}'
             + '}]}' ']}'
@@ -2142,22 +2123,13 @@ obj MonitoringDeployer {
         }
     }
 
-    def deploy(
-        app_name: str,
-        namespace: str,
-        apps_v1: any,
-        core_v1: any,
-        provider: ClusterProvider,
-        scrape_target_service: str = ""
-    ) {
+    def deploy(app_name: str, namespace: str, apps_v1: any, core_v1: any) {
         if self.k8s_config.monitoring_enabled {
             if self.k8s_config.k8s_metrics_enabled {
                 self._deploy_kube_state_metrics(app_name, namespace, apps_v1, core_v1);
                 self._deploy_node_exporter(app_name, namespace, apps_v1, core_v1);
             }
-            self._deploy_prometheus(
-                app_name, namespace, apps_v1, core_v1, provider, scrape_target_service
-            );
+            self._deploy_prometheus(app_name, namespace, apps_v1, core_v1);
         }
         if self.k8s_config.tracing_enabled {
             self._deploy_tempo(app_name, namespace, apps_v1, core_v1);

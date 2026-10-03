@@ -11,6 +11,9 @@ import from jaclang.scale.deploy.target.kubernetes.kubernetes_config {
 import from jaclang.scale.deploy.target.kubernetes.target { KubernetesTarget }
 import from jaclang.scale.deploy.target.kubernetes.monitoring { MonitoringDeployer }
 import from jaclang.scale.deploy.target.kubernetes.cluster_provider { LocalProvider }
+import json;
+import re;
+import unittest.mock;
 import yaml;
 
 
@@ -57,27 +60,51 @@ test "nothing enabled requests nothing" {
 }
 
 
-test "prometheus scrapes every app pod alongside the gateway" {
+test "prometheus scrapes every fleet pod and the dashboard counts each request once" {
     deployer = MonitoringDeployer(
         KubernetesConfig(app_name="t", namespace="t-ns", container_port=8000)
     );
-    scrape = yaml.safe_load(
-        deployer._scrape_config("t", "t-ns", LocalProvider(), "gateway-service")
-    );
+    scrape = yaml.safe_load(deployer._scrape_config("t", "t-ns"));
     jobs = {j["job_name"]: j for j in scrape["scrape_configs"]};
-    assert jobs["t"]["static_configs"][0]["targets"] == ["gateway-service:8000"];
-    pods = jobs["t-pods"];
-    assert pods["kubernetes_sd_configs"]
+    app_job = jobs["t"];
+    assert "static_configs" not in app_job;
+    assert app_job["kubernetes_sd_configs"]
         == [{"role": "pod", "namespaces": {"names": ["t-ns"]}}];
-    assert pods["basic_auth"] == jobs["t"]["basic_auth"];
+    assert app_job["basic_auth"]["password_file"]
+        == "/etc/prometheus/scrape-secret/password";
     keeps = {
         ";".join(rule["source_labels"]): rule["regex"]
-        for rule in pods["relabel_configs"]
+        for rule in app_job["relabel_configs"]
         if rule.get("action") == "keep"
     };
     assert keeps
         == {
-            "__meta_kubernetes_pod_label_managed;__meta_kubernetes_pod_label_jac_scale_role": "jac-scale;microservice",
+            "__meta_kubernetes_pod_label_managed;__meta_kubernetes_pod_label_jac_scale_role": "jac-scale;(gateway|microservice)",
             "__meta_kubernetes_pod_container_port_number": "8000"
         };
+    target_labels = [
+        rule["target_label"]
+        for rule in app_job["relabel_configs"]
+        if "target_label" in rule
+    ];
+    assert target_labels == ["role", "app", "pod"];
+
+    core_v1 = unittest.mock.MagicMock();
+    deployer._deploy_grafana("t", "t-ns", unittest.mock.MagicMock(), core_v1);
+    dashboards = [
+        write.kwargs["body"]["data"]["jac-scale.json"]
+        for write in core_v1.replace_namespaced_config_map.call_args_list
+        if write.kwargs["name"] == "t-grafana-dashboard"
+    ];
+    exprs = [
+        query["expr"]
+        for panel in json.loads(dashboards[0])["panels"]
+        for query in panel.get("targets", [])
+    ];
+    http_series = re.compile(r"_http_[a-z_]+(\{[^}]*\})?");
+    selectors = [m.group(1) or "" for e in exprs for m in http_series.finditer(e)];
+    assert selectors;
+    for selector in selectors {
+        assert 'role="gateway"' in selector , selector;
+    }
 }
