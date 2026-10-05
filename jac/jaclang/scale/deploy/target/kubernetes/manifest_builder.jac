@@ -929,15 +929,16 @@ obj ManifestBuilder {
         return PLACEHOLDER_JWT_SECRET;
     }
 
+    def _worker_count_env(svc_cfg: dict[str, any]) -> str {
+        raw = str(svc_cfg.get("workers") or self._serve_config().workers.count).strip();
+        resolve_count(raw, 1, '[serve.workers] count');  # fail at deploy; pod resolves "auto"
+        return raw;
+    }
+
     def _serve_env(svc_name: str, svc_cfg: dict[str, any]) -> list[dict[str, any]] {
         serve = self._serve_config();
-        workers = str(svc_cfg.get("workers") or "");
-        if not workers {
-            resolve_count(serve.workers.count, 1, '[serve.workers] count');
-            workers = serve.workers.count.strip();
-        }
         env: list[dict[str, any]] = [
-            {"name": "JAC_SERVE_WORKERS", "value": workers},
+            {"name": "JAC_SERVE_WORKERS", "value": self._worker_count_env(svc_cfg)},
             {"name": "JAC_SERVE_ACCESS_LOG_FORMAT", "value": "json"},
             {"name": "JAC_SERVE_ACCESS_LOG_SUPPRESS_HEALTH", "value": "1"},
             {"name": "JAC_SERVE_DRAIN_TIMEOUT", "value": str(self._drain_timeout())}

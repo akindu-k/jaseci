@@ -17,6 +17,7 @@ import from jaclang.scale.config.config_loader {
 import from jaclang.scale.deploy.autoscale.autoscaler { Autoscaler, AutoscalerSpec }
 import from jaclang.scale.runtime.fleet { fleet_of }
 import from jaclang.server.serving.authcrypt { PLACEHOLDER_JWT_SECRET }
+import from jaclang.server.settings { ServeConfigError }
 
 
 def _builder(services: dict[str, any], project_dir: str = "") -> ManifestBuilder {
@@ -392,6 +393,25 @@ test "embedder-supplied overrides reach the builder with gateway defaults" {
             assert env["JAC_SERVE_WORKERS"] == workers , app_dir;
             assert env["JAC_SERVE_PROXY_TRUSTED"] == trusted , app_dir;
             assert app._signing_secret() == secret , app_dir;
+        }
+        app = _builder({"svc_a": {}}, project_dir=str(Path(deployer, "bare")));
+        for (svc_workers, expected) in [
+            ("2", "2"),
+            (" auto ", "auto"),
+            ("0", None),
+            ("many", None)
+        ] {
+            raised = False;
+            try {
+                env = {
+                    e["name"]: e["value"]
+                    for e in app._serve_env("svc_a", {"workers": svc_workers})
+                };
+                assert env["JAC_SERVE_WORKERS"] == expected , svc_workers;
+            } except ServeConfigError {
+                raised = True;
+            }
+            assert raised == (expected is None) , svc_workers;
         }
     } finally {
         reset_scale_config();
