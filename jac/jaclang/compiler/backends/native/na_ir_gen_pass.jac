@@ -1678,6 +1678,7 @@ walker NaIRGenPass(CompilerPass) {
     ) -> (dict[str, TypeBase] | None);
 
     def _instantiate_generic(nd: uni.FuncCall, func_name: str) -> (ir.Function | None);
+    def _record_generic_definition(ability: uni.Ability) -> None;
     def _stamp_mono_fn(
         ability: uni.Ability, spec_name: str, memo_key: str
     ) -> (ir.Function | None);
@@ -2037,6 +2038,7 @@ walker NaIRGenPass(CompilerPass) {
     def _codegen_constructors_first(archetypes: list[uni.Archetype]) -> None;
     def _demoted_init_of(type_name: str) -> (str | None);
     def _codegen_no_sig_method(arch_name: str, method: uni.Ability) -> None;
+    def _event_from_walker(method: uni.Ability) -> bool;
     def _forward_declare_event_method(arch_name: str, method: uni.Ability) -> None;
     def _codegen_event_method(arch_name: str, method: uni.Ability) -> None;
     def _trigger_member_structs(tag: (uni.UniNode | None)) -> list[str];
