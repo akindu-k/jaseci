@@ -32,7 +32,8 @@ def as_user(user_id: str, work: any) -> None {
 def stored_n(user_id: str, counter_id: str) -> int {
     out = [0];
     def read -> None {
-        out[0] = jobj(counter_id).n;
+        c: any = jobj(counter_id);
+        out[0] = c.n;
     }
     as_user(user_id, read);
     return out[0];
@@ -56,7 +57,8 @@ with entry {
     commit();
     c1_id = jid(c1);
     def job1 -> None {
-        jobj(c1_id) spawn SetCount(to=1);
+        theirs: any = jobj(c1_id);
+        theirs spawn SetCount(to=1);
     }
     as_user(me, job1);
     r1 = try_commit();
@@ -68,9 +70,10 @@ with entry {
     c2 = root ++> Counter();
     commit();
     c2_id = jid(c2);
-    held = jobj(c2_id);
+    held: any = jobj(c2_id);
     def job2 -> None {
-        print(f"  background job sees n = {jobj(c2_id).n}");
+        theirs: any = jobj(c2_id);
+        print(f"  background job sees n = {theirs.n}");
         held spawn SetCount(to=5);
     }
     as_user(me, job2);
