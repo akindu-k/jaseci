@@ -1,0 +1,72 @@
+diff --git a/jac/jaclang/runtime/archetype.jac b/jac/jaclang/runtime/archetype.jac
+index 5a76b976e..e46b57f97 100644
+--- a/jac/jaclang/runtime/archetype.jac
++++ b/jac/jaclang/runtime/archetype.jac
+@@ -115,6 +115,8 @@ obj Anchor {
+ 
+     def ensure_id -> UUID;
+     def own_access -> Permission;
++    def bind_memory(mem: any) -> None;
++    def owning_memory -> any;
+     def is_populated -> bool;
+     def make_stub -> TANCH;
+     def populate -> None;
+@@ -630,7 +632,9 @@ def _dirty_setattr(self: any, name: str, value: any) -> None {
+         return;
+     }
+     object.__setattr__(self, name, value);
+-    md = ctx.mem?.mark_dirty;
++
++    owner = an.owning_memory();
++    md = owner?.mark_dirty;
+     if md is not None {
+         md(an);
+     }
+diff --git a/jac/jaclang/runtime/impl/archetype.impl.jac b/jac/jaclang/runtime/impl/archetype.impl.jac
+index bf0520d04..8f31b938a 100644
+--- a/jac/jaclang/runtime/impl/archetype.impl.jac
++++ b/jac/jaclang/runtime/impl/archetype.impl.jac
+@@ -47,6 +47,19 @@ impl Anchor.own_access -> Permission {
+     return perm;
+ }
+ 
++impl Anchor.bind_memory(mem: any) -> None {
++    held = self.__dict__.get('_mem');
++    if held is not None and held() is mem {
++        return;
++    }
++    self.__dict__['_mem'] = weakref.ref(mem);
++}
++
++impl Anchor.owning_memory -> any {
++    held = self.__dict__.get('_mem');
++    return held() if held is not None else None;
++}
++
+ impl Anchor.is_populated -> bool {
+     return ('archetype' in self.__dict__);
+ }
+diff --git a/jac/jaclang/runtime/memory.jac b/jac/jaclang/runtime/memory.jac
+index 2d56bfd80..782d45880 100644
+--- a/jac/jaclang/runtime/memory.jac
++++ b/jac/jaclang/runtime/memory.jac
+@@ -59,6 +59,7 @@ obj Memory {
+         aid = anchor.ensure_id();
+         with self._lock {
+             self.__mem__[aid] = anchor;
++            anchor.bind_memory(self);
+             self._dirty[aid] = None;
+             self._deleted.discard(aid);
+         }
+diff --git a/jac/jaclang/server/impl/session.impl.jac b/jac/jaclang/server/impl/session.impl.jac
+index f1e9466db..81b0072f4 100644
+--- a/jac/jaclang/server/impl/session.impl.jac
++++ b/jac/jaclang/server/impl/session.impl.jac
+@@ -996,6 +996,7 @@ impl Session._materialize(row: AnchorRow) -> (Anchor | None) {
+     }
+     self._version_seen[row.id] = row.version;
+     self.__mem__[row.id] = anchor;
++    anchor.bind_memory(self);
+     self._flushed_hash[row.id] = _persist_hash(anchor);
+     anchor.hash = self._flushed_hash[row.id];
+     if self._store is not None

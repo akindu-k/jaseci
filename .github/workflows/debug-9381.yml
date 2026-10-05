@@ -1,0 +1,43 @@
+name: debug-9381
+
+on:
+  push:
+    branches: [debug/9381-session-attribution]
+
+jobs:
+  probe:
+    name: ${{ matrix.lane }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [before-sealed, before-reroute, after-reroute]
+    env:
+      LANE: ${{ matrix.lane }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # The rolling dev binary, built from 2486ef8b4, the commit this branch is cut from.
+      - name: Install the dev jac binary
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          gh release download dev -R jaseci-labs/jac -p jac-dev-linux-x86_64 -O "$HOME/.local/bin/jac"
+          chmod +x "$HOME/.local/bin/jac"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "XDG_CACHE_HOME=$RUNNER_TEMP/.cache" >> "$GITHUB_ENV"
+
+      - name: Fetch the pinned typeshed stubs
+        run: |
+          set -euo pipefail
+          V=jac/jaclang/vendor/typeshed
+          PIN=$(cat $V/PIN)
+          curl -fsSL "https://codeload.github.com/python/typeshed/tar.gz/$PIN" -o ts.tgz
+          echo "$(cat $V/TARBALL_SHA256)  ts.tgz" | sha256sum -c -
+          tar -xzf ts.tgz
+          rm -rf $V/stdlib && cp -r "typeshed-$PIN/stdlib" $V/stdlib
+          echo "$PIN" > $V/stdlib/.typeshed-sha
+
+      - name: Probe
+        run: bash scripts/debug_9381_probe.sh
