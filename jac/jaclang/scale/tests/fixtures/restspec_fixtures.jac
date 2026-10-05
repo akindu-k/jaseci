@@ -1,6 +1,11 @@
 """Test API fixture for restspec decorator tests."""
 
 import from jaclang.runtime.builtin { restspec }
+import from jaclang.server.serving.datatypes {
+    FileResponse,
+    RedirectResponse,
+    Response
+}
 import from http { HTTPMethod }
 
 # ============================================================================
@@ -140,6 +145,63 @@ walker:pub GetProjectTaskWalker {
             "task_id": self.task_id
         };
     }
+}
+
+"""A list walker one segment shorter than its item route, both on PUT: the
+list walker's implicit `/{nd}` route has the item route's shape."""
+@restspec(method=HTTPMethod.PUT, path="/boards/{board_id}/cards")
+walker:pub ReorderCards {
+    has board_id: str = "";
+
+    can reorder with Root entry {
+        report {"message": "ReorderCards executed", "board_id": self.board_id};
+    }
+}
+
+"""The item route the list walker's `/{nd}` route must not shadow. Its
+parameter name sorts after `nd`, which is the case that lost the tie."""
+@restspec(method=HTTPMethod.PUT, path="/boards/{board_id}/cards/{slot}")
+walker:pub EditCard {
+    has board_id: str = "",
+        slot: str = "";
+
+    can edit with Root entry {
+        report {
+            "message": "EditCard executed",
+            "board_id": self.board_id,
+            "slot": self.slot
+        };
+    }
+}
+
+"""A catch-all behind a path parameter, which the server's own `/{file_path:path}`
+page fallback must not shadow on GET."""
+@restspec(
+    method=HTTPMethod.GET,
+    path="/boards/{board_id}/files/{file_path:path}",
+    produces="text/plain",
+    envelope=False
+)
+def:pub board_file(board_id: str, file_path: str) -> str {
+    return board_id + ":" + file_path;
+}
+
+"""A walker field named `request`, the name the server uses for its own
+request object."""
+@restspec(method=HTTPMethod.POST, path="/orders/save")
+walker:pub SaveOrder {
+    has request: dict[str, any] = {},
+        status: str = "";
+
+    can save with Root entry {
+        report {"request": self.request, "status": self.status};
+    }
+}
+
+"""A function parameter named `request`."""
+@restspec(method=HTTPMethod.POST, path="/orders/echo")
+def:pub echo_order(request: dict[str, any], status: str = "") -> dict[str, any] {
+    return {"request": request, "status": status};
 }
 
 node UserProfile {
@@ -373,6 +435,54 @@ def:pub raw_bytes -> bytes {
 )
 def:pub raw_bytearray -> bytearray {
     return bytearray(b"\x00\x01\x02");
+}
+
+"""A returned Response is sent as returned: status, headers and media type
+are the function's, per request (#9291)."""
+@restspec(
+    method=HTTPMethod.GET, path="/raw/response", produces="text/plain", envelope=False
+)
+def:pub raw_response(kind: str = "csv", name: str = "report") -> Response {
+    if kind == "missing" {
+        return Response(
+            content="<h1>no such report</h1>", status_code=404, media_type="text/html"
+        );
+    }
+    if kind == "header" {
+        return Response(content="x", headers={"X-Report-Name": name});
+    }
+    return Response(
+        content="a,b\n1,2\n",
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="' + name + '.csv"'}
+    );
+}
+
+"""A returned RedirectResponse is a redirect."""
+@restspec(method=HTTPMethod.GET, path="/raw/moved", envelope=False)
+def:pub raw_moved -> RedirectResponse {
+    return RedirectResponse(url="/raw/plain", status_code=302);
+}
+
+"""A (body, media_type) pair picks the representation per request; a plain
+body still uses the registered `produces`."""
+@restspec(
+    method=HTTPMethod.GET, path="/raw/pair", produces="text/plain", envelope=False
+)
+def:pub raw_pair(fmt: str = "csv") -> tuple[str, str] | str {
+    if fmt == "view" {
+        return ("<h1>report</h1>", "text/html");
+    }
+    if fmt == "plain" {
+        return "plain default";
+    }
+    return ("a,b\n1,2\n", "text/csv");
+}
+
+"""A returned FileResponse is served by the server's Range-aware file path."""
+@restspec(method=HTTPMethod.GET, path="/raw/file", envelope=False)
+def:pub raw_file(path: str) -> FileResponse {
+    return FileResponse(path=path, media_type="video/mp4");
 }
 
 """Envelope stays on by default -- regression guard for the opt-in."""

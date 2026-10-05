@@ -78,7 +78,7 @@ def _walker_callback(
     requires_auth: bool
 ) -> Callable[..., (TransportResponse | Response)] {
     async def callback(
-        request: Request, nd: (str | None) = None, **kwargs: JsonValue
+        request: Request, /, nd: (str | None) = None, **kwargs: JsonValue
     ) -> (TransportResponse | Response) {
         username = request_caller(server, request);
         if requires_auth and not username {
@@ -120,7 +120,7 @@ def _function_callback(
     requires_auth: bool
 ) -> Callable[..., (TransportResponse | Response)] {
     async def callback(
-        request: Request, **kwargs: JsonValue
+        request: Request, /, **kwargs: JsonValue
     ) -> (TransportResponse | Response) {
         username = request_caller(server, request);
         if requires_auth and not username {
@@ -152,7 +152,7 @@ def _function_callback(
 
 
 def _listing(names: list[str], key: str) -> Callable[..., TransportResponse] {
-    async def callback(request: Request, **kwargs: JsonValue) -> TransportResponse {
+    async def callback(request: Request, /, **kwargs: JsonValue) -> TransportResponse {
         return TransportResponse.success(
             data={key: list[str](names)}, meta=Meta(extra={'http_status': 200})
         );
@@ -205,7 +205,8 @@ def _mount_provider(
                 summary=f"{provider_app}.{walker_name}",
                 description=f"Spawn {walker_name} in the colocated app {provider_app} on a node.",
                 requires_auth=walker_auth,
-                forward_undeclared_query_params=False
+                forward_undeclared_query_params=False,
+                yields_to_declared=True
             )
         );
         server.add_endpoint(
