@@ -33,9 +33,9 @@ jobs:
           set -euo pipefail
           V=jac/jaclang/vendor/typeshed
           PIN=$(cat $V/PIN)
-          curl -fsSL "https://codeload.github.com/python/typeshed/tar.gz/$PIN" -o ts.tgz
-          echo "$(cat $V/TARBALL_SHA256)  ts.tgz" | sha256sum -c -
-          tar -xzf ts.tgz
+          curl -fsSL "https://codeload.github.com/python/typeshed/tar.gz/$PIN" | gunzip > ts.tar
+          echo "$(cat $V/TARBALL_SHA256)  ts.tar" | sha256sum -c -
+          tar -xf ts.tar
           rm -rf $V/stdlib && cp -r "typeshed-$PIN/stdlib" $V/stdlib
           echo "$PIN" > $V/stdlib/.typeshed-sha
 
