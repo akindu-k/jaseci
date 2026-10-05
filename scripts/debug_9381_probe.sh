@@ -22,7 +22,7 @@ else
     export JAC_DEV_SOURCE="${REPO_ROOT}/jac"
 fi
 
-for repro in bg_writes caller_writes; do
+for repro in user_repro bg_writes caller_writes; do
     work="$(mktemp -d)"
     cp "${REPO_ROOT}/scripts/debug_9381_${repro}.jac" "${work}/"
     echo "### repro ${repro}"
