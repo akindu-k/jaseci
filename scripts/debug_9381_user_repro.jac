@@ -4,14 +4,22 @@ runtime's "run as a user" context helpers that background workers use."""
 import from jaclang { JacRuntime as Jac }
 
 node Counter {
-    has n: int = 0;
+    has tag: str,
+        n: int = 0;
 }
 
 walker SetCount {
-    has to: int;
+    has tag: str,
+        to: int;
+
+    can start with Root entry {
+        visit [-->];
+    }
 
     can set with Counter entry {
-        here.n = self.to;
+        if here.tag == self.tag {
+            here.n = self.to;
+        }
     }
 }
 
@@ -53,12 +61,11 @@ with entry {
     me = jid(root);
 
     # Case 1, as reported in #9381: the background job updates its own copy.
-    c1 = root ++> Counter();
+    c1 = root ++> Counter(tag="c1");
     commit();
     c1_id = jid(c1);
     def job1 -> None {
-        theirs: any = jobj(c1_id);
-        theirs spawn SetCount(to=1);
+        root spawn SetCount(tag="c1", to=1);
     }
     as_user(me, job1);
     r1 = try_commit();
@@ -67,14 +74,13 @@ with entry {
 
     # Case 2, the reverse: the request hands its own Counter to the background job,
     # which runs the walker on it while the job is running.
-    c2 = root ++> Counter();
+    c2 = root ++> Counter(tag="c2");
     commit();
     c2_id = jid(c2);
-    held: any = jobj(c2_id);
     def job2 -> None {
         theirs: any = jobj(c2_id);
         print(f"  background job sees n = {theirs.n}");
-        held spawn SetCount(to=5);
+        c2 spawn SetCount(tag="c2", to=5);
     }
     as_user(me, job2);
     r2 = try_commit();
