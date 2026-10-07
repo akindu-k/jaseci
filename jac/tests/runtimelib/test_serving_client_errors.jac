@@ -203,6 +203,14 @@ test "connection reuse follows the response framing" {
             1
         ),
         (
+            "interim 100 continue",
+            b"HTTP/1.1 100 Continue\r\n\r\n" + _OK,
+            False,
+            ["GET", "GET", "GET"],
+            [b"ok"] * 3,
+            1
+        ),
+        (
             "connection close",
             b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
             False,

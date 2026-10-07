@@ -345,7 +345,11 @@ async def _exchange(
     try {
         conn.writer.write(payload);
         await conn.writer.drain();
-        return await _read_response_head(conn.reader, timeout);
+        head = await _read_response_head(conn.reader, timeout);
+        while 100 <= head[1] < 200 and head[1] != 101 {
+            head = await _read_response_head(conn.reader, timeout);
+        }
+        return head;
     } except ClientRequestSent {
         _discard(conn);
         raise;
@@ -423,7 +427,7 @@ async def arequest(
         );
     }
     chunked = 'chunked' in (resp_headers.get('Transfer-Encoding') or '').lower();
-    bodiless = verb == 'HEAD' or status in (204, 304) or 100 <= status < 200;
+    bodiless = verb == 'HEAD' or status in (204, 304);
     reusable = version == 'HTTP/1.1'
         and 'close' not in (resp_headers.get('Connection') or '').lower()
         and (bodiless or chunked or resp_headers.get('Content-Length') is not None);
@@ -447,10 +451,10 @@ async def arequest(
             collected.append(block);
         }
     } except (ConnectionError, OSError, asyncio.IncompleteReadError) as e {
-        _discard(conn);
         raise ClientRequestSent(detail=f"connection lost mid-body: {e!r}");
+    } finally {
+        await response.aclose();
     }
-    await response.aclose();
     response.body = b''.join(collected);
     return response;
 }
