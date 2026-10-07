@@ -198,10 +198,10 @@ def _param_kind(
 def walker_parameters(
     server: JacAPIServer,
     walker_name: str,
+    walker_cls: type,
     invoke_on_root: bool,
     method: HTTPMethod = HTTPMethod.POST
 ) -> list[APIParameter] {
-    walker_cls = server.get_walkers()[walker_name];
     restspec: any = target_restspec(walker_cls);
     path_names = path_param_names(str(restspec.path) if restspec?.path else None);
     fields = server.introspector.introspect_walker(walker_cls)['fields'];
@@ -320,7 +320,7 @@ def register_walker_endpoints(server: JacAPIServer) {
                 path=f"{path}/{{nd}}",
                 callback=callback,
                 parameters=walker_parameters(
-                    server, walker_name, invoke_on_root=False, method=method
+                    server, walker_name, walker_cls, invoke_on_root=False, method=method
                 ),
                 tags=['Walkers'],
                 summary=f"Spawn {walker_name} on a node",
@@ -336,7 +336,7 @@ def register_walker_endpoints(server: JacAPIServer) {
                 path=path,
                 callback=callback,
                 parameters=walker_parameters(
-                    server, walker_name, invoke_on_root=True, method=method
+                    server, walker_name, walker_cls, invoke_on_root=True, method=method
                 ),
                 tags=['Walkers'],
                 summary=f"Spawn {walker_name}",
@@ -350,9 +350,11 @@ def register_walker_endpoints(server: JacAPIServer) {
 
 
 def function_parameters(
-    server: JacAPIServer, func_name: str, method: HTTPMethod = HTTPMethod.POST
+    server: JacAPIServer,
+    func_name: str,
+    func_obj: Callable,
+    method: HTTPMethod = HTTPMethod.POST
 ) -> list[APIParameter] {
-    func_obj = server.get_functions()[func_name];
     restspec: any = target_restspec(func_obj);
     path_names = path_param_names(str(restspec.path) if restspec?.path else None);
     fields = server.introspector.introspect_callable(func_obj)['parameters'];
@@ -387,10 +389,9 @@ def function_parameters(
 
 
 def function_callback(
-    server: JacAPIServer, func_name: str
+    server: JacAPIServer, func_name: str, func_obj: Callable
 ) -> Callable[..., (TransportResponse | StreamingResponse | Response)] {
     requires_auth = server.introspector.is_auth_required_for_function(func_name);
-    func_obj = server.get_functions()[func_name];
     restspec: any = target_restspec(func_obj);
     raw_body: bool = restspec is not None and not restspec.envelope;
     raw_media: str = str(restspec.produces or 'text/plain')
@@ -471,8 +472,10 @@ def register_function_endpoints(server: JacAPIServer) {
             JEndPoint(
                 method=method,
                 path=path,
-                callback=function_callback(server, func_name),
-                parameters=function_parameters(server, func_name, method=method),
+                callback=function_callback(server, func_name, func_obj),
+                parameters=function_parameters(
+                    server, func_name, func_obj, method=method
+                ),
                 media_type=raw_media,
                 tags=['Functions'],
                 summary=f"Call {func_name}",
