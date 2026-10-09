@@ -2,7 +2,7 @@ name: debug-9840
 
 on:
   push:
-    branches: [debug/9840-cache-coherence, debug/9840-fix-check]
+    branches: [debug/9840-cache-coherence, debug/9840-fix-check, debug/9840-nx-check]
   workflow_dispatch:
 
 env:
