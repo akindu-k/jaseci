@@ -94,9 +94,9 @@ def unlisted_image_root(path: str) -> (str | None) {
 
 
 def serve_manifest_stamp -> dict[str, (int | str)] {
-    import from importlib.metadata { version }
+    import from jaclang.cli.manifest_route { resolve_cli_version }
     try {
-        jac_version = version("jaclang");
+        jac_version = resolve_cli_version();
     } except Exception {
         jac_version = "0.0.0";
     }

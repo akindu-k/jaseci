@@ -18,6 +18,7 @@ import from jaclang.runtime.prepared {
 test "sealing retains each colocated service's access metadata" {
     import from jaclang.dist.seal { build_serve_manifest }
     import from jaclang.server.sealed_serve { SERVE_MANIFEST_FORMAT }
+    import from jaclang.cli.manifest_route { resolve_cli_version }
     with tempfile.TemporaryDirectory() as tmp {
         base = Path(tmp);
         (base / 'jac.toml').write_text(
@@ -35,7 +36,7 @@ test "sealing retains each colocated service's access metadata" {
             manifest = build_serve_manifest(path, base);
             assert manifest is not None;
             assert manifest['format'] == SERVE_MANIFEST_FORMAT;
-            assert manifest['jaclang_version'];
+            assert manifest['jaclang_version'] == resolve_cli_version();
             modules = manifest['module_manifests'];
             assert modules['main.jac']['app'] == 'web';
             assert modules['scoring.jac']['app'] == 'scoring';
