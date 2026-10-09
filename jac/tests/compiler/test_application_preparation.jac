@@ -15,6 +15,60 @@ import from jaclang.runtime.prepared {
     initialize_application
 }
 
+glob SERVE_MANIFEST_SHAPES: dict[int, dict[str, set[str]]] = {
+    3: {
+        'manifest': {
+            'app',
+            'client',
+            'endpoint_effects',
+            'format',
+            'jaclang_version',
+            'module_manifests',
+            'persistence',
+            'private_declarations',
+            'root',
+            'spa_routes',
+            'surface'
+        },
+        'module': {
+            'app',
+            'client',
+            'endpoint_effects',
+            'persistence',
+            'private_declarations',
+            'root',
+            'spa_routes',
+            'surface'
+        },
+        'surface': {
+            'explicit_access',
+            'exposure',
+            'kind',
+            'module',
+            'placement',
+            'reflect',
+            'route',
+            'scheduled',
+            'src'
+        }
+    }
+};
+
+def serve_manifest_shape(manifest: dict[str, any]) -> dict[str, set[str]] {
+    """Collect the key names of a serve manifest, its module records, and their surface entries."""
+    modules = list(manifest['module_manifests'].values());
+    return {
+        'manifest': set(manifest),
+        'module': {key for record in modules for key in record},
+        'surface': {
+            key
+            for record in modules
+            for entry in (record.get('surface') or {}).values()
+            for key in entry
+        }
+    };
+}
+
 test "sealing retains each colocated service's access metadata" {
     import from jaclang.dist.seal { build_serve_manifest }
     import from jaclang.server.sealed_serve { SERVE_MANIFEST_FORMAT }
@@ -37,6 +91,12 @@ test "sealing retains each colocated service's access metadata" {
             assert manifest is not None;
             assert manifest['format'] == SERVE_MANIFEST_FORMAT;
             assert manifest['jaclang_version'] == resolve_cli_version();
+            shape = serve_manifest_shape(manifest);
+            assert shape == SERVE_MANIFEST_SHAPES.get(SERVE_MANIFEST_FORMAT) , (
+                f'serve manifest shape changed under format {SERVE_MANIFEST_FORMAT}: '
+                    + f'{shape}. If older readers cannot handle the change, bump '
+                    + 'SERVE_MANIFEST_FORMAT; then record the new shape in SERVE_MANIFEST_SHAPES.'
+            );
             modules = manifest['module_manifests'];
             assert modules['main.jac']['app'] == 'web';
             assert modules['scoring.jac']['app'] == 'scoring';
