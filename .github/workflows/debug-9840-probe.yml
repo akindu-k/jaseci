@@ -1,0 +1,9 @@
+name: debug-9840-probe
+on:
+  push:
+    branches: [debug/9840-trigger-probe]
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
