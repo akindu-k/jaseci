@@ -42,7 +42,7 @@ jobs:
           set +e
           jac --version
           failed=""
-          for f in ${DEBUG_FILES:-jac/jaclang/scale/tests/data/test_memory_hierarchy.jac}; do
+          for f in jac/jaclang/scale/tests/data/test_*.jac; do
             echo "::group::$f"
             JAC_TEST_JOBS=0 jac test -v "$f" || failed="$failed $f"
             echo "::endgroup::"
