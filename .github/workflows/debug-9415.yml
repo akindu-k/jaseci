@@ -1,0 +1,37 @@
+name: debug-9415
+
+on:
+  push:
+    branches: [debug/9415-serve-manifest-format]
+  workflow_dispatch:
+
+jobs:
+  serve-manifest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - name: Build jac from this branch's source
+        uses: ./.github/actions/setup-jac
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Run the touched test files (sealed)
+        env:
+          JAC_NO_DEV_SOURCE: "1"
+          JAC_TEST_JOBS: "0"
+        run: |
+          jac --version
+          HOME="$(mktemp -d)" jac test -v \
+            jac/tests/compiler/test_application_preparation.jac \
+            jac/tests/client/test_sealed_serve.jac
+
+      - name: Mutation probes (source reroute)
+        env:
+          JAC_NO_DEV_SOURCE: ""
+          JAC_TEST_JOBS: "0"
+        run: bash scripts/debug_9415_probe.sh
