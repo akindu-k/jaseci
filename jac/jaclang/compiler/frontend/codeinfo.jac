@@ -12,6 +12,7 @@ import from jaclang.compiler.frontend.srcloc { CodeLocInfo }
 import from jaclang.compiler.kernel_target {
     active_kernel_target,
     is_target_package_path,
+    target_package_rel,
     kernel_target_active,
     kernel_target_generation,
     target_pkg_root
@@ -23,10 +24,7 @@ import type from jaclang.compiler.frontend.unitree { CommentToken, Module, UniNo
 import type from jaclang.compiler.passes.layout_pass { LayoutRegistry }
 import type from jaclang.compiler.passes.osp_analysis { OspModel }
 import type from jaclang.compiler.backends.native.llvm.ir { Module as IRModule }
-import type from jaclang.compiler.backends.native.llvm.binding {
-    ModuleRef,
-    ExecutionEngine
-}
+import type from jaclang.compiler.backends.native.llvm.binding { ExecutionEngine }
 import type from jaclang.compiler.driver.native_iface { NativeIface }
 
 obj ClientManifest {
@@ -52,7 +50,8 @@ obj ClientArtifact {
         source_map: list[tuple[int, int, int, int, str]] = [],
         dep_digests: dict[str, str] = {},
         boundary_contracts: dict[str, any] = {},
-        framework: str = "";
+        framework: str = "",
+        pulled: list[int] = [];
 }
 
 enum InteropContext { SERVER = 'server', NATIVE = 'native', CLIENT = 'client' }
@@ -266,7 +265,7 @@ def native_arch_scope(mod_path: str) -> str {
     }
     source = os.path.realpath(mod_path);
     out = "";
-    if not is_target_package_path(source) {
+    if source.endswith(".jac") and not toolchain_runtime_unit(source) {
         stem = os.path.basename(source);
         dot = stem.find(".");
         if dot > 0 {
@@ -281,6 +280,19 @@ def native_arch_scope(mod_path: str) -> str {
     }
     _native_arch_scope_memo[mod_path] = out;
     return out;
+}
+
+def toolchain_runtime_unit(source: str) -> bool {
+    rel = target_package_rel(source) if is_target_package_path(source) else None;
+    if rel is None {
+        return False;
+    }
+    if rel in kernel_unit_rels() {
+        return True;
+    }
+    import from jaclang.compiler.frontend.host { active_host }
+    host = active_host();
+    return host.is_native_only_source(rel) or host.is_native_lowered_source(rel);
 }
 
 def native_arch_name(mod_path: str, name: str) -> str {
@@ -780,6 +792,16 @@ def is_shared_runtime_module(file_path: str) -> bool {
     if not file_path {
         return False;
     }
+    stem = os.path.basename(file_path);
+    named = False;
+    for module in SHARED_RUNTIME_MODULES {
+        if stem == module.rpartition('.')[2] + '.jac' {
+            named = True;
+        }
+    }
+    if not named {
+        return False;
+    }
     path = os.path.realpath(file_path);
     for pkg in bundled_pkg_roots() {
         package = os.path.realpath(pkg);
@@ -1129,7 +1151,8 @@ obj CodeGenTarget {
         py_bytecode: (bytes | None) = None,
         jcir: (bytes | None) = None,
         es_ast: EsNode | Sequence[EsNode] | SliceInfo | IndexInfo | None = None,
-        llvm_ir: (ModuleRef | IRModule | None) = None,
+        llvm_ir: any = None,
+        ir_module: (IRModule | None) = None,
         native_engine: (ExecutionEngine | SharedNativeEngine | None) = None,
         native_bitcode: (bytes | None) = None,
         native_object: (bytes | None) = None,
@@ -1156,6 +1179,15 @@ obj CodeGenTarget {
     has doc_ir: Doc { getter; setter(value: Doc); }
     has client_manifest: ClientManifest { getter; setter(value: ClientManifest); }
     has interop_manifest: InteropManifest { getter; setter(value: InteropManifest); }
+
+    def has_native_ir -> bool {
+        return self.ir_module is not None or self.llvm_ir is not None;
+    }
+
+    def drop_native_ir {
+        self.ir_module = None;
+        self.llvm_ir = None;
+    }
 }
 
 def endpoint_descriptor(module: Module, kind: str, name: str) -> dict[str, str] {

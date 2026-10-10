@@ -982,7 +982,7 @@ After each call byLLM appends the turn to your list **in place** as plain dicts.
 {"role": "assistant", "content": "It's sunny in Paris."}
 ```
 
-The auto-generated SYSTEM prompt and `finish_tool` calls are excluded from the list - byLLM regenerates them each turn. The list is safe to JSON-serialise and replay across sessions.
+The SYSTEM prompt and `finish_tool` calls are excluded from the list - byLLM regenerates them each turn, so a `system` message found in the list (for example one stored by an earlier version) is dropped rather than replayed. The list is safe to JSON-serialise and replay across sessions.
 
 ---
 
