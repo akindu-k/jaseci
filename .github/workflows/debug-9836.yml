@@ -1,0 +1,36 @@
+name: debug-9836
+
+on:
+  push:
+    branches: [debug/9836-pool-close]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the dev jac binary
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          gh release download dev -R jaseci-labs/jac -p jac-dev-linux-x86_64 -O "$HOME/.local/bin/jac"
+          chmod +x "$HOME/.local/bin/jac"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "XDG_CACHE_HOME=$RUNNER_TEMP/.cache" >> "$GITHUB_ENV"
+
+      - name: Fetch the pinned typeshed stubs
+        run: |
+          set -euo pipefail
+          V=jac/jaclang/vendor/typeshed
+          PIN=$(cat $V/PIN)
+          curl -fsSL "https://codeload.github.com/python/typeshed/tar.gz/$PIN" | gunzip > ts.tar
+          echo "$(cat $V/TARBALL_SHA256)  ts.tar" | sha256sum -c -
+          tar -xf ts.tar
+          rm -rf $V/stdlib && cp -r "typeshed-$PIN/stdlib" $V/stdlib
+          echo "$PIN" > $V/stdlib/.typeshed-sha
+
+      - name: Probe
+        run: bash scripts/debug_9836_probe.sh

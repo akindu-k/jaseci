@@ -154,7 +154,7 @@ def _keep_alive(reply: bytes, drop_reused: bool = False) -> any {
             }
             conn.sendall(reply);
             served += 1;
-            if "connection: close" in head or b"Connection: close" in reply {
+            if b"Connection: close" in reply {
                 conn.close();
                 return;
             }
@@ -166,11 +166,29 @@ def _keep_alive(reply: bytes, drop_reused: bool = False) -> any {
 
 async def _send_each(port: int, methods: list[str]) -> list[any] {
     outcomes: list[any] = [];
-    for method in methods {
+    for spec in methods {
+        (method, _, mode) = spec.partition(" ");
+        streamed = mode in ("stream", "partial");
         try {
             resp = await arequest(
-                method, f"http://127.0.0.1:{port}/x", data=b"{}", timeout=2.0
+                method,
+                f"http://127.0.0.1:{port}/x",
+                headers={"Connection": "close"} if mode == "close" else None,
+                data=b"{}",
+                timeout=2.0,
+                stream=streamed
             );
+            if streamed {
+                blocks: list[bytes] = [];
+                async for block in resp.aiter_raw() {
+                    blocks.append(block);
+                    if mode == "partial" {
+                        break;
+                    }
+                }
+                await resp.aclose();
+                resp.body = b"".join(blocks);
+            }
             outcomes.append(resp.body);
         } except ClientConnectionError as e {
             outcomes.append(type(e));
@@ -180,7 +198,9 @@ async def _send_each(port: int, methods: list[str]) -> list[any] {
 }
 
 
-glob _OK: bytes = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+glob _OK: bytes = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok",
+     _TWO_CHUNKS: bytes = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+         + b"2\r\nok\r\n2\r\nok\r\n0\r\n\r\n";
 
 
 test "connection reuse follows the response framing" {
@@ -215,6 +235,30 @@ test "connection reuse follows the response framing" {
             b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
             False,
             ["GET", "GET"],
+            [b"ok"] * 2,
+            2
+        ),
+        (
+            "client asked to close",
+            _OK,
+            False,
+            ["GET close", "GET"],
+            [b"ok"] * 2,
+            2
+        ),
+        (
+            "stream read to the end",
+            _TWO_CHUNKS,
+            False,
+            ["GET stream", "GET stream", "GET stream"],
+            [b"okok"] * 3,
+            1
+        ),
+        (
+            "stream closed mid-body",
+            _TWO_CHUNKS,
+            False,
+            ["POST partial", "POST partial"],
             [b"ok"] * 2,
             2
         ),
