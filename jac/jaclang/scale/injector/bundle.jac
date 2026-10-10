@@ -394,7 +394,19 @@ def check_fleet_entries(
 def unresolved_toml_references(text: str, environ: dict[str, str]) -> list[str] {
     import from jaclang.project.config { resolve_env_refs }
     (_, refs) = resolve_env_refs(tomllib.loads(text), environ);
-    return [f"{ref.path}: {ref.describe()}" for ref in refs];
+    return [
+        f"{ref.path}: {ref.describe()}"
+        for ref in refs
+        if not _is_shell_script_ref(ref)
+    ];
+}
+
+
+def _is_shell_script_ref(ref: any) -> bool {
+    parts = ref.path.split(".");
+    in_scripts = parts[0] == "scripts"
+        or (parts[0] == "environments" and parts[2:3] == ["scripts"]);
+    return ref.unsupported and in_scripts;
 }
 
 
@@ -655,29 +667,23 @@ def _precompile_app(
         jac_path.write_bytes(seal_binary);
         jac_path.chmod(0o755);
 
-        manifest_script = stage_root / "_serve_payloads.jac";
-        manifest_script.write_text(
-            "import from pathlib { Path }\n"
-                + "import from jaclang.project.config { get_config_for_path }\n"
-                + "import from jaclang.dist.seal { bake_serve_payloads }\n"
-                + "with entry {\n"
-                + "    project = Path('app').resolve();\n"
-                + "    config = get_config_for_path(project);\n"
-                + "    if not bake_serve_payloads(\n"
-                + f"        config, project, app={repr(app)}, bake_client=False\n"
-                + "    ) {\n"
-                + "        raise RuntimeError('Serving metadata preparation failed');\n"
-                + "    }\n}\n"
-        );
+        serve_payloads = "from pathlib import Path\n"
+            + "from jaclang.project.config import get_config_for_path\n"
+            + "from jaclang.dist.seal import bake_serve_payloads\n"
+            + "project = Path('app').resolve()\n"
+            + "config = get_config_for_path(project)\n"
+            + "if not bake_serve_payloads(\n"
+            + f"    config, project, app={repr(app)}, bake_client=False\n"
+            + "):\n"
+            + "    raise RuntimeError('Serving metadata preparation failed')\n";
         prepared = subprocess.run(
-            [str(jac_path), "run", str(manifest_script)],
+            [str(jac_path), "-c", serve_payloads],
             capture_output=True,
             text=True,
             timeout=timeout_s,
             env=seal_step_env(),
             cwd=str(stage_root)
         );
-        manifest_script.unlink();
         if prepared.returncode != 0 {
             raise RuntimeError(
                 "App serving metadata preparation failed: "

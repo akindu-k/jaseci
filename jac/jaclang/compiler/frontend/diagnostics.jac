@@ -1722,6 +1722,12 @@ glob E0001 = _err("E0001", Category.SYNTAX, "Expected '{expected}', got '{got}'"
          "inside '{owner}' and its subclasses.",
          help="Access protected (`:protect`) members from within the declaring class or a subclass, or mark the member `:pub` to expose it more broadly."
      ),
+     E2036 = _err(
+         "E2036",
+         Category.SEMANTIC,
+         "Duplicate definition of '{name}': it replaces the definition on line {line}.",
+         help="A module-level name can be defined once. The later definition is the one that runs, while calls are checked against the earlier one, so rename or remove one of them. Use `impl {name}` to give a declaration its body, or `@overload` for alternative signatures."
+     ),
      E2037 = _err(
          "E2037",
          Category.SEMANTIC,
@@ -1862,6 +1868,30 @@ glob E0001 = _err("E0001", Category.SYNTAX, "Expected '{expected}', got '{got}'"
          help="A package lists the modules other code may import under [project]"
          " exports in its jac.toml ({exports}). Import one of those modules, or"
          " ask the package to export this one."
+     ),
+     E2097 = _err(
+         "E2097",
+         Category.SEMANTIC,
+         "Closure captures '{name}', which the enclosing loop reassigns: every closure the loop creates shares that one binding and will see its final value",
+         help="'{name}' belongs to the scope around the loop, not to one iteration,"
+         " so the loop assigns the same binding each time round. Pass the value"
+         " through a parameter, which is bound per call: declare"
+         " `def handler_for({name}: T) -> Callable[[], None] {{ return lambda {{ ... }}; }}`"
+         " outside the loop and use `handler_for({name})` inside it. A type"
+         " annotation on the assignment does not change which scope owns the binding."
+     ),
+     W2084 = _warn(
+         "W2084",
+         Category.SEMANTIC,
+         "Closure captures '{name}', which the enclosing loop reassigns: every closure the loop creates shares that one binding and will see its final value if the callee or container it is handed to keeps it past the iteration",
+         help="The closure is handed to a call the compiler cannot see into, or stored"
+         " where it may or may not outlive the iteration. If it runs before the"
+         " iteration ends, each closure sees its own iteration's value; if it is"
+         " kept (stored, scheduled, registered as a handler), every one reads what"
+         " the last iteration assigned to '{name}'."
+         " Pass the value through a parameter, which is bound per call: declare"
+         " `def handler_for({name}: T) -> Callable[[], None] {{ return lambda {{ ... }}; }}`"
+         " outside the loop and pass `handler_for({name})`."
      ),
      W3001 = _warn(
          "W3001",

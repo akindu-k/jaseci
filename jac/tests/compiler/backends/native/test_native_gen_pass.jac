@@ -5725,6 +5725,15 @@ def _lambdas__lambda_closure_as_scaler(eng: any, _ir: any) {
     assert f(7, -2) == -14 , f"Expected -14, got {f(7, -2)}";
 }
 
+"""lambda untyped parameter infers its real type from context (#7139)
+
+`x + "!"` uses `x` as a string -- a bare `x;` survives a wrong `i64` slot.
+"""
+def _lambdas__untyped_param_infers_str(eng: any, _ir: any) {
+    f = get_sfunc(eng, "untyped_param_infers_str", ctypes.c_char_p);
+    assert f() == b"hello!" , f"Expected b'hello!', got {f()}";
+}
+
 test "lambdas" {
     (_eng, _ir) = compile_native("lambdas.jac");
     _lambdas__lambda_simple_add(_eng, _ir);
@@ -5733,6 +5742,7 @@ test "lambdas" {
     _lambdas__lambda_closure_captures_local(_eng, _ir);
     _lambdas__lambda_closure_captures_multiple_vars(_eng, _ir);
     _lambdas__lambda_closure_as_scaler(_eng, _ir);
+    _lambdas__untyped_param_infers_str(_eng, _ir);
 }
 
 # --- Multi-statement lambda callback parity (P2 cross-target probe) ---
@@ -6481,12 +6491,23 @@ test "restore-failure falls back to recompile for inferred modules (item #19)" {
         bc1 = comp.get_bytecode(fx, JacProgram());
         assert bc1 is not None , "warm-up compile must produce bytecode";
         prog2 = JacProgram();
-        with patch.object(
-            JacCompiler, '_load_native_from_cache', side_effect=RuntimeError('boom')
-        ) {
+        # The recompile builds its engine through the same loader, so only
+        # the restore (the first call) fails.
+        real_load: any = JacCompiler._load_native_from_cache;
+        loads: list[int] = [];
+
+        def restore_fails(compiler: JacCompiler, *args: object, **kwargs: object) {
+            loads.append(1);
+            if len(loads) == 1 {
+                raise RuntimeError('boom');
+            }
+            real_load(compiler, *args, **kwargs);
+        }
+        with patch.object(JacCompiler, '_load_native_from_cache', restore_fails) {
             bc2 = comp.get_bytecode(fx, prog2);
         }
         assert bc2 is not None;
+        assert len(loads) == 2 , f"expected a restore and a rebuild, saw {len(loads)}";
         (eng, _) = comp.get_native_interop_setup(fx, prog2);
         assert eng is not None , (
             "restore failure must trigger recompile for inferred modules"
