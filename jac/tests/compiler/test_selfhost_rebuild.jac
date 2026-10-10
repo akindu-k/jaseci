@@ -8,48 +8,70 @@ once, the unit collector fires on its budget rather than on every module, no
 interface is encoded inside a codegen-driven closure, and the peak memory of
 the process stays under a ceiling with room to spare.
 
+The program the rebuild runs is a two-line entry that imports only `gc`, which
+keeps it on the Python lane (a module with nothing but a print is placed
+native, and a cold native build is a different measurement). The counters
+are read by the driver once it has run. A program that imported a compiler module to
+read them would be compiled by the kernel, which asks the host for that
+module's interface; building the interfaces of compiler modules is a cost of
+its own (there is no prebuilt catalog of them yet) and would be measured
+here on top of the rebuild.
+
 It takes minutes, which is why it lives alone in this file: the runner
 parallelizes across files, so a slow file costs wall time only for itself.
 It forces the rerouted compiler source so the rebuild is of this checkout
 whatever lane it runs in."""
 import json;
 import os;
-import resource;
 import subprocess;
 import sys;
 import tempfile;
-import from tests.support { cache_env }
-import jaclang;
+import from tests.support { cache_env, compiler_python_command, JAC_ROOT }
 
-glob JACLANG_DIR: str = os.path.dirname(os.path.realpath(str(jaclang.__file__))),
-     SYMTAB_PER_MODULE: float = 1.75,
+glob SYMTAB_PER_MODULE: float = 1.75,
      COLLECT_EVERY: int = 16,
      COLLECT_SLACK: int = 8,
      PEAK_RSS_CEILING_MB: int = 4096,
      PROBE_SRC: str = (
-         "import gc;\n"
-         "import json;\n"
-         "import from jaclang.runtime.runtime { JacRuntime }\n\n"
+         "import gc;\n\n"
          "with entry {\n"
-         "    a = JacRuntime.get_selfhost().program.analysis;\n"
-         "    print(\"SELFHOST=\" + json.dumps({\n"
-         "        \"runs\": a.pass_runs,\n"
-         "        \"events\": a.cache_events,\n"
-         "        \"collections\": getattr(gc.collect, \"call_count\")\n"
-         "    }));\n"
+         "    print(\"rebuilt\", gc.isenabled());\n"
          "}\n"
      ),
      DRIVER: str = (
-         "import gc, sys\n"
+         "import atexit, gc, json, resource, sys\n"
          "from unittest.mock import patch\n"
-         "with patch('gc.collect', wraps=gc.collect):\n"
-         "    from jaclang.cli.cli_boot import start_cli\n"
-         "    sys.argv = ['jac', 'run', sys.argv[1]]\n"
-         "    start_cli()"
+         "collect = patch('gc.collect', wraps=gc.collect).start()\n"
+         "def report():\n"
+         "    usage = [resource.getrusage(w).ru_maxrss\n"
+         "             for w in (resource.RUSAGE_SELF, resource.RUSAGE_CHILDREN)]\n"
+         "    print('PEAK_RSS=' + str(max(usage)), flush=True)\n"
+         "    from jaclang.runtime.runtime import JacRuntime\n"
+         "    a = JacRuntime.get_selfhost().program.analysis\n"
+         "    print('SELFHOST=' + json.dumps({\n"
+         "        'runs': dict(a.pass_runs),\n"
+         "        'events': dict(a.cache_events),\n"
+         "        'collections': collect.call_count\n"
+         "    }), flush=True)\n"
+         "atexit.register(report)\n"
+         "from jaclang.cli.cli_boot import start_cli\n"
+         "sys.argv = ['jac', 'run', sys.argv[1]]\n"
+         "start_cli()"
      );
 
-def _peak_children_mb -> int {
-    peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss;
+"""Convert a `PEAK_RSS=` report from the driver to MB.
+
+The driver reports its own peak and its children's, so the figure covers the
+rebuild alone. `RUSAGE_CHILDREN` read here would also count every earlier
+child of a pooled test worker."""
+def _peak_mb(stdout: str) -> int {
+    peak = 0;
+    for line in stdout.splitlines() {
+        if line.startswith("PEAK_RSS=") {
+            peak = int(line[len("PEAK_RSS="):]);
+        }
+    }
+    assert peak > 0 , f"no PEAK_RSS= line in stdout:\n{stdout[-1500:]}";
     if sys.platform == "darwin" {
         return int(peak // (1024 * 1024));
     }
@@ -77,8 +99,8 @@ def _cold_rebuild -> tuple[int, dict[str, any], int] {
         env.pop(knob, None);
     }
     proc = subprocess.run(
-        [sys.executable, "-c", DRIVER, probe],
-        cwd=os.path.dirname(JACLANG_DIR),
+        compiler_python_command(DRIVER, probe, compiler_root=JAC_ROOT),
+        cwd=JAC_ROOT,
         capture_output=True,
         text=True,
         env=env
@@ -104,7 +126,7 @@ def _cold_rebuild -> tuple[int, dict[str, any], int] {
         }
     }
     assert payload is not None , f"no SELFHOST= line in stdout:\n{proc.stdout[-1500:]}";
-    return (compiled, payload, _peak_children_mb(), );
+    return (compiled, payload, _peak_mb(proc.stdout), );
 }
 
 test "a cold compiler rebuild ingests each dependency about once and collects on its budget" {

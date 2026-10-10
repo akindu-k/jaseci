@@ -76,6 +76,83 @@ def pkg_config_with_include(
     return cfg;
 }
 
+"""Scaffold mypkg with a compressible package-data file and return its config."""
+def scaffold_pkg_with_data(pkg_dir: Path) -> JacConfig {
+    scaffold_pkg(pkg_dir);
+    (pkg_dir / "mypkg" / "guide.txt").write_text(
+        "Jac wheels carry package data like this guide.\n" * 200
+    );
+    cfg = JacConfig.from_toml_str(
+        '[project]\nname = "mypkg"\nversion = "1.0.0"\nrequires-python = ">=3.11"\n\n'
+            + '[project.include]\npackages = ["mypkg"]\n\n'
+            + '[project.include.data]\n"mypkg" = ["*.txt"]\n'
+    );
+    cfg.project_root = pkg_dir;
+    return cfg;
+}
+
+"""Assert every wheel entry is deflated at the fixed timestamp and RECORD matches the members."""
+def assert_deflated_wheel(wheel: bytes, record_path: str) {
+    with zipfile.ZipFile(io.BytesIO(wheel)) as zf {
+        for info in zf.infolist() {
+            assert info.compress_type == zipfile.ZIP_DEFLATED , f"{info.filename} uses "
+            f"compression method {info.compress_type}, expected ZIP_DEFLATED";
+            assert info.date_time == (2016, 1, 1, 0, 0, 0) , f"{info.filename} lost the "
+            f"fixed timestamp: {info.date_time}";
+        }
+        guide = zf.getinfo("mypkg/guide.txt");
+        assert guide.compress_size < guide.file_size , f"compressible package data must "
+        f"shrink: {guide.compress_size} >= {guide.file_size}";
+        record_text = zf.read(record_path).decode("utf-8");
+        rows: list[list[str]] = [
+            r
+            for r in csv.reader(io.StringIO(record_text))
+            if r
+        ];
+        recorded = {row[0]: row[1:] for row in rows};
+        assert set(recorded) == set(zf.namelist()) , f"RECORD paths {sorted(recorded)} "
+        f"!= members {sorted(zf.namelist())}";
+        assert recorded[record_path] == ["", ""];
+        for name in zf.namelist() {
+            if name == record_path {
+                continue;
+            }
+            data = zf.read(name);
+            assert recorded[name] == [sha256_b64(data), str(len(data))] , f"RECORD row "
+            f"for {name} does not match its contents";
+        }
+    }
+}
+
+"""Rebuild a wheel through the sdist's bundled backend with a stdlib-only Python."""
+def rebuild_from_sdist(builder: WheelBuilder, work_dir: Path) -> Path {
+    import subprocess;
+    extract = work_dir / "extract";
+    with tarfile.open(fileobj=io.BytesIO(builder.build_sdist()), mode="r:gz") as tf {
+        tf.extractall(path=str(extract), filter="data");
+    }
+    sdist_root = next(extract.iterdir());
+    out_dir = work_dir / "rebuilt";
+    out_dir.mkdir();
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            "import sys; sys.path.insert(0, '.'); import _jac_build; "
+                + f"print(_jac_build.build_wheel({str(out_dir)!r}))",
+
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(sdist_root),
+    );
+    assert result.returncode == 0 , result.stderr;
+    rebuilt = out_dir / result.stdout.strip();
+    assert rebuilt.exists();
+    return rebuilt;
+}
+
 # metadata --------------------------------------------------------------------------
 test "normalize_package_name lowercases and collapses separators" {
     assert normalize_package_name("My_Pkg.Name") == "my-pkg-name";
@@ -92,7 +169,7 @@ test "normalize_constraint converts npm caret tilde and wildcard" {
 
 test "generate_metadata produces correct METADATA 2.4 output" {
     cfg = JacConfig.from_toml_str(
-        '[project]\nname = "mypkg"\nversion = "1.2.3"\nrequires-python = ">=3.11"\nlicense = "MIT"\n\n[dependencies]\nrequests = ">=2.28.0"\nnumpy = "^1.24.0"\n\n[optional-dependencies.video]\nopencv-python-headless = ">=4.0"\n'
+        '[project]\nname = "mypkg"\nversion = "1.2.3"\nrequires-python = ">=3.11"\nlicense = "MIT"\n\n[dependencies.pypi]\nrequests = ">=2.28.0"\nnumpy = "^1.24.0"\n\n[optional-dependencies.video]\nopencv-python-headless = ">=4.0"\n'
     );
     meta = generate_metadata(cfg);
 
@@ -412,6 +489,20 @@ test "WheelBuilder.build is reproducible" {
     }
 }
 
+test "WheelBuilder.build deflates every entry and stays reproducible" {
+    tmpdir = tempfile.mkdtemp();
+    try {
+        proj = Path(tmpdir);
+        cfg = scaffold_pkg_with_data(proj);
+        builder = WheelBuilder(config=cfg, project_root=proj);
+        data = builder.build();
+        assert_deflated_wheel(data, f"{dist_info_dirname(cfg)}/RECORD");
+        assert builder.build() == data , "a deflated wheel must still be byte-reproducible";
+    } finally {
+        shutil.rmtree(tmpdir, ignore_errors=True);
+    }
+}
+
 test "WheelBuilder.build_to writes file with correct name" {
     tmpdir = tempfile.mkdtemp();
     try {
@@ -486,9 +577,9 @@ test "generate_pyproject_toml produces valid TOML covering structure, deps, and 
         'license = "MIT \\"Modified\\""\n'
         'keywords = ["key\\"word"]\n'
         'classifiers = ["Dev :: \\"Alpha\\""]\n\n'
-        '[dependencies]\nrequests = ">=2.28"\n\n'
+        '[dependencies.pypi]\nrequests = ">=2.28"\n\n'
         '[optional-dependencies.video]\nopencv = ">=4.0"\n\n'
-        '[dev-dependencies]\npytest = ">=7.0"\n'
+        '[dev-dependencies.pypi]\npytest = ">=7.0"\n'
     );
     toml_str = generate_pyproject_toml(cfg);
     tomllib.loads(toml_str);  # raises TOMLDecodeError on any invalid TOML
@@ -668,7 +759,7 @@ test "WheelBuilder rewrites sibling imports so the installed wheel imports clean
     }
 }
 
-test "WheelBuilder skips client codespace files with a record" {
+test "WheelBuilder refuses client codespace files unless told to drop them" {
     tmpdir = tempfile.mkdtemp();
     try {
         proj = Path(tmpdir);
@@ -677,7 +768,13 @@ test "WheelBuilder skips client codespace files with a record" {
         (pkg / "core.jac").write_text("def go() -> int {\n    return 1;\n}\n");
         (pkg / "view.jac").write_text("def View() -> JsxElement { return <div />; }\n");
         cfg = pkg_config_with_include(proj, "mypkg");
-        builder = WheelBuilder(config=cfg, project_root=proj);
+        try {
+            WheelBuilder(config=cfg, project_root=proj).build();
+            assert False , "a client module must not be dropped silently";
+        } except ValueError as e {
+            assert "mypkg/view.jac" in str(e) and "--allow-drop-client" in str(e);
+        }
+        builder = WheelBuilder(config=cfg, project_root=proj, allow_drop_client=True);
         data = builder.build();
         with zipfile.ZipFile(io.BytesIO(data)) as zf {
             names = zf.namelist();
@@ -762,7 +859,7 @@ test "WheelBuilder honors an explicit jaclang dependency instead of vendoring" {
         (proj / "main.jac").write_text("node Thing {\n    has n: int = 1;\n}\n");
         cfg = JacConfig.from_toml_str(
             '[project]\nname = "hostdemo"\nversion = "0.1.0"\n\n'
-            '[dependencies]\njaclang = ">=0.30"\n'
+            '[dependencies.pypi]\njaclang = ">=0.30"\n'
         );
         cfg.project_root = proj;
         builder = WheelBuilder(config=cfg, project_root=proj);
@@ -777,42 +874,41 @@ test "WheelBuilder honors an explicit jaclang dependency instead of vendoring" {
 }
 
 test "sdist build backend rebuilds the wheel with stdlib only" {
-    import subprocess;
-    import sys;
     tmpdir = tempfile.mkdtemp();
     try {
         proj = Path(tmpdir);
         scaffold_pkg(proj);
         cfg = pkg_config_with_include(proj);
         builder = WheelBuilder(config=cfg, project_root=proj);
-        sdist = builder.build_sdist();
-        extract = proj / "extract";
-        with tarfile.open(fileobj=io.BytesIO(sdist), mode="r:gz") as tf {
-            tf.extractall(path=str(extract), filter="data");
-        }
-        sdist_root = next(extract.iterdir());
-        out_dir = proj / "rebuilt";
-        out_dir.mkdir();
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-I",
-                "-c",
-                "import sys; sys.path.insert(0, '.'); import _jac_build; "
-                    + f"print(_jac_build.build_wheel({str(out_dir)!r}))",
-
-            ],
-            capture_output=True,
-            text=True,
-            cwd=str(sdist_root),
-        );
-        assert result.returncode == 0 , result.stderr;
-        rebuilt = out_dir / result.stdout.strip();
-        assert rebuilt.exists();
+        rebuilt = rebuild_from_sdist(builder, proj);
         direct = builder.build();
         with zipfile.ZipFile(io.BytesIO(direct)) as zf_direct {
             with zipfile.ZipFile(str(rebuilt)) as zf_rebuilt {
                 assert sorted(zf_direct.namelist()) == sorted(zf_rebuilt.namelist());
+            }
+        }
+    } finally {
+        shutil.rmtree(tmpdir, ignore_errors=True);
+    }
+}
+
+test "sdist build backend deflates every entry, RECORD included" {
+    tmpdir = tempfile.mkdtemp();
+    try {
+        proj = Path(tmpdir);
+        cfg = scaffold_pkg_with_data(proj);
+        builder = WheelBuilder(config=cfg, project_root=proj);
+        rebuilt = rebuild_from_sdist(builder, proj).read_bytes();
+        record_path = f"{dist_info_dirname(cfg)}/RECORD";
+        assert_deflated_wheel(rebuilt, record_path);
+        with zipfile.ZipFile(io.BytesIO(builder.build())) as zf_direct {
+            with zipfile.ZipFile(io.BytesIO(rebuilt)) as zf_rebuilt {
+                for name in zf_direct.namelist() {
+                    if name != record_path {
+                        assert zf_rebuilt.read(name) == zf_direct.read(name) , f"{name} "
+                        "differs between the direct and the sdist-rebuilt wheel";
+                    }
+                }
             }
         }
     } finally {

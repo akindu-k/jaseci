@@ -154,7 +154,7 @@ impl JcirGenPass.exit_module with Module exit {
             )
         );
     }
-    merged_body = self._merge_module_bodies(here);
+    merged_body = ModuleFacts.merged_body(here);
     body_items: list[CgItem] = [];
     if here.doc {
         body_items.append(
@@ -162,6 +162,34 @@ impl JcirGenPass.exit_module with Module exit {
         );
     }
     body_items.extend(self.preamble);
+    if here.persistence {
+        body_items.append(
+            self.nod(
+                'Assign',
+                ['targets', 'value'],
+                [
+                    [
+                        self.nod(
+                            'Name',
+                            ['id', 'ctx'],
+                            ['__jac_persistence__', self.nod('Store', [], [])]
+                        )
+                    ],
+                    self.nod(
+                        'Tuple',
+                        ['elts', 'ctx'],
+                        [
+                            [
+                                self.nod('Constant', ['value'], [part])
+                                for part in here.persistence
+                            ],
+                            self.nod('Load', [], [])
+                        ]
+                    )
+                ]
+            )
+        );
+    }
     body_items.extend(self._drain_module_hoists());
     stub_node = self._interop_stub_node;
     if stub_node is not None {
@@ -186,8 +214,7 @@ impl JcirGenPass.exit_module with Module exit {
             body_items.extend(stmts);
         }
     }
-    new_body = self._flatten_ast_list(body_items);
-    module = self.nod('Module', ['body', 'type_ignores'], [new_body, []]);
+    module = self.nod('Module', ['body', 'type_ignores'], [body_items, []]);
     self.set_out(here, [module]);
     self._module_root = module;
     self._module_path = here.loc.mod_path;
@@ -257,10 +284,14 @@ impl JcirGenPass.exit_type_alias with TypeAlias exit {
 }
 
 impl JcirGenPass.exit_global_vars with GlobalVars exit {
-    assigns_ast = self._flatten_ast_list([self.outs(a) for a in here.assignments]);
+    assigns_ast: list[CgItem] = [];
+    for assignment in here.assignments {
+        assigns_ast.extend(self.outs(assignment));
+    }
     if here.doc {
         doc = self.nod('Expr', ['value'], [self.val(here.doc)], jac_node=here.doc);
-        self.set_out(here, [doc] + assigns_ast);
+        assigns_ast.insert(0, doc);
+        self.set_out(here, assigns_ast);
     } else {
         self.set_out(here, assigns_ast);
     }
@@ -350,11 +381,13 @@ impl JcirGenPass.exit_test with Test exit {
             )
         );
     }
-    func.get('decorator_list').append(
+    func.push(
+        'decorator_list',
         self.call_node(self.jaclib_obj('jac_test'), [], jac_test_keywords)
     );
     if jcir_is_test_path(here.loc.mod_path) {
-        func.get('decorator_list').append(
+        func.push(
+            'decorator_list',
             self.call_node(
                 self.jaclib_obj('impl_patch_filename'),
                 [],

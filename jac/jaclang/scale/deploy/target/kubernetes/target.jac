@@ -17,6 +17,7 @@ import from jaclang.scale.deploy.target.kubernetes.utils.kubernetes_utils {
     get_cluster_provider,
     namespace_is_owned,
     privileged_pss_labels,
+    resolve_signing_secret,
     PSS_ENFORCE_LABEL,
     _resolve_current_rs_hashes,
     _refresh_rs_hashes
@@ -141,6 +142,25 @@ def fleet_targets_for_release(
         return {"ok": True, "missing": [], "targets": held};
     }
     return {"ok": False, "missing": list(expected), "targets": {}};
+}
+
+
+def replacing_init_containers(body: dict[str, any]) -> dict[str, any] {
+    pod_spec: dict[str, any] = dict(
+        dict(dict(body.get("spec") or {}).get("template") or {}).get("spec") or {}
+    );
+    if "initContainers" not in pod_spec {
+        return body;
+    }
+    pod_spec["initContainers"] = list(pod_spec["initContainers"])
+        + [{"$patch": "replace"}];
+    template = dict(body["spec"]["template"]);
+    template["spec"] = pod_spec;
+    spec = dict(body["spec"]);
+    spec["template"] = template;
+    patched = dict(body);
+    patched["spec"] = spec;
+    return patched;
 }
 
 
@@ -1151,6 +1171,18 @@ obj KubernetesTarget(KubernetesTargetBase) {
         config_revision: str = "";
         user_secret = bundle.get("user_secret");
         if user_secret {
+            if resolve_signing_secret(
+                core_v1,
+                namespace,
+                user_secret["metadata"]["name"],
+                user_secret["stringData"]
+            )
+                and self.logger {
+                self.logger.info(
+                    "Minted a JWT signing secret, kept across redeploys. Set "
+                    "[scale.secrets] JAC_SERVE_AUTH_SECRET to control it yourself."
+                );
+            }
             config_revision = create_k8s_secret(
                 core_v1,
                 namespace,
@@ -1198,8 +1230,11 @@ obj KubernetesTarget(KubernetesTargetBase) {
         deployments: dict[str, dict[str, any]] = bundle["deployments"];
         for (svc_name, raw_manifest) in deployments.items() {
             dep_manifest = with_config_revision(raw_manifest, config_revision);
-            patch_body = self._deployment_patch_body(
-                dep_manifest, dict(scaling.get(svc_name, {}))
+            patch_body = replacing_init_containers(
+                self._deployment_patch_body(
+                    dep_manifest, dict(scaling.get(svc_name, {}))
+                )
+                    or dep_manifest
             );
             self._apply_or_replace(
                 apps_v1,

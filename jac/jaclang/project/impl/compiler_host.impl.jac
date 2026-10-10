@@ -49,8 +49,14 @@ impl ProjectHost.check_settings(target_app: str) -> CheckSettings {
     return check_settings_of(cfg.check);
 }
 
+def package_name_of(name: str) -> str {
+    import from jaclang.project.modresolver { is_scoped_package_name }
+    return name if is_scoped_package_name(name) else "";
+}
+
 impl ProjectHost.project_facts(path: str) -> (ProjectFacts | None) {
     import from pathlib { Path }
+    import from jaclang.project.modresolver { project_mounts_dir }
     try {
         import from jaclang.project.config { get_config_for_path }
         cfg = get_config_for_path(Path(path));
@@ -69,7 +75,10 @@ impl ProjectHost.project_facts(path: str) -> (ProjectFacts | None) {
         project_root=project_root,
         check=check_settings_of(cfg.check),
         arch_closed=list(cfg.arch.closed),
-        client_framework=cfg.client.framework if cfg.client else "react"
+        client_framework=cfg.client.framework if cfg.client else "react",
+        package_name=package_name_of(cfg.project.name),
+        package_exports=list(cfg.project.exports),
+        package_mounts=project_mounts_dir(project_root)
     );
     self._facts[project_root] = (cfg, facts);
     return facts;
@@ -106,14 +115,24 @@ impl ProjectHost.declared_dependencies(
     if cfg is None {
         return None;
     }
-    names: list[str] = [*cfg.dependencies, *cfg.dev_dependencies];
+    scopes = [cfg];
     owner = cfg.app_for_path(str(Path(module_path).resolve()));
     app_name = owner.name if owner is not None else fallback_app;
     if app_name and app_name in cfg.apps {
         try {
-            app_cfg = cfg.effective_for_app(app_name);
-            names.extend([*app_cfg.dependencies, *app_cfg.dev_dependencies]);
+            scopes.append(cfg.effective_for_app(app_name));
         } except Exception {}
+    }
+    names: list[str] = [];
+    for scope in scopes {
+        names.extend(
+            [
+                *scope.dependencies,
+                *scope.dev_dependencies,
+                *scope.pypi_dependencies,
+                *scope.pypi_dev_dependencies
+            ]
+        );
     }
     return [str(n) for n in names];
 }
@@ -240,6 +259,107 @@ impl ProjectHost.native_session_declares(
     );
 }
 
+impl ProjectHost.client_boundary_facts(
+    program: JacProgram, path: str
+) -> (list[str] | None) {
+    try {
+        return program.iface_registry().client_boundary_facts(path);
+    } except Exception {
+        return None;
+    }
+}
+
+impl ProjectHost.kernel_compile(
+    program: JacProgram, path: str, options: CompileOptions
+) -> (CompileReport | None) {
+    import from jaclang.project.kernel_compile { host_kernel_compile }
+    return host_kernel_compile(self, program, path, options);
+}
+
+impl ProjectHost.in_compiler_tree(path: str) -> bool {
+    import from jaclang.compiler.driver.jir { is_compiler_tree_path }
+    return is_compiler_tree_path(path);
+}
+
+impl ProjectHost.schedule_import_failed(err: ImportError) {
+    import from jaclang.compiler.driver.source_failures { fail_loud_on_compiler_source }
+    fail_loud_on_compiler_source(err);
+}
+
+impl ProjectHost.client_osp_core_js -> str {
+    import from jaclang.compiler.backends.es.client_kernel_cache { osp_core_js }
+    return osp_core_js();
+}
+
+impl ProjectHost.client_pulls(path: str) -> str {
+    import from jaclang.compiler.driver.compiler { cached_client_pulls }
+    return cached_client_pulls(path);
+}
+
+impl ProjectHost.client_stub_globals -> list[str] {
+    if not self._stub_globals {
+        import os;
+        import from jaclang.compiler.frontend.codeinfo { jaclang_pkg_root }
+        stub_dir = os.path.join(jaclang_pkg_root(), "compiler", "types");
+        names: set[str] = set();
+        for stub in ("js_globals.pyi", "dom_types.pyi") {
+            names.update(client_stub_names(os.path.join(stub_dir, stub)));
+        }
+        self._stub_globals.extend(sorted(names));
+    }
+    return list(self._stub_globals);
+}
+
+impl ProjectHost.native_dep_iface(
+    program: JacProgram, path: str, options: CompileOptions
+) -> (NativeIface | None) {
+    ent = program.native_units().ensure(
+        path,
+        compile_on_miss=True,
+        options=options,
+        check_deps=False,
+        products=not options.no_cgen
+    );
+    return ent.iface if ent is not None else None;
+}
+
+impl ProjectHost.held_native_iface(
+    program: JacProgram, path: str, options: CompileOptions
+) -> str {
+    import from jaclang.compiler.frontend.codeinfo { is_compiler_source_path }
+    ent = program.native_units().ensure(
+        path,
+        compile_on_miss=is_compiler_source_path(path),
+        options=options,
+        check_deps=False,
+        products=not options.no_cgen
+    );
+    return ent.iface.to_bytes().decode("utf-8") if ent is not None else "";
+}
+
+impl ProjectHost.native_lowering_failed(program: JacProgram, path: str, detail: str) {
+    import os;
+    program.native_units().failures[os.path.realpath(path)] = detail;
+}
+
+impl ProjectHost.save_native_debug_ir(path: str, text: str) {
+    import os;
+    import from jaclang.compiler.driver.jir { get_native_debug_dir }
+    stem = os.path.splitext(os.path.basename(path))[0];
+    ir_dir = str(get_native_debug_dir(path));
+    os.makedirs(ir_dir, exist_ok=True);
+    saved = os.path.join(ir_dir, stem + ".ll");
+    with open(saved, "w") as f {
+        f.write(text);
+    }
+    self.note(f"[native debug] IR saved to: {saved}", style="info");
+}
+
+impl ProjectHost.native_fact(kind: str, key: str) -> str {
+    import from jaclang.compiler.backends.native.host_facts { host_native_fact }
+    return host_native_fact(kind, key);
+}
+
 impl ProjectHost.native_units_for(program: JacProgram) -> NativeUnitRegistry {
     if program._natives is None {
         import from jaclang.compiler.driver.nativecache { NativeUnitRegistry }
@@ -310,8 +430,8 @@ impl ProjectHost.native_analyze(
 impl ProjectHost.kernel_inputs(
     program: JacProgram, path: str, options: CompileOptions, source: (str | None) = None
 ) -> KernelInputs {
-    import from jaclang.project.kernel_snapshot { snapshot_inputs }
-    return snapshot_inputs(self, program, path, options, source);
+    import from jaclang.project.kernel_snapshot { session_inputs }
+    return session_inputs(self, program, path, options);
 }
 
 impl ProjectHost.format_file(file_path: str, auto_lint: bool = False) -> JacProgram {

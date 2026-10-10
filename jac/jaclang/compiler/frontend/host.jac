@@ -9,13 +9,16 @@ import type from jaclang.compiler.passes.annex_weave { WovenAnnex }
 import type from jaclang.compiler.driver.compiler { JacCompiler }
 import type from jaclang.compiler.driver.ifacecache { IfaceRegistry }
 import type from jaclang.compiler.driver.nativecache { NativeUnitRegistry }
+import type from jaclang.compiler.driver.native_iface { NativeIface }
 import type from jaclang.compiler.driver.compile_options { CompileOptions }
 import type from jaclang.compiler.driver.module_analysis { ModuleAnalysis }
+import type from jaclang.compiler.frontend.kernel_analyze { CompileReport }
 
 obj NativeVerdict {
     has demoted: bool = False,
         code: str = "",
-        detail: str = "";
+        detail: str = "",
+        deps: list[list[str]] = [];
 }
 
 obj CheckSettings {
@@ -69,7 +72,10 @@ obj ProjectFacts {
     has project_root: str,
         check: CheckSettings,
         arch_closed: list[str] = [],
-        client_framework: str = "react";
+        client_framework: str = "react",
+        package_name: str = "",
+        package_exports: list[str] = [],
+        package_mounts: str = "";
 }
 
 obj HostServices {
@@ -136,6 +142,11 @@ obj HostServices {
         return None;
     }
 
+    def client_pulls(path: str) -> str {
+        return "";
+    }
+
+    def client_pull_grew(path: str) {}
     def has_npm_package(spec: str, base_path: str) -> bool {
         return False;
     }
@@ -227,8 +238,49 @@ obj HostServices {
         raise RuntimeError("no compiler host is installed");
     }
 
+    def native_dep_iface(
+        program: JacProgram, path: str, options: CompileOptions
+    ) -> (NativeIface | None) {
+        return None;
+    }
+
+    def held_native_iface(
+        program: JacProgram, path: str, options: CompileOptions
+    ) -> str {
+        return "";
+    }
+
+    def native_lowering_failed(program: JacProgram, path: str, detail: str) {}
+    def native_fact(kind: str, key: str) -> str {
+        return "";
+    }
+
+    def save_native_debug_ir(path: str, text: str) {}
     def native_units_for(program: JacProgram) -> NativeUnitRegistry {
         raise RuntimeError("no compiler host is installed");
+    }
+
+    def client_boundary_facts(program: JacProgram, path: str) -> (list[str] | None) {
+        return None;
+    }
+
+    def kernel_compile(
+        program: JacProgram, path: str, options: CompileOptions
+    ) -> (CompileReport | None) {
+        return None;
+    }
+
+    def in_compiler_tree(path: str) -> bool {
+        return False;
+    }
+
+    def schedule_import_failed(err: ImportError) {}
+    def client_osp_core_js -> str {
+        return "";
+    }
+
+    def client_stub_globals -> list[str] {
+        return [];
     }
 
     def native_session_declares(

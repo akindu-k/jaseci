@@ -736,6 +736,51 @@ def _resolve_plan(
     return (plan, cfg, app, file, 0);
 }
 
+def _load_executable(
+    filename: str, base: str, main: bool, force_codespace: str = ''
+) -> types.ModuleType {
+    import from jaclang.runtime.runtime { JacRuntime as Jac }
+    import from jaclang.compiler.driver.application { prepare_application }
+    import from jaclang.runtime.prepared { load_prepared_module }
+    import from jaclang.project.workspace { workspace_for_path }
+    import from jaclang.project.config { get_config_for_path }
+    program = Jac.get_program();
+    compiler = program._get_compiler();
+    compiler_owned = compiler.selfhost.is_selfhost(
+        compiler.selfhost.resolve(filename, program)
+    );
+    config = get_config_for_path(Path(filename));
+    if config is not None
+        and config.project_root is not None
+        and config.dev.jaclang_source {
+        source_root = (
+            config.project_root / config.dev.jaclang_source / 'jaclang'
+        ).resolve();
+        compiler_owned = compiler_owned
+            or (
+                source_root.is_relative_to(config.project_root.resolve())
+                and Path(filename).resolve().is_relative_to(source_root)
+            );
+    }
+    if compiler_owned {
+        modules = Jac.jac_import(
+            target=os.path.splitext(os.path.basename(filename))[0],
+            base_path=base,
+            override_name='__main__' if main else None
+        );
+        if not modules or not isinstance(modules[0], types.ModuleType) {
+            raise RuntimeError(f'No executable module produced for {filename}');
+        }
+        return modules[0];
+    }
+    workspace = workspace_for_path(filename);
+    project_root = workspace.project_root if workspace is not None else base;
+    prepared = prepare_application(
+        filename, program, project_root, force_codespace=force_codespace
+    );
+    return load_prepared_module(prepared.entry, prepared, as_main=main);
+}
+
 def _invoke_entrypoint(
     filename: str, entrypoint: str, args: list[str], main: bool, root_id: str, nd: str
 ) -> int {
@@ -748,32 +793,25 @@ def _invoke_entrypoint(
     }
     _discover_config_from_file(filename);
     (base, mod, mach) = _proc_file(filename);
-
-    if root_id {
-        mach.set_user_root(root_id);
-    }
-    ret_module = Jac.jac_import(
-        target=mod, base_path=base, override_name='__main__' if main else None
-    );
-    if not ret_module {
+    try {
+        loaded_mod = _load_executable(filename, base, main);
+        if root_id {
+            mach.set_user_root(root_id);
+        }
+        archetype = getattr(loaded_mod, entrypoint)(*args);
+        mach.set_entry_node(nd);
+        if (
+            isinstance(archetype, WalkerArchetype)
+            and Jac.check_read_access(mach.entry_node)
+        ) {
+            Jac.`spawn(mach.entry_node.archetype, archetype);
+        }
+    } except BaseException {
+        mach.mem.abort();
+        raise;
+    } finally {
         mach.close();
-        return 0;
     }
-    (loaded_mod, ) = ret_module;
-    if not loaded_mod {
-        console.error('Errors occurred while importing the module.');
-        mach.close();
-        return 1;
-    }
-    archetype = getattr(loaded_mod, entrypoint)(*args);
-    mach.set_entry_node(nd);
-    if (
-        isinstance(archetype, WalkerArchetype)
-        and Jac.check_read_access(mach.entry_node)
-    ) {
-        Jac.`spawn(mach.entry_node.archetype, archetype);
-    }
-    mach.close();
     return 0;
 }
 
@@ -1010,19 +1048,26 @@ def _exec_file(
                         if _kind_forced or backend == "native"
                         else None
                 );
-                ir_mod = program.compile(file_path=full_path, options=_run_options);
+                (in_kernel, engine) = program._get_compiler().kernel_native_entry(
+                    full_path, program, _run_options
+                );
+                if not in_kernel {
+                    ir_mod = program.compile(file_path=full_path, options=_run_options);
+                    if (
+                        ir_mod
+                        and ir_mod.decided_codespace == 'native'
+                        and ir_mod.gen.native_engine
+                    ) {
+                        engine = ir_mod.gen.native_engine;
+                    }
+                }
                 if program.errors_had {
                     for _err in program.errors_had {
                         console.error(_err.pretty_print());
                     }
                     return 1;
                 }
-                if (
-                    ir_mod
-                    and ir_mod.decided_codespace == 'native'
-                    and ir_mod.gen.native_engine
-                ) {
-                    engine = ir_mod.gen.native_engine;
+                if engine is not None {
                     _populate_native_argv(engine, sys.argv);
                     if main {
                         addr = engine.get_function_address("jac_entry");
@@ -1042,29 +1087,8 @@ def _exec_file(
                 }
             }
             if not native_executed {
-                if backend == "python" {
-                    import from jaclang.compiler.driver.compile_options {
-                        CompileOptions
-                    }
-                    program = Jac.get_program();
-                    program.compile(
-                        file_path=os.path.abspath(filename),
-                        options=CompileOptions(
-                            force_codespace="server", default_codespace="server",
-                        )
-                    );
-                    if program.errors_had {
-                        for error in program.errors_had {
-                            console.error(error.pretty_print());
-                        }
-                        return 1;
-                    }
-                }
-                Jac.jac_import(
-                    target=mod,
-                    base_path=base,
-                    override_name='__main__' if main else None,
-                    lng=lng
+                _load_executable(
+                    filename, base, main, 'server' if backend == 'python' else ''
                 );
             }
         } else {
@@ -1301,7 +1325,12 @@ impl serve(
                 [svc.entry_path(project_root) for svc in services],
                 not no_client
                     and not faux
-                    and (served is None or served.kind == "web-app"),
+                    and _serves_web_client(
+                        (cfg.resolved_kind(served) if cfg else served.kind)
+                            if served is not None
+                            else None,
+                        platform or (served.platform if served is not None else "")
+                    ),
                 dev
             );
             console.print("Initializing application...", style="bold");
@@ -1352,6 +1381,7 @@ impl serve(
             return 0;
         }
         hot_reloader = None;
+        watch_paths: list[str] = [base];
         vite_holder: list[any] = [];
         if dev {
             if not _ensure_watchdog_installed() {
@@ -1360,9 +1390,14 @@ impl serve(
             }
             try {
                 import from jaclang.server.hmr { HotReloader }
-                import from jaclang.server.watcher { JacFileWatcher }
+                import from jaclang.server.watcher { JacFileWatcher, watch_roots }
 
-                watcher = JacFileWatcher(watch_paths=[base]);
+                watch_paths = watch_roots(
+                    base,
+                    prepared.`root,
+                    [str(k) for k in Jac.get_program().mod.hub.keys()]
+                );
+                watcher = JacFileWatcher(watch_paths=watch_paths);
                 client_compiler = None;
                 if not no_client {
                     try {
@@ -1426,7 +1461,8 @@ impl serve(
                 no_client=no_client,
                 primary_port=primary_port,
                 api_port=actual_port,
-                base_path=base
+                base_path=base,
+                watch_paths=watch_paths
             );
         }
         try {
@@ -1544,10 +1580,20 @@ def _get_network_ips -> list[str] {
     return ips;
 }
 
+def _serves_web_client(kind: (str | None), platform: (str | None)) -> bool {
+    if kind is None or kind == "web-app" {
+        return True;
+    }
+    return kind == "mobile" and (platform or "").strip().lower() == "web";
+}
+
 def _count_jac_files(directory: str) -> int {
     import from pathlib { Path }
     try {
         path = Path(directory);
+        if path.is_file() {
+            return 1 if path.suffix == '.jac' else 0;
+        }
         return len(list(path.rglob('*.jac')));
     } except Exception {
         return 0;
@@ -1555,7 +1601,12 @@ def _count_jac_files(directory: str) -> int {
 }
 
 def _print_startup_message(
-    dev: bool, no_client: bool, primary_port: int, api_port: int, base_path: str = '.'
+    dev: bool,
+    no_client: bool,
+    primary_port: int,
+    api_port: int,
+    base_path: str = '.',
+    watch_paths: (list[str] | None) = None
 ) {
     import from importlib.metadata { version as pkg_version }
 
@@ -1586,7 +1637,7 @@ def _print_startup_message(
         console.print(f"    API:  http://localhost:{api_port}/", style="muted");
         console.print();
 
-        file_count = _count_jac_files(base_path);
+        file_count = sum(_count_jac_files(p) for p in (watch_paths or [base_path]));
         if file_count > 0 {
             console.print_watching("**/*.jac", file_count);
         } else {
@@ -1595,7 +1646,7 @@ def _print_startup_message(
     } elif dev and no_client {
         console.print("  Server ready (API only)", style="bold green");
         console.print();
-        file_count = _count_jac_files(base_path);
+        file_count = sum(_count_jac_files(p) for p in (watch_paths or [base_path]));
         if file_count > 0 {
             console.print_watching("**/*.jac", file_count);
         } else {

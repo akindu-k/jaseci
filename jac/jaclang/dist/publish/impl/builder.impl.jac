@@ -65,8 +65,13 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
 
+        def _write(path, data):
+            # A hand-built ZipInfo is stored uncompressed unless given the archive's method.
+            info = zipfile.ZipInfo(path, date_time=_TIMESTAMP)
+            zf.writestr(info, data, compress_type=zf.compression)
+
         def _add(path, data):
-            zf.writestr(zipfile.ZipInfo(path, date_time=_TIMESTAMP), data)
+            _write(path, data)
             records.append(_record(path, data))
 
         for rel in _FILES:
@@ -78,10 +83,7 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
         if _ENTRY_POINTS is not None:
             _add(_DIST_INFO + "/entry_points.txt", _ENTRY_POINTS)
         records.append(_DIST_INFO + "/RECORD,,")
-        zf.writestr(
-            zipfile.ZipInfo(_DIST_INFO + "/RECORD", date_time=_TIMESTAMP),
-            "\\n".join(records) + "\\n",
-        )
+        _write(_DIST_INFO + "/RECORD", "\\n".join(records) + "\\n")
     with open(os.path.join(wheel_directory, _WHEEL_NAME), "wb") as f:
         f.write(buf.getvalue())
     return _WHEEL_NAME
@@ -174,6 +176,13 @@ impl WheelBuilder.source_data -> dict[str, bytes] {
 }
 
 impl WheelBuilder._assemble_src_data -> dict[str, bytes] {
+    if self.config.dependencies {
+        raise ValueError(
+            "a Python wheel cannot carry Jac package dependencies ("
+                + ", ".join(sorted(self.config.dependencies))
+                + "); publish the package with 'jac publish' instead"
+        );
+    }
     source_files = collect_source_files(self.config, project_root=self.project_root);
 
     self.skipped_codespace = [];
@@ -229,6 +238,13 @@ impl WheelBuilder._assemble_src_data -> dict[str, bytes] {
         }
     }
 
+    if self.skipped_codespace and not self.allow_drop_client {
+        raise ValueError(
+            "these client-codespace modules cannot ship in a Python wheel: "
+                + ", ".join(sorted(self.skipped_codespace))
+                + " (pass --allow-drop-client to build without them)"
+        );
+    }
     module_map: dict[str, str] = {};
     for (target, src_path) in origins.items() {
         module_map[os.path.normpath(os.path.abspath(str(src_path)))] = (
@@ -254,7 +270,7 @@ impl WheelBuilder._assemble_src_data -> dict[str, bytes] {
     }
     src_data.update(raw);
 
-    if self.transpile_jac and ("jaclang" not in self.config.dependencies) {
+    if self.transpile_jac and ("jaclang" not in self.config.pypi_dependencies) {
         self._vendor_runtime_into(src_data, list(texts.values()));
     }
 
@@ -396,7 +412,7 @@ impl WheelBuilder.build -> bytes {
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf {
         def _add(arc_path: str, data: bytes) {
             zi = zipfile.ZipInfo(arc_path, date_time=_WHEEL_TIMESTAMP);
-            zf.writestr(zi, data);
+            zf.writestr(zi, data, compress_type=zf.compression);
         }
         for (path, data) in src_data.items() {
             _add(path, data);

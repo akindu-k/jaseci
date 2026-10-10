@@ -304,8 +304,21 @@ glob JAC_RUNTIME_JS_OBJECT: str = r"""{
       if (t === "boolean") return "bool";
       if (t === "number") return Number.isInteger(o) ? "int" : "float";
       if (t === "bigint") return "int";
+      if (t === "function" && (o.__jac_type__ !== undefined ||
+          Object.prototype.hasOwnProperty.call(o, "__name__"))) return "type";
+      if (_jac.poly._isdict(o)) return "dict";
       if (t === "object") return (o.constructor && o.constructor.name) || "object";
       return t;
+    },
+    // A jac dict lowers to a plain object, so "judge this like a dict" has to
+    // mean that exact shape and not every value whose `typeof` is "object".
+    // Host objects (File, Blob, Date, Response, DOM nodes) and archetype
+    // instances carry their own prototype and are not dicts, however few own
+    // enumerable keys they happen to expose.
+    _isdict(o) {
+      if (o === null || o === undefined || typeof o !== "object") return false;
+      const p = Object.getPrototypeOf(o);
+      return p === Object.prototype || p === null;
     },
     // --- per-runtime-type Python method tables (keyed by Python name) ---
     // Trivial native-mapped ops are inline; non-trivial ones delegate to the
@@ -448,11 +461,7 @@ glob JAC_RUNTIME_JS_OBJECT: str = r"""{
         if (_jac.poly._map[m]) return _jac.poly._map[m](o, ...args);
       } else if (o instanceof Uint8Array) {
         if (_jac.bytes[m]) return _jac.bytes[m](o, ...args);
-      } else if (
-        o !== null && o !== undefined && typeof o === "object"
-        && (Object.getPrototypeOf(o) === Object.prototype
-            || Object.getPrototypeOf(o) === null)
-      ) {
+      } else if (_jac.poly._isdict(o)) {
         // A plain object is a Python dict literal.
         if (_jac.poly._dict[m]) return _jac.poly._dict[m](o, ...args);
       }
@@ -628,7 +637,7 @@ glob JAC_RUNTIME_JS_OBJECT: str = r"""{
       for (const item of arr) { if (item === val) c++; }
       return c;
     },
-    sort(arr, key) {
+    sort(arr, key, reverse) {
       if (key) {
         arr.sort((a, b) => {
           const ka = key(a), kb = key(b);
@@ -637,6 +646,7 @@ glob JAC_RUNTIME_JS_OBJECT: str = r"""{
       } else {
         arr.sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
       }
+      if (reverse) arr.reverse();
     },
     repeat(arr, n) {
       const result = [];
@@ -1179,6 +1189,7 @@ glob JAC_RUNTIME_JS_OBJECT: str = r"""{
   types: __JAC_TYPES_RUNTIME__,
 
   builtin: {
+    // Helpers keep the Python builtin's parameter order; keyword args are slotted by it.
     bindFields(args, keywords, names) {
       if (args.length > names.length) {
         throw new _jac.exc.TypeError(`Expected at most ${names.length} positional arguments, got ${args.length}`);
@@ -1286,6 +1297,12 @@ glob JAC_RUNTIME_JS_OBJECT: str = r"""{
       if (sub === sup) return true;
       if (sup === "int" && sub === "bool") return true;
       return false;
+    },
+    // Must return the object a bare type name lowers to: `is` compares identity.
+    type(o) {
+      const tag = _jac.poly._typename(o);
+      if (Object.prototype.hasOwnProperty.call(_jac.types, tag)) return _jac.types[tag];
+      return o.constructor || _jac.types.object;
     },
     isinstance(o, classinfo) {
       // isinstance(x, (A, B, ...)) -- the tuple of types lowers to a JS array;
@@ -1425,10 +1442,23 @@ glob JAC_RUNTIME_JS_OBJECT: str = r"""{
     },
     complex(re, im) { return {re: re || 0, im: im || 0}; },
     bool(x) {
-      if (x === null || x === undefined || x === false || x === 0 || x === "" || Number.isNaN(x)) return false;
+      // Python's truth test. Emptiness decides only for the containers jac
+      // actually lowers to; a value that defines `__bool__`/`__len__` answers
+      // for itself, and every other object is truthy. Judging all of `typeof
+      // "object"` by its own enumerable keys made host objects falsy -- a
+      // File, Blob, Date, Response or DOM node keeps its data on prototype
+      // getters, so `Object.keys(file)` is `[]` and `bool(file)` was false.
+      if (x === null || x === undefined || x === false || x === 0 || x === 0n
+          || x === "" || Number.isNaN(x)) return false;
+      if (typeof x !== "object") return true;
       if (Array.isArray(x)) return x.length > 0;
       if (x instanceof Set || x instanceof Map) return x.size > 0;
-      if (typeof x === "object") return Object.keys(x).length > 0;
+      if (x instanceof Uint8Array) return x.length > 0;
+      // Before the dunders, so a dict carrying a "__bool__" key is still
+      // judged by emptiness; an archetype is never a plain object.
+      if (_jac.poly._isdict(x)) return Object.keys(x).length > 0;
+      if (typeof x.__bool__ === "function") return x.__bool__() ? true : false;
+      if (typeof x.__len__ === "function") return x.__len__() !== 0;
       return true;
     },
     float(x) {
@@ -1607,27 +1637,29 @@ def _build_types_runtime_js -> str {
     import from jaclang.compiler.backends.es.es_unparse { JSCodeGenerator }
     import from jaclang.compiler.backends.es.primitives_es {
         ESBuiltinEmitter,
-        ESEmitCtx
+        ESEmitCtx,
+        es_sized_cast
     }
-    emitter = ESBuiltinEmitter();
+    import from jaclang.compiler.backends.common.primitives { PrimitiveEmitter }
+    emitter: PrimitiveEmitter[(str, ESEmitCtx)] = ESBuiltinEmitter();
     ctx = ESEmitCtx(unparser=JSCodeGenerator());
     entries: list[str] = [];
     for (tok, name) in sorted(TOKEN_MAP.items()) {
         if not tok.startswith("TYP_") {
             continue;
         }
-        emit_fn = getattr(emitter, "emit_" + name, None);
-        if emit_fn is None and not JAC_TYPE_REGISTRY.is_sized(name) {
+        has_emitter = name in emitter.static_names();
+        if not has_emitter and not JAC_TYPE_REGISTRY.is_sized(name) {
             continue;
         }
 
         bodies: list[(str | None)] = [];
         for argv in ([], ["a[0]"], ["a[0]", "a[1]"]) {
             try {
-                if emit_fn is None {
-                    bodies.append(emitter.emit_sized_cast(name, argv));
+                if has_emitter {
+                    bodies.append(emitter.dispatch_static(name, ctx, argv));
                 } else {
-                    bodies.append(emit_fn(ctx, argv));
+                    bodies.append(es_sized_cast(name, argv));
                 }
             } except Exception {
                 bodies.append(None);
@@ -1663,6 +1695,8 @@ def _build_types_runtime_js -> str {
         }
         entries.append("    " + name + ': _t("' + name + '", (...a) => ' + body + ")");
     }
+    entries.append('    object: _t("object", (...a) => ({}))');
+    entries.append('    NoneType: _t("NoneType", (...a) => null)');
     import from jaclang.runtime.scalars { numeric_shapes }
     sized_lines: list[str] = [];
     for shape in numeric_shapes() {
@@ -1693,6 +1727,7 @@ def _build_types_runtime_js -> str {
             "(() => {",
             "    const _t = (tag, fn) => Object.assign(fn, {",
             "      __jac_type__: tag,",
+            "      __name__: tag,",
             "      toString: () => \"<class '\" + tag + \"'>\"",
             "    });",
             "    const T = {",
@@ -1938,8 +1973,8 @@ def point_jac_prelude_at(js: str, target: str = "") -> str {
 }
 
 def build_osp_core_js -> str {
-    import from jaclang.compiler.backends.es.client_kernel_cache { osp_core_js }
-    return osp_core_js();
+    import from jaclang.compiler.frontend.host { active_host }
+    return active_host().client_osp_core_js();
 }
 
 def build_osp_driver_js -> str {

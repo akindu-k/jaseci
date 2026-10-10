@@ -12,6 +12,7 @@ import from jaclang.compiler.frontend.srcloc { CodeLocInfo }
 import from jaclang.compiler.kernel_target {
     active_kernel_target,
     is_target_package_path,
+    target_package_rel,
     kernel_target_active,
     kernel_target_generation,
     target_pkg_root
@@ -23,10 +24,7 @@ import type from jaclang.compiler.frontend.unitree { CommentToken, Module, UniNo
 import type from jaclang.compiler.passes.layout_pass { LayoutRegistry }
 import type from jaclang.compiler.passes.osp_analysis { OspModel }
 import type from jaclang.compiler.backends.native.llvm.ir { Module as IRModule }
-import type from jaclang.compiler.backends.native.llvm.binding {
-    ModuleRef,
-    ExecutionEngine
-}
+import type from jaclang.compiler.backends.native.llvm.binding { ExecutionEngine }
 import type from jaclang.compiler.driver.native_iface { NativeIface }
 
 obj ClientManifest {
@@ -52,7 +50,8 @@ obj ClientArtifact {
         source_map: list[tuple[int, int, int, int, str]] = [],
         dep_digests: dict[str, str] = {},
         boundary_contracts: dict[str, any] = {},
-        framework: str = "";
+        framework: str = "",
+        pulled: list[int] = [];
 }
 
 enum InteropContext { SERVER = 'server', NATIVE = 'native', CLIENT = 'client' }
@@ -161,8 +160,9 @@ def _reserved_c_symbols -> frozenset[str] {
         "isspace isupper isxdigit tolower toupper "
         "feclearexcept fegetexceptflag feraiseexcept fesetexceptflag fetestexcept "
         "fegetround fesetround fegetenv feholdexcept fesetenv feupdateenv "
-        "setlocale localeconv setjmp longjmp _setjmp _longjmp sigsetjmp siglongjmp "
-        "signal raise kill "
+        "setlocale localeconv nl_langinfo setjmp longjmp _setjmp _longjmp sigsetjmp siglongjmp "
+        "signal raise kill bsd_signal sigemptyset sigaddset sigismember "
+        "sigprocmask setitimer select "
         "remove rename renameat tmpfile tmpnam fclose fflush fopen freopen fdopen "
         "fileno setbuf setvbuf "
         "fprintf fscanf printf scanf snprintf sprintf sscanf dprintf vfprintf "
@@ -188,6 +188,10 @@ def _reserved_c_symbols -> frozenset[str] {
         "open openat creat close read pread write lseek stat fstat lstat access "
         "chmod chdir getcwd mkdir rmdir link symlink readlink unlink utime "
         "opendir readdir closedir getpid getpwuid_r getpwnam_r errno __error "
+        "pipe poll waitpid posix_spawnp posix_spawn_file_actions_init "
+        "posix_spawn_file_actions_destroy posix_spawn_file_actions_addopen "
+        "posix_spawn_file_actions_addclose posix_spawn_file_actions_adddup2 "
+        "posix_spawn_file_actions_addchdir_np "
         "__errno_location environ _NSGetExecutablePath "
         "pthread_create pthread_join pthread_key_create pthread_getspecific "
         "pthread_setspecific "
@@ -200,8 +204,12 @@ def _reserved_c_symbols -> frozenset[str] {
         "ZSTD_CCtx_setParameter ZSTD_compress2 ZSTD_freeDCtx ZSTD_DCtx_setParameter "
         "ZSTD_decompressStream_simpleArgs ZSTD_getFrameContentSize "
         "ZSTD_getDictID_fromFrame "
-        "RAND_bytes EVP_MD_CTX_free EVP_DigestInit_ex EVP_DigestUpdate "
-        "EVP_DigestFinal_ex HMAC_CTX_free HMAC_Init_ex HMAC_Update HMAC_Final "
+        "RAND_bytes CRYPTO_memcmp EVP_MD_CTX_new EVP_MD_CTX_free EVP_MD_CTX_copy_ex "
+        "EVP_DigestInit_ex EVP_DigestUpdate EVP_DigestFinal_ex "
+        "EVP_md5 EVP_sha1 EVP_sha224 EVP_sha256 EVP_sha384 EVP_sha512 "
+        "EVP_sha3_256 EVP_sha3_512 "
+        "HMAC_CTX_new HMAC_CTX_free HMAC_CTX_copy HMAC_Init_ex HMAC_Update "
+        "HMAC_Final TLS_client_method "
         "SSL_CTX_new SSL_CTX_set_verify SSL_CTX_load_verify_locations "
         "SSL_CTX_set_default_verify_paths SSL_CTX_free SSL_new SSL_set_fd SSL_ctrl "
         "SSL_set1_host SSL_connect SSL_get_verify_result SSL_get_error SSL_read "
@@ -257,7 +265,7 @@ def native_arch_scope(mod_path: str) -> str {
     }
     source = os.path.realpath(mod_path);
     out = "";
-    if not is_target_package_path(source) {
+    if source.endswith(".jac") and not toolchain_runtime_unit(source) {
         stem = os.path.basename(source);
         dot = stem.find(".");
         if dot > 0 {
@@ -272,6 +280,19 @@ def native_arch_scope(mod_path: str) -> str {
     }
     _native_arch_scope_memo[mod_path] = out;
     return out;
+}
+
+def toolchain_runtime_unit(source: str) -> bool {
+    rel = target_package_rel(source) if is_target_package_path(source) else None;
+    if rel is None {
+        return False;
+    }
+    if rel in kernel_unit_rels() {
+        return True;
+    }
+    import from jaclang.compiler.frontend.host { active_host }
+    host = active_host();
+    return host.is_native_only_source(rel) or host.is_native_lowered_source(rel);
 }
 
 def native_arch_name(mod_path: str, name: str) -> str {
@@ -639,13 +660,33 @@ def native_stdlib_root -> (str | None) {
     return stdlib_dir if os.path.isdir(stdlib_dir) else None;
 }
 
+def bundled_pkg_roots -> list[str] {
+    roots: list[str] = [];
+    pkg = jaclang_pkg_root();
+    if pkg {
+        roots.append(pkg);
+    }
+    if kernel_target_active() {
+        target = target_pkg_root();
+        if target and target not in roots {
+            roots.append(target);
+        }
+    }
+    return roots;
+}
+
 def is_in_jaclang_package(file_path: str) -> bool {
     import os;
-    pkg = jaclang_pkg_root();
-    if not file_path or not pkg {
+    if not file_path {
         return False;
     }
-    return os.path.abspath(file_path).startswith(pkg + os.sep);
+    ap = os.path.abspath(file_path);
+    for pkg in bundled_pkg_roots() {
+        if ap.startswith(pkg + os.sep) {
+            return True;
+        }
+    }
+    return False;
 }
 
 def bundled_native_module_names -> list[str] {
@@ -670,37 +711,42 @@ def bundled_native_module_names -> list[str] {
 
 def is_native_by_location(file_path: str) -> bool {
     import os;
-    pkg = jaclang_pkg_root();
-    if not file_path or not pkg {
+    if not file_path {
         return False;
     }
     ap = os.path.abspath(file_path);
-    return ap.startswith(os.path.join(pkg, "runtime", "na_stdlib") + os.sep);
+    for pkg in bundled_pkg_roots() {
+        if ap.startswith(os.path.join(pkg, "runtime", "na_stdlib") + os.sep) {
+            return True;
+        }
+    }
+    return False;
 }
 
 def bundled_stdlib_module_of(file_path: str) -> (str | None) {
     import os;
-    pkg = jaclang_pkg_root();
-    if not file_path or not pkg {
+    if not file_path {
         return None;
     }
     ap = os.path.abspath(file_path);
-    native_root = os.path.join(pkg, "runtime", "na_stdlib") + os.sep;
-    stub_root = os.path.join(pkg, "vendor", "typeshed", "stdlib") + os.sep;
-    if ap.startswith(native_root) and ap.endswith(".jac") {
-        rel = ap[len(native_root):-len(".jac")];
-        parts = rel.split(os.sep);
+    for pkg in bundled_pkg_roots() {
+        native_root = os.path.join(pkg, "runtime", "na_stdlib") + os.sep;
+        stub_root = os.path.join(pkg, "vendor", "typeshed", "stdlib") + os.sep;
+        if ap.startswith(native_root) and ap.endswith(".jac") {
+            rel = ap[len(native_root):-len(".jac")];
+            parts = rel.split(os.sep);
 
-        parts[-1] = parts[-1].split(".")[0];
-        return ".".join(parts);
-    }
-    if ap.startswith(stub_root) and ap.endswith(".pyi") {
-        rel = ap[len(stub_root):-len(".pyi")];
-        parts = rel.split(os.sep);
-        if parts[-1] == "__init__" {
-            parts = parts[:-1];
+            parts[-1] = parts[-1].split(".")[0];
+            return ".".join(parts);
         }
-        return ".".join(parts) if parts else None;
+        if ap.startswith(stub_root) and ap.endswith(".pyi") {
+            rel = ap[len(stub_root):-len(".pyi")];
+            parts = rel.split(os.sep);
+            if parts[-1] == "__init__" {
+                parts = parts[:-1];
+            }
+            return ".".join(parts) if parts else None;
+        }
     }
     return None;
 }
@@ -727,14 +773,15 @@ glob SHARED_RUNTIME_MODULES: tuple[str, ...] = (
 
 def is_client_by_location(file_path: str) -> bool {
     import os;
-    pkg = jaclang_pkg_root();
-    if not file_path or not pkg {
+    if not file_path {
         return False;
     }
     ap = os.path.abspath(file_path);
-    for rel in CLIENT_RUNTIME_SOURCE_PATHS {
-        if ap == os.path.join(pkg, rel.replace("/", os.sep)) {
-            return True;
+    for pkg in bundled_pkg_roots() {
+        for rel in CLIENT_RUNTIME_SOURCE_PATHS {
+            if ap == os.path.join(pkg, rel.replace("/", os.sep)) {
+                return True;
+            }
         }
     }
     return False;
@@ -742,16 +789,27 @@ def is_client_by_location(file_path: str) -> bool {
 
 def is_shared_runtime_module(file_path: str) -> bool {
     import os;
-    pkg = jaclang_pkg_root();
-    if not file_path or not pkg {
+    if not file_path {
         return False;
     }
-    package = os.path.realpath(pkg);
-    path = os.path.realpath(file_path);
+    stem = os.path.basename(file_path);
+    named = False;
     for module in SHARED_RUNTIME_MODULES {
-        rel = module.split('.', 1)[1].replace('.', os.sep) + '.jac';
-        if path == os.path.join(package, rel) {
-            return True;
+        if stem == module.rpartition('.')[2] + '.jac' {
+            named = True;
+        }
+    }
+    if not named {
+        return False;
+    }
+    path = os.path.realpath(file_path);
+    for pkg in bundled_pkg_roots() {
+        package = os.path.realpath(pkg);
+        for module in SHARED_RUNTIME_MODULES {
+            rel = module.split('.', 1)[1].replace('.', os.sep) + '.jac';
+            if path == os.path.join(package, rel) {
+                return True;
+            }
         }
     }
     return False;
@@ -949,6 +1007,30 @@ def resolve_native_module(
         }
     }
 
+    if allow_inferred and not clean.startswith('jaclang.') {
+        import from jaclang.compiler.frontend.host { active_host }
+        host = active_host();
+        owners: list[str] = [];
+        for start in [base_dir, ""] {
+            owner = host.project_root(start);
+            if owner {
+                owners.append(owner);
+            }
+        }
+        for owner in owners {
+            facts = host.project_facts(owner);
+            mounts = facts.package_mounts if facts is not None else "";
+            if mounts and os.path.isdir(mounts) {
+                mounted = _inferred_native_path(
+                    _native_variant_path(os.path.join(mounts, path_name))
+                );
+                if mounted is not None {
+                    return (path_name, mounted);
+                }
+            }
+        }
+    }
+
     if clean.startswith('jaclang.') {
         import from jaclang.compiler.native_scope { in_native_scope_path }
         _cand = os.path.join(
@@ -1041,6 +1123,7 @@ obj InteropManifest {
         provider_routes: dict[(str, str)] = {};
 
     has native_imports: list[InteropBinding] { getter; }
+    has callable_native_imports: list[InteropBinding] { getter; }
     has native_exports: list[InteropBinding] { getter; }
     has native_cross_module_imports: list[InteropBinding] { getter; }
     has client_native_imports: list[InteropBinding] { getter; }
@@ -1068,12 +1151,14 @@ obj CodeGenTarget {
         py_bytecode: (bytes | None) = None,
         jcir: (bytes | None) = None,
         es_ast: EsNode | Sequence[EsNode] | SliceInfo | IndexInfo | None = None,
-        llvm_ir: (ModuleRef | IRModule | None) = None,
+        llvm_ir: any = None,
+        ir_module: (IRModule | None) = None,
         native_engine: (ExecutionEngine | SharedNativeEngine | None) = None,
         native_bitcode: (bytes | None) = None,
         native_object: (bytes | None) = None,
         native_iface: (NativeIface | None) = None,
         native_deps: list[str] = [],
+        native_codespace: bool = False,
         _interop_manifest: (InteropManifest | None) = None,
         interop_py_funcs: dict[(str, any)] = {},
         _interop_callbacks: list[any] = [],
@@ -1094,6 +1179,15 @@ obj CodeGenTarget {
     has doc_ir: Doc { getter; setter(value: Doc); }
     has client_manifest: ClientManifest { getter; setter(value: ClientManifest); }
     has interop_manifest: InteropManifest { getter; setter(value: InteropManifest); }
+
+    def has_native_ir -> bool {
+        return self.ir_module is not None or self.llvm_ir is not None;
+    }
+
+    def drop_native_ir {
+        self.ir_module = None;
+        self.llvm_ir = None;
+    }
 }
 
 def endpoint_descriptor(module: Module, kind: str, name: str) -> dict[str, str] {

@@ -1,6 +1,5 @@
 import io;
 import os;
-import gzip;
 import hashlib;
 import logging;
 import shutil;
@@ -11,6 +10,8 @@ import time;
 import tomllib;
 import from pathlib { Path }
 import from jaclang.scale.runtime.fleet { FleetSpec }
+import from jaclang.dist.archive { det_tar_member, open_det_tar }
+import from jaclang.dist.sanitize { sanitized_jac_toml }
 
 glob logger = logging.getLogger(__name__);
 
@@ -387,85 +388,22 @@ def check_fleet_entries(
 }
 
 
-def _is_secret_path(name: str) -> bool {
-    return name == "plugins.scale.secrets"
-        or name.startswith("plugins.scale.secrets.")
-        or name == "scale.secrets"
-        or name.startswith("scale.secrets.");
-}
-
-
-def _is_dev_section(name: str) -> bool {
-    return name == "dev" or name.startswith("dev.");
-}
-
-
-def sanitized_jac_toml(base: Path) -> (str | None) {
-    src = base / "jac.toml";
-    if not src.is_file() {
-        return None;
-    }
-    out: list[str] = [];
-    pending: list[str] = [];
-    in_stripped_section = False;
-    current_section = "";
-    for line in src.read_text().splitlines() {
-        stripped = line.lstrip();
-        if stripped.startswith("[") {
-            header = stripped.lstrip("[").split("]")[0].strip();
-            in_stripped_section = _is_secret_path(header) or _is_dev_section(header);
-            current_section = header;
-            if in_stripped_section {
-                pending = [];
-                continue;
-            }
-            out.extend(pending);
-            pending = [];
-            out.append(line);
-            continue;
-        }
-        if in_stripped_section {
-            continue;
-        }
-        if stripped == "" or stripped.startswith("#") {
-            pending.append(line);
-            continue;
-        }
-        key = stripped.split("=")[0].strip();
-        full_key = key if current_section == "" else f"{current_section}.{key}";
-        if _is_secret_path(full_key) {
-            pending = [];
-            continue;
-        }
-        out.extend(pending);
-        pending = [];
-        out.append(line);
-    }
-    out.extend(pending);
-    return "\n".join(out) + "\n";
-}
-
-
 def unresolved_toml_references(text: str, environ: dict[str, str]) -> list[str] {
     import from jaclang.project.config { resolve_env_refs }
     (_, refs) = resolve_env_refs(tomllib.loads(text), environ);
-    return [f"{ref.path}: {ref.describe()}" for ref in refs];
+    return [
+        f"{ref.path}: {ref.describe()}"
+        for ref in refs
+        if not _is_shell_script_ref(ref)
+    ];
 }
 
 
-def det_tar_member(info: tarfile.TarInfo) -> tarfile.TarInfo {
-    info.mtime = 0;
-    info.uid = 0;
-    info.gid = 0;
-    info.uname = "";
-    info.gname = "";
-    return info;
-}
-
-
-def open_det_tar(buf: io.BytesIO) -> tuple[tarfile.TarFile, any] {
-    gz = gzip.GzipFile(fileobj=buf, mode="wb", mtime=0);
-    return (tarfile.open(fileobj=gz, mode="w"), gz);
+def _is_shell_script_ref(ref: any) -> bool {
+    parts = ref.path.split(".");
+    in_scripts = parts[0] == "scripts"
+        or (parts[0] == "environments" and parts[2:3] == ["scripts"]);
+    return ref.unsupported and in_scripts;
 }
 
 
@@ -740,29 +678,23 @@ def _precompile_app(
         jac_path.write_bytes(seal_binary);
         jac_path.chmod(0o755);
 
-        manifest_script = stage_root / "_serve_payloads.jac";
-        manifest_script.write_text(
-            "import from pathlib { Path }\n"
-                + "import from jaclang.project.config { get_config_for_path }\n"
-                + "import from jaclang.dist.seal { bake_serve_payloads }\n"
-                + "with entry {\n"
-                + "    project = Path('app').resolve();\n"
-                + "    config = get_config_for_path(project);\n"
-                + "    if not bake_serve_payloads(\n"
-                + f"        config, project, app={repr(app)}, bake_client=False\n"
-                + "    ) {\n"
-                + "        raise RuntimeError('Serving metadata preparation failed');\n"
-                + "    }\n}\n"
-        );
+        serve_payloads = "from pathlib import Path\n"
+            + "from jaclang.project.config import get_config_for_path\n"
+            + "from jaclang.dist.seal import bake_serve_payloads\n"
+            + "project = Path('app').resolve()\n"
+            + "config = get_config_for_path(project)\n"
+            + "if not bake_serve_payloads(\n"
+            + f"    config, project, app={repr(app)}, bake_client=False\n"
+            + "):\n"
+            + "    raise RuntimeError('Serving metadata preparation failed')\n";
         prepared = subprocess.run(
-            [str(jac_path), "run", str(manifest_script)],
+            [str(jac_path), "-c", serve_payloads],
             capture_output=True,
             text=True,
             timeout=timeout_s,
             env=seal_step_env(),
             cwd=str(stage_root)
         );
-        manifest_script.unlink();
         if prepared.returncode != 0 {
             raise RuntimeError(
                 "App serving metadata preparation failed: "

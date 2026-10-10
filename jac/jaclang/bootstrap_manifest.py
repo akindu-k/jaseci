@@ -114,7 +114,6 @@ SEED_PATHS: tuple[str, ...] = (
     "compiler/backends/py/jcir_facts.jac",
     "compiler/backends/py/jcir_gen_pass.impl/",
     "compiler/backends/py/jcir_gen_pass.jac",
-    "compiler/backends/common/ast_gen_base.jac",
     "compiler/backends/common/fmt_kernel.jac",
     "compiler/backends/native/wasm_linker.jac",
     "compiler/backends/native/linker_common.jac",
@@ -126,6 +125,7 @@ SEED_PATHS: tuple[str, ...] = (
     "compiler/passes/endpoint_effect_pass.jac",
     "compiler/passes/semantic_analysis_pass.jac",
     "compiler/passes/import_wiring_pass.jac",
+    "compiler/passes/package_boundary_pass.jac",
     "compiler/passes/sym_tab_build_pass.jac",
     "compiler/passes/context.jac",
     "compiler/native_scope.jac",
@@ -190,6 +190,7 @@ SEED_PATHS: tuple[str, ...] = (
 NATIVE_ONLY_REL: tuple[str, ...] = (
     "compiler/jc_unit.jac",
     "compiler/jc_materialize.jac",
+    "compiler/jc_ask.jac",
     "dist/fused/embed.jac",
     "dist/fused/_libc.jac",
 )
