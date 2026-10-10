@@ -193,10 +193,10 @@ test "a seal that cannot yield a bootable .jab fails the pack instead of the pod
             ["RuntimeError", SERVE_MANIFEST_REL, "sealing without serve payloads"]
         )
     ];
-    for (label, entry, binary, expected) in cases {
+    for (label, entry_line, binary, expected) in cases {
         base = Path(_mini_app());
         (base / "jac.toml").write_text(
-            f'[project]\nname="mini"\n{entry}\n[scale]\nfat_bundle = false\n'
+            f'[project]\nname="mini"\n{entry_line}\n[scale]\nfat_bundle = false\n'
         );
         (base / ".jac").mkdir();
         (base / ".jac" / "serve_manifest.json").write_text('{"stale": true}\n');
