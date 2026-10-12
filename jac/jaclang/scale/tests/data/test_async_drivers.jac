@@ -94,14 +94,21 @@ test "RedisBackend.aput and aget round-trip via redis.asyncio" {
     backend = RedisBackend(redis_url=_redis_url);
     backend.postinit();
 
-    async def _roundtrip -> object {
+    async def _roundtrip -> tuple {
         await backend.aput(anchor);
-        return await backend.aget(anchor.id);
+        stored = await backend.aget(anchor.id);
+        leases = backend.lease([anchor.id]);
+        counter.value = 8;
+        await backend.aput(anchor);
+        backend.fill(stored, leases.get(anchor.id));
+        return (stored, leases, await backend.aget(anchor.id));
     }
-    result = asyncio.run(_roundtrip());
+    (result, leases, refilled) = asyncio.run(_roundtrip());
 
     assert result is not None , "aget returned None after aput";
     assert isinstance(result.archetype, CounterNode);
     assert result.archetype.value == 7;
+    assert leases , "a cache miss must take the refill lease";
+    assert refilled.archetype.value == 8 , "a refill leased before aput overwrote it";
     backend.close();
 }

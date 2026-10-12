@@ -1,0 +1,94 @@
+name: debug-9840
+
+on:
+  push:
+    branches: [debug/9840-aput-lease]
+  workflow_dispatch:
+
+env:
+  JAC_NO_DEV_SOURCE: "1"
+  FIXTURE_URL: https://raw.githubusercontent.com/MichaelAshley2000/jaseci/23a319fef32c8cb9e7817f151a0bd2dc621413f9/diagnostics/9840/cache_consistency_test.jac
+  FIXTURE_SHA256: 8ba612caca384b506b84199d33a69bb2d814acc5d1ce246ab864313d1107ec42
+  # Space-separated test files; "frozen" is the original #9840 fixture.
+  TARGETS: frozen jac/jaclang/scale/tests/data/test_async_drivers.jac
+
+jobs:
+  memory-hierarchy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    services:
+      mongo:
+        image: mongo:7
+        ports: ["27017:27017"]
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - name: Build jac from this branch's source
+        uses: ./.github/actions/setup-jac
+
+      - name: Record source and binary identity
+        run: |
+          {
+            echo "source_sha=$(git rev-parse HEAD)"
+            echo "jaclang_tree=$(git rev-parse HEAD:jac/jaclang)"
+            echo "binary_sha256=$(sha256sum jac/zig-out/bin/jac | cut -d' ' -f1)"
+            echo "jac_version=$(jac --version | tr '\n' ' ')"
+          } | tee identity.txt
+
+      - name: Upload the built binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: jac-${{ github.sha }}
+          path: |
+            jac/zig-out/bin/jac
+            identity.txt
+          retention-days: 30
+
+      - name: Install scale deps + test deps
+        run: |
+          jac install \
+            "fastapi>=0.121.3,<0.122.0" "uvicorn[standard]>=0.38.0,<0.39.0" \
+            "pyjwt>=2.10.1,<2.11.0" "fastapi-sso>=0.21.0,<1.0.0" \
+            "python-multipart>=0.0.21,<1.0.0" "bcrypt>=4.0.0,<5.0.0" \
+            "aiohttp>=3.9.0,<4.0.0" "sqlalchemy>=2.0.0,<3.0.0" \
+            "email-validator>=2.3.0,<3.0.0" "python-dotenv>=1.2.1,<2.0.0" \
+            "pymongo>=4.15.4,<5.0.0" "redis>=7.1.0,<8.0.0" \
+            "prometheus-client>=0.21.0,<1.0.0" \
+            "opentelemetry-sdk>=1.27.0,<2.0.0" \
+            "opentelemetry-exporter-otlp-proto-http>=1.27.0,<2.0.0" \
+            "apscheduler>=3.11.2,<4.0.0" "kubernetes>=34.1.0,<35.0.0" \
+            "docker>=7.1.0,<8.0.0" "boto3>=1.40.0,<2.0.0" \
+            requests "testcontainers[mongodb,redis]>=4.15,<5" "moto[s3]>=5.0.0" \
+            --global
+
+      - name: Fetch the frozen 9840 fixture and verify its hash
+        run: |
+          mkdir -p "$RUNNER_TEMP/frozen9840"
+          curl -fsSL "$FIXTURE_URL" -o "$RUNNER_TEMP/frozen9840/cache_consistency_test.jac"
+          echo "$FIXTURE_SHA256  $RUNNER_TEMP/frozen9840/cache_consistency_test.jac" | sha256sum -c -
+
+      - name: Run the targets
+        run: |
+          set +e
+          cat identity.txt
+          failed=""
+          for f in $TARGETS; do
+            echo "::group::$f"
+            if [ "$f" = frozen ]; then
+              MONGODB_URI=mongodb://localhost:27017 REDIS_URL=redis://localhost:6379 \
+                JAC_TEST_JOBS=0 jac test -v "$RUNNER_TEMP/frozen9840/cache_consistency_test.jac" \
+                || failed="$failed $f"
+            else
+              JAC_TEST_JOBS=0 jac test -v "$f" || failed="$failed $f"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::Failed test files:$failed"
+            exit 1
+          fi
