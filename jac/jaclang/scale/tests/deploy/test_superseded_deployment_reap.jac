@@ -980,12 +980,22 @@ test "a compensating restore puts back the marker the live template carried" {
 
 
 obj _UnreadableApps {
+    has broken: str;
+
     def list_namespaced_deployment(namespace: str, **kwargs: any) -> any {
-        return SimpleNamespace(items=[]);
+        if self.broken == "deployments" {
+            raise RuntimeError("deployments is forbidden: RBAC");
+        }
+        return SimpleNamespace(
+            items=[SimpleNamespace(metadata=SimpleNamespace(name="app-deployment"))]
+        );
     }
 
     def list_namespaced_replica_set(namespace: str, **kwargs: any) -> any {
-        raise RuntimeError("replicasets is forbidden: RBAC");
+        if self.broken == "replicasets" {
+            raise RuntimeError("replicasets is forbidden: RBAC");
+        }
+        return SimpleNamespace(items=[_rs_for("app-deployment", 1)]);
     }
 }
 
@@ -996,31 +1006,33 @@ obj _UnreadableApps {
 # bundle the app owns, including the one its live pods mount. list_revisions
 # stays lenient -- an empty history costs a rollback, not the app.
 test "the retention keep-set refuses to answer from an unreadable cluster" {
-    api = _UnreadableApps();
-    raised = False;
+    for broken in ["replicasets", "deployments"] {
+        api = _UnreadableApps(broken=broken);
+        raised = False;
 
-    with unittest.mock.patch.object(target_mod, "client", _FakeClient(apps=api)) {
-        with unittest.mock.patch.object(
-            target_mod.KubernetesTarget, "_load_cluster_config", return_value=None
-        ) {
-            t = target_mod.KubernetesTarget(
-                config=KubernetesConfig(app_name="shop", namespace="shop")
-            );
-            try {
-                t.referenced_bundle_keys("shop");
-            } except Exception {
-                raised = True;
+        with unittest.mock.patch.object(target_mod, "client", _FakeClient(apps=api)) {
+            with unittest.mock.patch.object(
+                target_mod.KubernetesTarget, "_load_cluster_config", return_value=None
+            ) {
+                t = target_mod.KubernetesTarget(
+                    config=KubernetesConfig(app_name="shop", namespace="shop")
+                );
+                try {
+                    t.referenced_bundle_keys("shop");
+                } except Exception {
+                    raised = True;
+                }
+                assert t.list_revisions("shop") == [] , (
+                    f"{broken}: list_revisions stays lenient; only the keep-set is strict"
+                );
             }
-            assert t.list_revisions("shop") == [] , (
-                "list_revisions stays lenient; only the keep-set is strict"
-            );
         }
-    }
 
-    assert raised , (
-        "an empty keep-set from an unreadable cluster tells a pruner to delete "
-        "every bundle the app references"
-    );
+        assert raised , (
+            f"unlisted {broken}: an empty keep-set from an unreadable cluster tells "
+            "a pruner to delete every bundle the app references"
+        );
+    }
 }
 
 
