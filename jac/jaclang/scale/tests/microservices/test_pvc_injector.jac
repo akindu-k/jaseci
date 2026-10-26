@@ -246,7 +246,7 @@ test "a pod spec with no bootstrap container references no bundles" {
 
 """Stands in for the loader pod: kubectl runs against a local directory."""
 obj _LoaderVolume {
-    has root: str;
+    has volume_dir: str;
 
     def CoreV1Api -> any {
         return self;
@@ -262,11 +262,11 @@ obj _LoaderVolume {
 
     def kubectl(args: list[str], cwd: any = None) -> None {
         if args[0] == "cp" {
-            dest = args[-1].split(":", 1)[1].replace(BUNDLE_MOUNT_PATH, self.root);
+            dest = args[-1].split(":", 1)[1].replace(BUNDLE_MOUNT_PATH, self.volume_dir);
             shutil.copy(Path(cwd) / args[-2], dest);
             return;
         }
-        script = args[-1].replace(BUNDLE_MOUNT_PATH, self.root);
+        script = args[-1].replace(BUNDLE_MOUNT_PATH, self.volume_dir);
         if subprocess.run(["sh", "-c", script]).returncode != 0 {
             raise RuntimeError(f"kubectl command failed: {script}");
         }
@@ -287,12 +287,12 @@ test "seeding prunes the bundles no retained revision references (#10095)" {
         ("retained revisions", set(live), untouched),
         ("no retained revisions", set(), untouched + stale)
     ] {
-        with tempfile.TemporaryDirectory() as root {
+        with tempfile.TemporaryDirectory() as volume_dir {
             for key in untouched + stale {
-                Path(root, key).parent.mkdir(parents=True, exist_ok=True);
-                Path(root, key).write_bytes(b"x");
+                Path(volume_dir, key).parent.mkdir(parents=True, exist_ok=True);
+                Path(volume_dir, key).write_bytes(b"x");
             }
-            volume = _LoaderVolume(root=root);
+            volume = _LoaderVolume(volume_dir=volume_dir);
             injector = PvcInjector();
             injector._object_key = "bundles/orders/new.jab";
             injector._bundle_bytes = b"jab";
@@ -303,7 +303,7 @@ test "seeding prunes the bundles no retained revision references (#10095)" {
                 injector.seed("orders", "prod");
             }
             on_volume = sorted(
-                str(p.relative_to(root)) for p in Path(root).rglob("*") if p.is_file()
+                str(p.relative_to(volume_dir)) for p in Path(volume_dir).rglob("*") if p.is_file()
             );
             assert on_volume == sorted(survivors + ["bundles/orders/new.jab"]) , (
                 f"{label}: {on_volume}"
