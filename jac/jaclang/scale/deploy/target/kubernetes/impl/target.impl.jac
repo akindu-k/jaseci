@@ -1486,6 +1486,13 @@ impl KubernetesTarget.referenced_bundle_keys(app_name: str) -> set[str] {
             keys.add(str(key));
         }
     }
+    serializer = client.ApiClient();
+    for dep in client.AppsV1Api().list_namespaced_deployment(
+        namespace=self.k8s_config.namespace, label_selector=FLEET_SELECTOR
+    ).items {
+        pod_spec = serializer.sanitize_for_serialization(dep.spec.template.spec);
+        keys.update(bundle_keys_from_pod_spec(dict(pod_spec)));
+    }
     return keys;
 }
 

@@ -979,15 +979,25 @@ test "a compensating restore puts back the marker the live template carried" {
 }
 
 
-obj _UnreadableApps {
-    has broken: str;
+obj _RetentionApps {
+    has broken: str = "";
 
     def list_namespaced_deployment(namespace: str, **kwargs: any) -> any {
         if self.broken == "deployments" {
             raise RuntimeError("deployments is forbidden: RBAC");
         }
+        pending = {
+            "initContainers": [
+                {"name": "jac-bootstrap", "args": ["/jac-bundles/bundles/app/pending.jab"]}
+            ]
+        };
         return SimpleNamespace(
-            items=[SimpleNamespace(metadata=SimpleNamespace(name="app-deployment"))]
+            items=[
+                SimpleNamespace(
+                    metadata=SimpleNamespace(name="app-deployment"),
+                    spec=SimpleNamespace(template=SimpleNamespace(spec=pending))
+                )
+            ]
         );
     }
 
@@ -1004,11 +1014,16 @@ obj _UnreadableApps {
 # deleted". An unreadable cluster returning an empty keep-set is that contract
 # inverted: a pruner reads it as "nothing is referenced" and deletes every
 # bundle the app owns, including the one its live pods mount. list_revisions
-# stays lenient -- an empty history costs a rollback, not the app.
-test "the retention keep-set refuses to answer from an unreadable cluster" {
-    for broken in ["replicasets", "deployments"] {
-        api = _UnreadableApps(broken=broken);
-        raised = False;
+# stays lenient -- an empty history costs a rollback, not the app. A Deployment
+# template counts before the controller has cut its ReplicaSet.
+test "the retention keep-set covers every template and refuses an unreadable cluster" {
+    for (broken, expected) in [
+        ("replicasets", None),
+        ("deployments", None),
+        ("", {"bundles/app/old.jab", "bundles/app/pending.jab"})
+    ] {
+        api = _RetentionApps(broken=broken);
+        keys: (set[str] | None) = None;
 
         with unittest.mock.patch.object(target_mod, "client", _FakeClient(apps=api)) {
             with unittest.mock.patch.object(
@@ -1018,19 +1033,21 @@ test "the retention keep-set refuses to answer from an unreadable cluster" {
                     config=KubernetesConfig(app_name="shop", namespace="shop")
                 );
                 try {
-                    t.referenced_bundle_keys("shop");
+                    keys = t.referenced_bundle_keys("shop");
                 } except Exception {
-                    raised = True;
+                    keys = None;
                 }
-                assert t.list_revisions("shop") == [] , (
-                    f"{broken}: list_revisions stays lenient; only the keep-set is strict"
-                );
+                if broken {
+                    assert t.list_revisions("shop") == [] , (
+                        f"{broken}: list_revisions stays lenient; only the keep-set is strict"
+                    );
+                }
             }
         }
 
-        assert raised , (
-            f"unlisted {broken}: an empty keep-set from an unreadable cluster tells "
-            "a pruner to delete every bundle the app references"
+        assert keys == expected , (
+            f"unlisted {broken or 'nothing'}: got {keys}; an empty keep-set tells a "
+            "pruner to delete every bundle the app references"
         );
     }
 }
