@@ -31565,7 +31565,7 @@ graph import scale {
         admin.logs._fleet_names | admin.traces._trace_services { fleet_member_names },
         tests.apps.test_fleet_from_apps { _compiled_app_edges },
         tests.deploy.test_client_build_stage { FleetMember, FleetSpec },
-        tests.microservices.test_app_precompile { fleet_from_config },
+        tests.microservices.test_app_precompile { fleet_from_config, solo_fleet },
     ]
     runtime.gateway.dispatch ++> [
         tests.apps.test_fleet_from_apps { ROUTE_PROXY, classify_route },
