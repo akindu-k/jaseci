@@ -1962,7 +1962,8 @@ graph import {
         compiler.driver.program.JacProgram.stamp_app_facts { UI_MOBUI },
         runtime.source_app.main { kind_has_server },
     ]
-    project.apps ++> scale.injector.bundle._entry_module_spec { resolve_entry_path }
+    project.apps ++> scale.injector.bundle._entry_module_spec
+        | scale.injector.bundle.sealed_entry_module { resolve_entry_path }
     project.apps --> scale.deploy.target.kubernetes.manifest_builder.ManifestBuilder._client_entry {
         resolve_entry_path
     }
