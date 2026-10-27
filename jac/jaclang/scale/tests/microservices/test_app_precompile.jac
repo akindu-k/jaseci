@@ -477,16 +477,36 @@ test "a real pod binary seals the app each pod serves and boots it from the seal
     jac_bin = require_pod_binary();
     import json;
     import from jaclang.project.config { get_config_for_path }
-    import from jaclang.scale.runtime.fleet { fleet_from_config }
+    import from jaclang.scale.runtime.fleet { fleet_from_config, solo_fleet }
+    app_jac = {
+        "app.jac": 'import from svc { ping }\n'
+            + 'walker:pub echo { can run with Root entry { report "hello"; } }\n'
+    };
     cases = [
         (
             "an entry named app",
             '[project]\nname="mini"\nkind="service"\nentry-point="app"\n',
-            {
-                "app.jac": 'import from svc { ping }\n'
-                    + 'walker:pub echo { can run with Root entry { report "hello"; } }\n'
-            },
+            app_jac,
             "",
+            "",
+            "ping",
+            {"app.jac": "/walker/echo"}
+        ),
+        (
+            "a deploy of app.jac with no entry-point in jac.toml",
+            '[project]\nname="mini"\nkind="service"\n',
+            app_jac,
+            "",
+            "app.jac",
+            "ping",
+            {"app.jac": "/walker/echo"}
+        ),
+        (
+            "a deploy of app.jac over a different jac.toml entry-point",
+            '[project]\nname="mini"\nkind="service"\nentry-point="svc"\n',
+            app_jac,
+            "",
+            "app.jac",
             "ping",
             {"app.jac": "/walker/echo"}
         ),
@@ -497,24 +517,26 @@ test "a real pod binary seals the app each pod serves and boots it from the seal
                 + '[apps.svc]\nkind="service"\nentry-point="svc"\nroute="/api/svc"\n',
             {"web.jac": 'def:pub hello -> str { return "web"; }\n'},
             "web",
+            "",
             "hello",
             {"web.jac": "/function/hello", "svc.jac": "/function/ping"}
         )
     ];
-    for (label, toml, files, served, func, boots) in cases {
+    for (label, toml, files, served, deployed, func, boots) in cases {
         base = Path(_mini_app());
         (base / "jac.toml").write_text(toml);
         for (name, text) in files.items() {
             (base / name).write_text(text);
         }
-        fleet = fleet_from_config(
-            get_config_for_path(base),
-            served,
-            project_root=str(base),
-            relative_to=str(base)
-        )
-            if served
-            else None;
+        fleet = solo_fleet("mini", deployed) if deployed else None;
+        if served {
+            fleet = fleet_from_config(
+                get_config_for_path(base),
+                served,
+                project_root=str(base),
+                relative_to=str(base)
+            );
+        }
         raw = pack_jab(str(base), jac_bin.read_bytes(), fleet=fleet);
         names = _names(raw);
         assert "svc.jac" in names , label;
