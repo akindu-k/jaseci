@@ -603,6 +603,8 @@ impl _precompile_app(
             + "config = get_config_for_path(project)\n"
             + (
                 f"config.project.entry_point = {repr(entry_module)}\n"
+                    + "for served in getattr(config, 'apps', {}).values():\n"
+                    + f"    served.entry_point = {repr(entry_module)}\n"
                     if entry_module
                     else ""
             )
