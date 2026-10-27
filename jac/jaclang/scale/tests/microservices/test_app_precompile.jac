@@ -371,26 +371,40 @@ test "pack_jab without a pod binary is a hard error (a .jab requires a seal)" {
 
 test "a seal that cannot yield a bootable .jab fails the pack instead of the pod" {
     import from jaclang.server.sealed_serve { SERVE_MANIFEST_REL }
+    import from jaclang.scale.runtime.fleet { solo_fleet }
     cases = [
-        ("an unrunnable pod binary", "", b"not-an-elf", []),
+        ("an unrunnable pod binary", "", b"not-an-elf", [], ""),
         (
             "a bake that writes no manifest over a stale local copy",
             'entry-point="missing"\n',
             b"",
-            ["RuntimeError", SERVE_MANIFEST_REL, "sealing without serve payloads"]
+            ["RuntimeError", SERVE_MANIFEST_REL, "sealing without serve payloads"],
+            ""
+        ),
+        (
+            "a deployed file that is not a module name",
+            "",
+            b"not-an-elf",
+            ["ValueError", "my-app.jac", "not an importable module name"],
+            "my-app.jac"
         )
     ];
-    for (label, entry_line, binary, expected) in cases {
+    for (label, entry_line, binary, expected, deployed) in cases {
         base = Path(_mini_app());
         (base / "jac.toml").write_text(
             f'[project]\nname="mini"\n{entry_line}\n[scale]\nfat_bundle = false\n'
         );
         (base / ".jac").mkdir();
         (base / ".jac" / "serve_manifest.json").write_text('{"stale": true}\n');
+        fleet = None;
+        if deployed {
+            (base / deployed).write_text('def:pub ping -> str { return "pong"; }\n');
+            fleet = solo_fleet("mini", deployed);
+        }
         seal_binary = binary or require_pod_binary().read_bytes();
         caught = "";
         try {
-            pack_jab(str(base), seal_binary);
+            pack_jab(str(base), seal_binary, fleet=fleet);
         } except Exception as e {
             caught = f"{type(e).__name__}: {e}";
         }
@@ -528,7 +542,7 @@ test "a real pod binary seals the app each pod serves and boots it from the seal
         for (name, text) in files.items() {
             (base / name).write_text(text);
         }
-        fleet = solo_fleet("mini", deployed) if deployed else None;
+        fleet = None;
         if served {
             fleet = fleet_from_config(
                 get_config_for_path(base),
@@ -536,6 +550,8 @@ test "a real pod binary seals the app each pod serves and boots it from the seal
                 project_root=str(base),
                 relative_to=str(base)
             );
+        } elif deployed {
+            fleet = solo_fleet("mini", deployed);
         }
         raw = pack_jab(str(base), jac_bin.read_bytes(), fleet=fleet);
         names = _names(raw);

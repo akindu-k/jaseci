@@ -555,7 +555,16 @@ impl sealed_entry_module(project_dir: str, fleet: (FleetSpec | None)) -> str {
     }
     base = Path(project_dir).resolve();
     rel = Path(_fleet_entry_rel(base, served.app, served.file));
-    return ".".join(rel.with_suffix("").parts);
+    parts = [*rel.parent.parts, rel.stem];
+    if not all(part.isidentifier() for part in parts) {
+        raise ValueError(
+            f"App '{served.app}' boots '{rel.as_posix()}', which is not an "
+            "importable module name, so the deploy cannot seal it. Rename it "
+            "so every part of its path is a plain identifier, such as "
+            "'my_app.jac'."
+        );
+    }
+    return ".".join(parts);
 }
 
 impl require_serve_manifest(stage: Path, detail: str = "") -> Path {
@@ -1042,7 +1051,10 @@ impl pack_jab(
         );
     }
     excluded = source_filter_for(base);
-    assert_entry_module_ships(base, excluded);
+    entry_module = sealed_entry_module(project_dir, fleet);
+    if not entry_module {
+        assert_entry_module_ships(base, excluded);
+    }
     sources = bundle_source_files(base);
     check_fleet_entries(
         base, [path.relative_to(base).as_posix() for path in sources], excluded, fleet
@@ -1055,7 +1067,6 @@ impl pack_jab(
     }
     sanitized = sanitized_jac_toml(base);
     app_name = sealed_app_name(project_dir, fleet);
-    entry_module = sealed_entry_module(project_dir, fleet);
     tomls = nested_sanitized_tomls(base);
     def input_key(tree: Path, files: list[Path]) -> str {
         return seal_input_digest(

@@ -31569,6 +31569,7 @@ graph import scale {
         tests.apps.test_fleet_from_apps { _compiled_app_edges },
         tests.deploy.test_client_build_stage { FleetMember, FleetSpec },
         tests.microservices.test_app_precompile { fleet_from_config, solo_fleet },
+        tests.microservices.test_bundle_jacignore { solo_fleet },
     ]
     runtime.gateway.dispatch ++> [
         tests.apps.test_fleet_from_apps { ROUTE_PROXY, classify_route },
