@@ -564,7 +564,16 @@ impl sealed_entry_module(project_dir: str, fleet: (FleetSpec | None)) -> str {
             "'my_app.jac'."
         );
     }
-    return ".".join(parts);
+    module = ".".join(parts);
+    resolved = Path(resolve_entry_path(module, str(base))).resolve();
+    if resolved != (base / rel).resolve() {
+        raise ValueError(
+            f"App '{served.app}' boots '{rel.as_posix()}', but its module name "
+            f"'{module}' resolves to '{resolved.relative_to(base).as_posix()}', "
+            "so the deploy would seal the wrong file. Rename one of the two."
+        );
+    }
+    return module;
 }
 
 impl require_serve_manifest(stage: Path, detail: str = "") -> Path {
