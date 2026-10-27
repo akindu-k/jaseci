@@ -1,0 +1,42 @@
+name: debug-9610
+
+on:
+  push:
+    branches: [debug/9610-deployed-entry-bake]
+  workflow_dispatch:
+
+jobs:
+  deployed-entry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - name: Build jac from this branch's source
+        uses: ./.github/actions/setup-jac
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install scale deps
+        run: |
+          jac install \
+            "python-dotenv>=1.2.1,<2.0.0" \
+            "prometheus-client>=0.21.0,<1.0.0" \
+            "opentelemetry-sdk>=1.27.0,<2.0.0" \
+            "opentelemetry-exporter-otlp-proto-http>=1.27.0,<2.0.0" \
+            "apscheduler>=3.11.2,<4.0.0" "kubernetes>=34.1.0,<35.0.0" \
+            "docker>=7.1.0,<8.0.0" "boto3>=1.40.0,<2.0.0" \
+            requests "moto[s3]>=5.0.0" \
+            --global
+
+      - name: Run the seal-and-boot test
+        env:
+          JAC_TEST_JOBS: "1"
+          JAC_TEST_STRICT: "1"
+        run: |
+          jac --version
+          jac test -v jac/jaclang/scale/tests/microservices/test_app_precompile.jac \
+            -f "a real pod binary seals the app each pod serves"
