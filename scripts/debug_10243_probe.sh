@@ -8,5 +8,12 @@ jac --version || true
 git -C "${REPO_ROOT}" log -1 --format='### source %h %s'
 
 cd "${REPO_ROOT}"
-timeout 1800 jac test scripts/debug_10243_probe.jac 2>&1 | tail -80
-exit "${PIPESTATUS[0]}"
+status=0
+for t in scripts/debug_10243_probe.jac jac/tests/compiler/test_precompiled_interfaces.jac jac/tests/compiler/test_iface_cache.jac; do
+    echo "### test ${t}"
+    timeout 2400 jac test "${t}" 2>&1 | tail -60
+    rc=${PIPESTATUS[0]}
+    echo "### exit ${t}: ${rc}"
+    [ "${rc}" -eq 0 ] || status=1
+done
+exit "${status}"

@@ -25,6 +25,7 @@ test "a served app's seal precompile compiles what its prepare compiled" {
         );
         with contextlib.chdir(tmp) {
             prepare_application(str(path), JacProgram(), tmp);
+            (base / '.jac' / 'serve_manifest.json').write_text('{}');
             written = sorted(
                 str(p) for p in (base / '.jac' / 'cache').rglob('helper.*.jir')
             );
