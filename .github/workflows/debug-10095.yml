@@ -1,0 +1,105 @@
+name: debug-10095
+
+on:
+  push:
+    branches: [debug/10095-prune-rollback-e2e]
+
+jobs:
+  sdk-e2e:
+    name: SDK e2e with pruning redeploys and rollback (official-image)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+    env:
+      JAC_UNDER_TEST: ${{ github.workspace }}/jac/zig-out/bin/jac
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      # The binary upstream CI built for this PR's head (48512d9de).
+      - name: Fetch the PR's jac kit from upstream CI
+        uses: actions/download-artifact@v4
+        with:
+          name: jac-kit
+          path: jac
+          repository: jaseci-labs/jac
+          run-id: 41628541136
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: ./.github/actions/seal-checkout
+
+      - name: Install the jac binary as the deploy driver
+        run: |
+          chmod +x "$JAC_UNDER_TEST"
+          mkdir -p "$HOME/.local/bin"
+          cp "$JAC_UNDER_TEST" "$HOME/.local/bin/jac"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/jac" --version
+
+      - name: Install scale deploy deps
+        run: |
+          jac install \
+            "python-dotenv>=1.2.1,<2.0.0" \
+            "kubernetes>=34.1.0,<35.0.0" "docker>=7.1.0,<8.0.0" "humanize>=4.0.0" \
+            --global
+
+      - name: Run the changed scale tests
+        id: unit
+        continue-on-error: true
+        working-directory: jac
+        run: |
+          JAC_TEST_STRICT=1 jac test \
+              jaclang/scale/tests/deploy/test_superseded_deployment_reap.jac \
+              jaclang/scale/tests/microservices/test_pvc_injector.jac
+
+      - name: Set up kind cluster
+        run: |
+          curl -fsSL -o ./kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
+          chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
+          curl -fsSL -o kubectl https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl
+          sudo install kubectl /usr/local/bin/kubectl
+          cat > /tmp/kind.yaml <<'KIND'
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+            - role: control-plane
+              kubeadmConfigPatches:
+                - |
+                  kind: InitConfiguration
+                  nodeRegistration:
+                    kubeletExtraArgs:
+                      node-labels: "ingress-ready=true"
+              extraPortMappings:
+                - { containerPort: 80, hostPort: 80, protocol: TCP }
+                - { containerPort: 443, hostPort: 443, protocol: TCP }
+          KIND
+          kind create cluster --name jac --config /tmp/kind.yaml --wait 150s
+
+      - name: Deploy ingress-nginx (best-effort)
+        continue-on-error: true
+        run: |
+          kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.11.5/deploy/static/provider/kind/deploy.yaml
+          kubectl wait --namespace ingress-nginx --for=condition=ready pod \
+              --selector=app.kubernetes.io/component=controller --timeout=180s || true
+          docker pull postgres:18
+          kind load docker-image postgres:18 --name jac
+
+      - name: Build the official base image from this checkout's binary
+        run: |
+          mkdir -p /tmp/imgctx/amd64
+          cp "$JAC_UNDER_TEST" /tmp/imgctx/amd64/jac
+          docker build --build-arg TARGETARCH=amd64 \
+              -f docker/jaclang.Dockerfile -t jaclang-e2e:nightly /tmp/imgctx
+          kind load docker-image jaclang-e2e:nightly --name jac
+          echo "E2E_POD_BASE_IMAGE=jaclang-e2e:nightly" >> "$GITHUB_ENV"
+
+      - name: Run SDK programmatic deploy e2e (ScaleClient)
+        env:
+          CLUSTER_TYPE: kind
+        run: bash jac/jaclang/scale/tests/deploy/sdk_deploy_real_e2e.sh
+
+      - name: Fail if the scale tests failed
+        if: steps.unit.outcome == 'failure'
+        run: exit 1
