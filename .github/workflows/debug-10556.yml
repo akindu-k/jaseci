@@ -29,7 +29,7 @@ jobs:
           zig build fetch-typeshed --summary all
           zig build fetch-llvm --summary all
           zig build jacllvm --summary all
-          ls -la jaclang/vendor/typeshed/stdlib | head -3
+          test -d jaclang/vendor/typeshed/stdlib
           ls -la jaclang/compiler/backends/native/llvm/libjacllvm.*
 
       - name: Probe
