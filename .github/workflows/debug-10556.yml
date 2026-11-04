@@ -1,0 +1,36 @@
+name: debug-10556
+
+on:
+  push:
+    branches: [debug/10556-div-eq-bool, debug/10556-div-eq-bool-fixed]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the released jac
+        run: |
+          bash scripts/install.sh --version 0.39.0
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Set up Zig 0.16.0
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+          use-cache: false
+
+      - name: Materialize typeshed and the LLVM shim for the checkout compiler
+        working-directory: jac
+        run: |
+          set -euxo pipefail
+          zig build fetch-typeshed --summary all
+          zig build fetch-llvm --summary all
+          zig build jacllvm --summary all
+          ls -la jaclang/vendor/typeshed/stdlib | head -3
+          ls -la jaclang/compiler/backends/native/llvm/libjacllvm.*
+
+      - name: Probe
+        run: bash scripts/debug_10556_probe.sh 2>&1 | tee "$RUNNER_TEMP/probe.log"
