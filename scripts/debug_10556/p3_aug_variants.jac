@@ -32,9 +32,6 @@ with entry {
     f: float = 10.0;
     f //= 4;
     print("glob //=:", f);
-    i = 7;
-    i /= 2;
-    print("glob int /= int:", i);
     print("local annot:", local_annot());
     print("local plain:", local_plain());
 }
