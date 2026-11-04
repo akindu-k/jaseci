@@ -16,6 +16,16 @@ jobs:
           bash scripts/install.sh --version 0.39.0
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      - name: Set up Zig 0.16.0
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+          use-cache: false
+
+      - name: Fetch typeshed so the checkout's compiler serves the run
+        working-directory: jac
+        run: zig build fetch-typeshed --summary all
+
       - name: Seam test (any receiver + list[any] sorts)
         working-directory: jac
         continue-on-error: true
