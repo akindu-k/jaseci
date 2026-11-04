@@ -1,0 +1,37 @@
+name: debug-10553
+
+on:
+  push:
+    branches: [debug/10553-sorted-any, debug/10553-sorted-any-fixed]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the released jac
+        run: |
+          bash scripts/install.sh --version 0.39.0
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Seam test (any receiver + list[any] sorts)
+        working-directory: jac
+        continue-on-error: true
+        run: |
+          set -uxo pipefail
+          JAC_TEST_JOBS=1 jac test tests/compiler/backends/native/test_native_any_receiver_method.jac 2>&1 | tee "$RUNNER_TEMP/seams.log"
+          exit "${PIPESTATUS[0]}"
+
+      - name: Runtime probe (native sorted value)
+        working-directory: jac
+        continue-on-error: true
+        run: |
+          set -uxo pipefail
+          JAC_TEST_JOBS=1 jac test tests/compiler/backends/native/test_debug_10553_probe.jac 2>&1 | tee "$RUNNER_TEMP/probe.log"
+          exit "${PIPESTATUS[0]}"
+
+      - name: Summary
+        run: |
+          grep -hE "PROBE|any_list_sort|AssertionError|passed|failed" "$RUNNER_TEMP"/seams.log "$RUNNER_TEMP"/probe.log | head -80
