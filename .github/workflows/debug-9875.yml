@@ -1,0 +1,32 @@
+name: debug-9875
+
+on:
+  push:
+    branches: [debug/9875-identity-race]
+
+jobs:
+  repro:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the released jac (identity storage identical to main)
+        run: |
+          bash scripts/install.sh --version 0.39.1
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH"
+          jac --version
+
+      - name: Install the serve deps the runtime suite uses
+        run: jac install "python-dotenv>=1.2.1,<2.0.0" "requests>=2.32.0,<3.0.0" --global
+
+      - name: Run the extended auth policy test outside the checkout
+        run: |
+          set -uxo pipefail
+          WORK="$(mktemp -d)"
+          cp jac/tests/runtimelib/test_auth_policy.jac "$WORK/"
+          cd "$WORK"
+          JAC_TEST_JOBS=0 jac test test_auth_policy.jac 2>&1 | tee out.log
+          echo "--- result for the extended test ---"
+          grep -n -A40 "every write path" out.log || true
