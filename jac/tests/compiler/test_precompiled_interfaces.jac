@@ -40,7 +40,7 @@ test "precompiled interfaces are independent of the staging directory" {
     }
 }
 
-test "precompiled modules carry their type interface on cold and cached builds" {
+test "precompiled modules keep their type interface and their sealed app's codespace on cold and cached builds" {
     import contextlib;
     import from unittest.mock { patch }
     import from jaclang.compiler.driver.application { prepare_application }
@@ -48,9 +48,17 @@ test "precompiled modules carry their type interface on cold and cached builds" 
     import from jaclang.compiler.driver.jir { get_module_cache_path }
     import from jaclang.compiler.driver.program { JacProgram }
     import from jaclang.compiler.frontend.codeinfo { effective_default_codespace }
-    import from jaclang.dist.precompile_bytecode { precompile_unit_context }
+    import from jaclang.dist.precompile_bytecode {
+        precompile_unit_context,
+        sealable_sources
+    }
     import from jaclang.runtime.prepared { forget }
-    for (kind, sealed_under) in (("", ""), ("service", "server"), ("cli", "native")) {
+    for (kind, app, sealed_under) in (
+        ("", "", ""),
+        ("service", "", "server"),
+        ("cli", "", "native"),
+        ("desktop", "desk", "native")
+    ) {
         with TemporaryDirectory() as directory {
             package = _package(Path(directory));
             source = package / "api.jac";
@@ -58,28 +66,48 @@ test "precompiled modules carry their type interface on cold and cached builds" 
             reuses_prepare = sealed_under == "server";
             with (contextlib.chdir(package) if kind else contextlib.nullcontext()) {
                 if kind {
-                    (package / "jac.toml").write_text(
-                        f'[project]\nname = "library"\nkind = "{kind}"\n'
-                    );
                     app_main = package / "main.jac";
-                    app_main.write_text(
-                        "import from api { answer }\n"
-                            + "def:pub hello -> int { return answer(); }\n"
-                    );
-                    prepare_application(str(app_main), JacProgram(), str(package));
-                    forget(str(app_main));
-                    (package / ".jac" / "serve_manifest.json").write_text("{}");
+                    if app {
+                        (package / "jac.toml").write_text(
+                            f'[project]\nname = "library"\ndefault-app = "{app}"\n'
+                                + f'[apps.{app}]\nkind = "{kind}"\nentry-point = "main"\n'
+                                + '[apps.svc]\nkind = "service"\nentry-point = "svc"\n'
+                        );
+                        app_main.write_text("def:pub hello -> int { return 0; }\n");
+                        (package / "svc.jac").write_text(
+                            "import from api { answer }\n"
+                                + "def:pub read -> int { return answer(); }\n"
+                        );
+                        sealable_sources(str(package), app);
+                    } else {
+                        (package / "jac.toml").write_text(
+                            f'[project]\nname = "library"\nkind = "{kind}"\n'
+                        );
+                        app_main.write_text(
+                            "import from api { answer }\n"
+                                + "def:pub hello -> int { return answer(); }\n"
+                        );
+                        prepare_application(str(app_main), JacProgram(), str(package));
+                        forget(str(app_main));
+                    }
+                    manifest = package / ".jac" / "serve_manifest.json";
+                    manifest.parent.mkdir(parents=True, exist_ok=True);
+                    manifest.write_text("{}");
                     prepared = {
                         str(p) for p in (package / ".jac" / "cache").rglob("api.*.jir")
                     };
                     with precompile_unit_context(
-                        str(source), str(package)
-                    ) as _program {
+                        str(source), str(package), app=app
+                    ) as program {
                         codespace = effective_default_codespace();
+                        compiled = program.options.default_codespace or codespace;
                         looked = str(get_module_cache_path(str(source)));
                     }
                     assert codespace == sealed_under , (
                         f"a {kind} app's seal compiles under {codespace!r}, expected {sealed_under!r}"
+                    );
+                    assert compiled == codespace , (
+                        f"a {kind} app's seal places api.jac under {compiled!r} but keys it under {codespace!r}"
                     );
                     if reuses_prepare {
                         assert looked in prepared , (
@@ -98,7 +126,9 @@ test "precompiled modules carry their type interface on cold and cached builds" 
                         )
                     );
                     with (recompile if reuses_prepare else contextlib.nullcontext()) {
-                        data = precompile_unit(str(source), str(package), collect=False);
+                        data = precompile_unit(
+                            str(source), str(package), collect=False, app=app
+                        );
                     }
                     assert data is not None , "precompilation produced no artifact";
                     assert read_section_bytes(data, SEC_IFACE) is not None , (
