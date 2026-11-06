@@ -1,0 +1,23 @@
+name: debug-8670
+
+on:
+  push:
+    branches: [debug/8670-headless-db-dns]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up kind cluster
+        run: |
+          curl -fsSL -o ./kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
+          chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
+          curl -fsSL -o kubectl https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl
+          sudo install kubectl /usr/local/bin/kubectl
+          kind create cluster --name jac --wait 150s
+
+      - name: Probe
+        run: bash scripts/debug_8670_probe.sh
