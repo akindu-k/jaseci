@@ -1,0 +1,242 @@
+name: debug-10794
+
+on:
+  push:
+    branches: [debug/10794-grafana-prefix]
+
+jobs:
+  dev-kit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      # The cache home the test lanes pin (jac-kit), so the stub catalog
+      # lands in the slot they look it up in.
+      - name: Pin the cache home
+        run: echo "XDG_CACHE_HOME=$RUNNER_TEMP/.cache" >> "$GITHUB_ENV"
+
+      - name: Fingerprint immutable build inputs
+        id: inputs
+        run: bash scripts/ci_cache_keys.sh >> "$GITHUB_OUTPUT"
+
+      # The compiler modules compiled from the checkout, keyed by the compiler
+      # digest. Restored before anything calls jac, so a run that leaves the
+      # compiler alone skips compiling it from source.
+      - name: Restore the compiled compiler modules
+        id: dev-modules-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/.cache/jac/jir/modules
+          key: jac-dev-modules-c${{ steps.inputs.outputs.compiler }}
+
+      - name: Build the dev jac binary (cached)
+        uses: ./.github/actions/setup-jac
+        with:
+          need-build-inputs: "true"
+          bytecode-kit: "true"
+          dev: "true"
+
+      - name: Set up Zig 0.16.0
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+          use-cache: false
+
+      - name: Ensure the LLVMPY shim is present
+        working-directory: jac
+        run: |
+          set -euo pipefail
+          if ls jaclang/compiler/backends/native/llvm/libjacllvm.* >/dev/null 2>&1; then
+            exit 0
+          fi
+          zig build fetch-llvm --summary all
+          zig build jacllvm --summary all
+
+      - name: Materialize typeshed, bun + vendored runtimes
+        working-directory: jac
+        run: |
+          zig build fetch-typeshed --summary all
+          zig build fetch-bun --summary all
+          zig build vendor-musl --summary all
+          zig build vendor-musl-linux-aarch64 --summary all
+          zig build vendor-wasm-libc --summary all
+
+      - name: Restore the dev stub catalog
+        id: dev-stubcat-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/.cache/jac/jir/stubcat
+          key: dev-stubcat-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('jac/jaclang/compiler/types/**', 'jac/jaclang/compiler/passes/pyast_load_pass.jac', 'jac/jaclang/compiler/passes/impl/pyast_load_pass.impl.jac', 'jac/jaclang/compiler/passes/sym_tab_build_pass.jac', 'jac/jaclang/compiler/passes/impl/sym_tab_build_pass.impl.jac', 'jac/jaclang/compiler/frontend/unitree.jac', 'jac/jaclang/compiler/frontend/helpers.jac', 'jac/jaclang/compiler/symbol_utils.jac', 'jac/jaclang/vendor/typeshed/PIN') }}
+
+      # Built here, before any precompile shard: without it every unit's type
+      # evaluator parses the typeshed stubs from source, about two thirds of
+      # a cold precompile.
+      - name: Build the stub catalog
+        run: |
+          set -euo pipefail
+          export PATH="$GITHUB_WORKSPACE/jac/zig-out/bin:$PATH"
+          jac native build stubcat
+          ls "$XDG_CACHE_HOME/jac/jir/stubcat"/*.bin
+
+      - name: Save the dev stub catalog
+        if: steps.dev-stubcat-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/.cache/jac/jir/stubcat
+          key: dev-stubcat-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('jac/jaclang/compiler/types/**', 'jac/jaclang/compiler/passes/pyast_load_pass.jac', 'jac/jaclang/compiler/passes/impl/pyast_load_pass.impl.jac', 'jac/jaclang/compiler/passes/sym_tab_build_pass.jac', 'jac/jaclang/compiler/passes/impl/sym_tab_build_pass.impl.jac', 'jac/jaclang/compiler/frontend/unitree.jac', 'jac/jaclang/compiler/frontend/helpers.jac', 'jac/jaclang/compiler/symbol_utils.jac', 'jac/jaclang/vendor/typeshed/PIN') }}
+
+      - name: Upload the dev kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: jac-dev-kit
+          path: |
+            jac/zig-out/bin/jac
+            jac/jaclang/vendor/typeshed/stdlib
+            jac/jaclang/compiler/backends/native/llvm/libjacllvm.*
+            jac/jaclang/client/_bun
+            jac/.pbs-build/linux-x86_64/python/build/lib
+            jac/.pbs-build/linux-x86_64/musl/lib
+            jac/.pbs-build/linux-aarch64/musl/lib
+            jac/.pbs-build/wasm32/libc
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload the dev stub catalog
+        uses: actions/upload-artifact@v4
+        with:
+          name: jac-dev-stubcat
+          path: ${{ runner.temp }}/.cache/jac/jir/stubcat
+          retention-days: 1
+          if-no-files-found: error
+
+      # The compiler modules this job compiled from the checkout to build the
+      # catalog. A cached module is checked against its source and compiler,
+      # not file times, so the precompile legs start from them instead of
+      # each compiling the compiler again.
+      - name: Save the compiled compiler modules
+        if: steps.dev-modules-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/.cache/jac/jir/modules
+          key: jac-dev-modules-c${{ steps.inputs.outputs.compiler }}
+
+      - name: Upload the compiled compiler modules
+        uses: actions/upload-artifact@v4
+        with:
+          name: jac-dev-modules
+          path: ${{ runner.temp }}/.cache/jac/jir/modules
+          retention-days: 1
+          if-no-files-found: error
+
+  # The checkout's precompile bundle (jaclang/_precompiled), in three
+  # parallel legs of every third source (JAC_PRECOMPILE_SHARD). Each leg keeps
+  # its own cache, and every unit is checked against its source and compiler,
+  # so a restored tree only lets unchanged modules skip the recompile. The
+  # lanes merge the three artifacts back into one tree (jac-kit).
+  dev-precompile:
+    runs-on: ubuntu-24.04
+    needs: dev-kit
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Pin the cache home
+        run: echo "XDG_CACHE_HOME=$RUNNER_TEMP/.cache" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: jac-dev-kit
+          path: jac
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: jac-dev-stubcat
+          path: ${{ runner.temp }}/.cache/jac/jir/stubcat
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: jac-dev-modules
+          path: ${{ runner.temp }}/.cache/jac/jir/modules
+
+      - name: Fingerprint immutable build inputs
+        id: inputs
+        run: bash scripts/ci_cache_keys.sh >> "$GITHUB_OUTPUT"
+
+      - name: Restore this leg's precompile bundle
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: jac/jaclang/_precompiled
+          key: jac-dev-precompiled-s${{ matrix.shard }}of3-c${{ steps.inputs.outputs.compiler }}-${{ steps.inputs.outputs.payload }}
+          restore-keys: |
+            jac-dev-precompiled-s${{ matrix.shard }}of3-c${{ steps.inputs.outputs.compiler }}-
+
+      - name: Precompile this leg's share of the checkout
+        env:
+          JAC_PRECOMPILE_JOBS: "4"
+          JAC_PRECOMPILE_RSS_LOG: "1"
+          JAC_PRECOMPILE_SHARD: ${{ matrix.shard }}/3
+        run: |
+          set -euo pipefail
+          chmod +x jac/zig-out/bin/jac
+          export PATH="$GITHUB_WORKSPACE/jac/zig-out/bin:$PATH"
+          jac precompile ./jac
+          DIR="$(find jac/jaclang/_precompiled -maxdepth 1 -type d -name 'cpython-*' | head -1)"
+          [ -n "$DIR" ] || { echo "::error::no jac/jaclang/_precompiled/cpython-<ver> tree"; exit 1; }
+          UNITS="$(find "$DIR" -name '*.jir' | wc -l | tr -d ' ')"
+          [ "$UNITS" -ge 130 ] || { echo "::error::precompile leg has only $UNITS units"; exit 1; }
+          rm -f jac/jaclang/_precompiled/PRECOMPILE_RESULT.json
+          echo "precompile leg ${{ matrix.shard }}/3: $UNITS units in $DIR"
+
+      - name: Save this leg's precompile bundle
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: jac/jaclang/_precompiled
+          key: jac-dev-precompiled-s${{ matrix.shard }}of3-c${{ steps.inputs.outputs.compiler }}-${{ steps.inputs.outputs.payload }}
+
+      - name: Upload this leg's precompile bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: jac-dev-precompiled-${{ matrix.shard }}
+          path: jac/jaclang/_precompiled
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
+
+  repro:
+    needs: [dev-kit, dev-precompile]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - uses: ./.github/actions/jac-kit
+        with:
+          dev: "true"
+      - name: Install scale deps + test deps
+        run: |
+          jac install \
+            "python-dotenv>=1.2.1,<2.0.0" \
+            "prometheus-client>=0.21.0,<1.0.0" \
+            "opentelemetry-sdk>=1.27.0,<2.0.0" \
+            "opentelemetry-exporter-otlp-proto-http>=1.27.0,<2.0.0" \
+            "apscheduler>=3.11.2,<4.0.0" "kubernetes>=34.1.0,<35.0.0" \
+            "docker>=7.1.0,<8.0.0" "boto3>=1.40.0,<2.0.0" \
+            requests "moto[s3]>=5.0.0" \
+            --global
+      - name: Grafana prefix and config hand-off tests
+        env:
+          JAC_TEST_JOBS: "1"
+          JAC_TEST_STRICT: "1"
+        run: |
+          set -uo pipefail
+          rc=0
+          jac test jac/jaclang/scale/tests/deploy/test_monitoring_switch.jac || rc=1
+          jac test jac/jaclang/scale/tests/misc/test_config_loader.jac || rc=1
+          jac test jac/jaclang/scale/tests/misc/test_config_validation.jac || rc=1
+          exit $rc
