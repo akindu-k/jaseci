@@ -1,0 +1,25 @@
+name: debug-10805
+
+on:
+  push:
+    branches: [debug/10805-single-worker-app-metrics]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the released jac
+        run: |
+          bash scripts/install.sh --version 0.40.0
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH"
+          jac --version
+
+      - name: Install prometheus-client
+        run: jac install "prometheus-client>=0.20" --global
+
+      - name: Probe
+        run: bash scripts/debug_10805_probe.sh
