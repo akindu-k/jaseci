@@ -1,0 +1,30 @@
+name: debug-10659
+
+on:
+  push:
+    branches: [debug/10659-stub-module-name, debug/10659-stub-module-name-fixed]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the released jac
+        run: |
+          bash scripts/install.sh --version 0.40.0
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Probe (from-imported os function, catalog vs stub trees)
+        working-directory: jac
+        continue-on-error: true
+        run: |
+          set -uxo pipefail
+          jac --version
+          JAC_TEST_JOBS=1 jac test tests/compiler/backends/native/test_debug_10659_probe.jac 2>&1 | tee "$RUNNER_TEMP/probe.log"
+          exit "${PIPESTATUS[0]}"
+
+      - name: Summary
+        run: |
+          grep -hE "PROBE|AssertionError|Error|passed|failed" "$RUNNER_TEMP"/probe.log | head -80
